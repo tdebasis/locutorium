@@ -1,0 +1,3 @@
+# Deployment data never lives in this tree — it belongs to $LOC_HOME.
+*.log
+.DS_Store

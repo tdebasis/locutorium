@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# loc — the Locutorium CLI.
+#
+# In a silent house, the locutorium is the one room where speaking is allowed.
+# Queues are one endpoint saying something to another; topics are the room
+# where they converse. Nothing here is a record: what matters gets written
+# down elsewhere, deliberately, by whoever it mattered to.
+
+set -euo pipefail
+
+LOC_ROOT="$(cd "$(dirname "$(readlink "${BASH_SOURCE[0]}" || echo "${BASH_SOURCE[0]}")")/.." && pwd)"
+# shellcheck source=lib/core.sh
+source "$LOC_ROOT/lib/core.sh"
+loc_load_provider
+
+usage() {
+  cat <<'EOF'
+usage: loc <verb> [args]
+
+  send <endpoint> <body>    deliver to an endpoint's queue (guaranteed)
+  publish <topic> <body>    speak in a topic (@name rings that endpoint)
+  read [--peek]             your queue backlog + topic conversations
+  topics                    what conversations are active right now
+  status                    unread counts per endpoint
+  watch                     follow all traffic, read-only (^C to stop)
+  doctor [--init]           health checks; --init creates streams (admin)
+EOF
+  exit 1
+}
+
+verb="${1:-}"; shift || true
+case "$verb" in
+  send)    [[ $# -ge 2 ]] || usage; loc_send "$1" "$2" ;;
+  publish) [[ $# -ge 2 ]] || usage; loc_publish "$1" "$2" ;;
+  read)    loc_read "${1:-}" ;;
+  topics)  loc_topics ;;
+  status)  loc_status ;;
+  watch)   loc_watch ;;
+  doctor)  loc_doctor "${1:-}" ;;
+  *)       usage ;;
+esac
