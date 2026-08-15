@@ -161,6 +161,14 @@ out="$(LOC_IDENTITY=alice loc read 2>/dev/null)"
 if grep -q "wake-me" <<<"$out"; then
   ok "listener observes without consuming (message still readable)"
 else bad "listener observes without consuming (message still readable)"; fi
+# Stability: one message means ONE wake, and the tap outlives the event.
+# (A churning listener re-wakes on every reconnect cycle and still passed
+# every grep -q above — this case is why that can never happen again.)
+sleep 8
+wakes_now="$(grep -c '^alice' "$LOC_HOME/wakes.log" 2>/dev/null || echo 0)"
+if [[ "$wakes_now" == "1" ]] && pgrep -f "nats subscribe queue.alice" >/dev/null; then
+  ok "one message, one wake; the tap survives the event (no churn)"
+else bad "one message, one wake; the tap survives the event (got $wakes_now wakes, tap $(pgrep -f 'nats subscribe queue.alice' >/dev/null && echo alive || echo dead))"; fi
 LOC_IDENTITY=alice loc unsub >/dev/null 2>&1
 check_not "unsub ends attendance (pidfile gone)" test -f "$LOC_HOME/run/alice.listener.pid"
 # Wake-on-backlog: messages sent while unattended wake once, with the count.
@@ -201,6 +209,9 @@ sed -i '' '/send_requires_attendance/d' "$LOC_HOME/config"
 # hold all three messages (suppressed wakes never lose anything).
 printf 'wake_breaker_per_minute = 1\nwake_window_seconds = 1\n' >> "$LOC_HOME/config"
 : > "$LOC_HOME/wakes.log"
+# The breaker's window is calendar-aligned; keep all three sends inside one
+# minute or a boundary reset legally allows a second wake (phase flake).
+while [ "$(date +%S | sed 's/^0//')" -gt 40 ]; do sleep 2; done
 LOC_IDENTITY=alice loc sub >/dev/null 2>&1
 sleep 1
 env LOC_IDENTITY=bob loc send alice "b1" >/dev/null 2>&1; sleep 2
