@@ -145,12 +145,14 @@ _loc_listener() { # <endpoint> <watch_pid> — the background body of `loc sub`.
   local pending=0 last_wake=0 now m_e=0 m_n=0 h_e=0 h_n=0 tripped=""
   # Cleanup state lives in subshell globals, NOT locals: the EXIT trap fires
   # after this function returns, when its locals no longer exist (under set -u
-  # that error aborted cleanup and left a stale pidfile behind).
+  # that error aborted cleanup and left a stale pidfile behind). Own pid via
+  # a child's PPID: BASHPID does not exist in bash 3.2.
   _L_ME="$me"; _L_TAP=""
+  _L_SELF="$(exec sh -c 'echo "$PPID"')"
 
   _cleanup() {
     [[ -n "${_L_TAP:-}" ]] && kill "$_L_TAP" 2>/dev/null
-    pkill -P "$BASHPID" 2>/dev/null
+    [[ -n "${_L_SELF:-}" ]] && pkill -P "$_L_SELF" 2>/dev/null
     rm -f "$LOC_HOME/run/${_L_ME:-nobody}.listener.pid" \
           "$LOC_HOME/run/${_L_ME:-nobody}.listen.fifo"
   }
@@ -200,7 +202,10 @@ _loc_listener() { # <endpoint> <watch_pid> — the background body of `loc sub`.
         else
           pending=$((pending+1))       # followers coalesce into one wake
         fi
-      elif (( rcv > 128 )); then       # tick: flush any coalesced followers
+      elif kill -0 "$_L_TAP" 2>/dev/null; then
+        # Timeout tick. Decided by the TAP'S LIVENESS, not the read status:
+        # bash 3.2 returns 1 for both timeout and EOF (>128 is bash 4+), so
+        # the status alone cannot tell a quiet queue from a dead pipe.
         if (( pending > 0 && now - last_wake >= window )); then
           _wake_guarded "$pending"; pending=0
         fi
