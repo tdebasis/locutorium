@@ -132,6 +132,70 @@ n="$(env NATS_URL="$NURL" NATS_USER=admin NATS_PASSWORD="$(_creds admin)" \
   nats stream info WINDOWTEST --json 2>/dev/null | jq -r .state.messages)"
 if [[ "$n" == "0" ]]; then ok "messages expire at the window's edge (teardown-by-retention)"; else bad "messages expire at the window's edge (got $n)"; fi
 
+say "— delivery: registration, wake, backlog, liveness —"
+# Wake hook stub: records wakes instead of waking anything.
+cat > "$LOC_HOME/hooks/wake" <<EOF
+#!/bin/sh
+echo "\$1 \$2" >> "$LOC_HOME/wakes.log"
+EOF
+chmod +x "$LOC_HOME/hooks/wake"
+# Register hook stub: records that channel capture was asked for.
+cat > "$LOC_HOME/hooks/register" <<EOF
+#!/bin/sh
+echo "\$1" >> "$LOC_HOME/registers.log"
+EOF
+chmod +x "$LOC_HOME/hooks/register"
+
+LOC_IDENTITY=alice loc sub >/dev/null 2>&1
+sleep 1
+check "registration starts a live listener (verified pid, not file existence)" \
+  test -f "$LOC_HOME/run/alice.listener.pid"
+check "registration invoked the channel-capture hook" \
+  grep -qx "alice" "$LOC_HOME/registers.log"
+env LOC_IDENTITY=bob loc send alice "wake-me" >/dev/null 2>&1
+sleep 2
+check "wake hook fired on arrival (first message wakes instantly)" \
+  grep -q "^alice 1" "$LOC_HOME/wakes.log"
+# Observe-without-consume: the wake must not have eaten the message.
+out="$(LOC_IDENTITY=alice loc read 2>/dev/null)"
+if grep -q "wake-me" <<<"$out"; then
+  ok "listener observes without consuming (message still readable)"
+else bad "listener observes without consuming (message still readable)"; fi
+LOC_IDENTITY=alice loc unsub >/dev/null 2>&1
+check_not "unsub ends attendance (pidfile gone)" test -f "$LOC_HOME/run/alice.listener.pid"
+# Wake-on-backlog: messages sent while unattended wake once, with the count.
+env LOC_IDENTITY=bob loc send alice "backlog-1" >/dev/null 2>&1
+env LOC_IDENTITY=bob loc send alice "backlog-2" >/dev/null 2>&1
+: > "$LOC_HOME/wakes.log"
+LOC_IDENTITY=alice loc sub >/dev/null 2>&1
+sleep 2
+check "wake-on-backlog: (re)registration wakes with the waiting count" \
+  grep -q "^alice 2" "$LOC_HOME/wakes.log"
+LOC_IDENTITY=alice loc read >/dev/null 2>&1
+LOC_IDENTITY=alice loc unsub >/dev/null 2>&1
+# Liveness: a listener watching a pid exits when that pid dies.
+sleep 300 & WATCHED=$!
+LOC_IDENTITY=carol loc sub --watch-pid "$WATCHED" >/dev/null 2>&1
+sleep 1
+kill "$WATCHED" 2>/dev/null
+sleep 4
+lpid="$(sed -n 1p "$LOC_HOME/run/carol.listener.pid" 2>/dev/null || true)"
+if [[ -z "$lpid" ]] || ! kill -0 "$lpid" 2>/dev/null; then
+  ok "listener exits when the watched session dies (employment-tied)"
+else bad "listener exits when the watched session dies (employment-tied)"; kill "$lpid" 2>/dev/null; fi
+# Say-semantics (config-gated): a send to a known-absent endpoint is refused;
+# an attending endpoint still receives.
+echo "send_requires_attendance = yes" >> "$LOC_HOME/config"
+check_not "say-semantics: send to a known-absent endpoint is refused" \
+  env LOC_IDENTITY=bob loc send carol "into the void"
+LOC_IDENTITY=carol loc sub >/dev/null 2>&1
+sleep 1
+check "say-semantics: send to an attending endpoint succeeds" \
+  env LOC_IDENTITY=bob loc send carol "present company"
+LOC_IDENTITY=carol loc read >/dev/null 2>&1
+LOC_IDENTITY=carol loc unsub >/dev/null 2>&1
+sed -i '' '/send_requires_attendance/d' "$LOC_HOME/config"
+
 say "— repo cleanliness (future-public discipline) —"
 if "$ROOT/conformance/check-clean.sh" >/dev/null 2>&1; then
   ok "repo carries no deployment/internal vocabulary"

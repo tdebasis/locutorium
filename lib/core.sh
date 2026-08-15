@@ -90,11 +90,165 @@ loc_mentions() { # print @mentioned endpoints in a body, one per line
   grep -oE '@[a-z0-9_-]+' <<<"$1" | sed 's/^@//' | sort -u
 }
 
+# -------------------------------------------------------------- delivery ----
+# Registration is attendance. `loc sub` starts a listener that observes the
+# endpoint's own queue WITHOUT consuming it and wakes the registered channel
+# through the deployment's wake hook. Employment-tied: the listener watches
+# what it was told to watch and exits when that dies. Every start or reconnect
+# begins with a depth check (wake-on-backlog), so a missed event can never
+# become a missed message. The listener never sends through this tool's own
+# verbs: a delivery layer that speaks on the bus can recurse into it.
+
+_loc_rundir() { mkdir -p "$LOC_HOME/run"; chmod 700 "$LOC_HOME/run"; printf '%s' "$LOC_HOME/run"; }
+_loc_pid_start() { ps -o lstart= -p "$1" 2>/dev/null | sed 's/^[[:space:]]*//'; }
+
+_loc_listener_alive() { # <endpoint> — a RUNNING pid with a MATCHING start time.
+  # File existence alone must never stand in for liveness: a crash leaves a
+  # stale pidfile, and pid recycling can make a stale pid look alive.
+  local pidfile="$LOC_HOME/run/$1.listener.pid" pid start
+  [[ -f "$pidfile" ]] || return 1
+  pid="$(sed -n '1p' "$pidfile")"; start="$(sed -n '2p' "$pidfile")"
+  [[ -n "$pid" ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  [[ "$(_loc_pid_start "$pid")" == "$start" ]]
+}
+
+_loc_wake() { # <endpoint> <count> — the deployment's last inch. Its failure
+  # is logged (the statusline reads stream truth, so a stall becomes visible);
+  # it is never allowed to lose a message, which lives safely in the queue.
+  local hook="$LOC_HOME/hooks/wake"
+  [[ -x "$hook" ]] || return 0
+  "$hook" "$1" "$2" \
+    || echo "$(date -u +%FT%TZ) wake FAILED for $1 (count $2)" >> "$LOC_HOME/run/$1.delivery.log"
+}
+
+_loc_session_dead() { # <watch_pid> <endpoint> — generic liveness. A pid if we
+  # were given one; else the deployment's alive hook; else live until unsub.
+  local wpid="$1" me="$2" hook="$LOC_HOME/hooks/alive"
+  if [[ -n "$wpid" ]]; then
+    kill -0 "$wpid" 2>/dev/null && return 1 || return 0
+  fi
+  if [[ -x "$hook" ]]; then
+    "$hook" "$me" >/dev/null 2>&1 && return 1 || return 0
+  fi
+  return 1
+}
+
+_loc_listener() { # <endpoint> <watch_pid> — the background body of `loc sub`.
+  set +e  # a transient error must not kill attendance
+  local me="$1" wpid="$2"
+  local window perm perh
+  window="$(loc_config wake_window_seconds 5)"
+  perm="$(loc_config wake_breaker_per_minute 6)"
+  perh="$(loc_config wake_breaker_per_hour 60)"
+  local dlog="$LOC_HOME/run/$me.delivery.log"
+  local pending=0 last_wake=0 now m_e=0 m_n=0 h_e=0 h_n=0 tripped="" lpid=""
+
+  _cleanup() {
+    [[ -n "$lpid" ]] && kill "$lpid" 2>/dev/null
+    pkill -P "$BASHPID" 2>/dev/null
+    rm -f "$LOC_HOME/run/$me.listener.pid"
+  }
+  trap '_cleanup; exit 0' TERM INT
+  trap '_cleanup' EXIT
+
+  _wake_guarded() { # <count> — the breaker sits between policy and the hook
+    now="$(date +%s)"
+    (( now/60  != m_e )) && { m_e=$((now/60));  m_n=0; }
+    (( now/3600 != h_e )) && { h_e=$((now/3600)); h_n=0; tripped=""; }
+    if (( m_n >= perm || h_n >= perh )); then
+      [[ -z "$tripped" ]] && { echo "$(date -u +%FT%TZ) BREAKER TRIPPED for $me (min $m_n/$perm, hr $h_n/$perh): wakes suppressed, the queue keeps the truth" >> "$dlog"; tripped=yes; }
+      return 0
+    fi
+    m_n=$((m_n+1)); h_n=$((h_n+1)); last_wake="$now"
+    echo "$(date -u +%FT%TZ) wake $me count=$1" >> "$dlog"
+    _loc_wake "$me" "$1"
+  }
+
+  while :; do
+    _loc_session_dead "$wpid" "$me" && break
+    # wake-on-backlog: every start and every reconnect begins at the queue
+    local depth; depth="$(provider_depth "$me" 2>/dev/null)"
+    [[ "$depth" =~ ^[0-9]+$ ]] || depth=0
+    (( depth > 0 )) && _wake_guarded "$depth"
+    pending=0
+    while :; do
+      local line="" rcv=0
+      IFS= read -t 2 -r line || rcv=$?
+      if _loc_session_dead "$wpid" "$me"; then break 2; fi
+      now="$(date +%s)"
+      if (( rcv == 0 )) && [[ -n "$line" ]]; then
+        if (( now - last_wake >= window )); then
+          _wake_guarded 1              # the first message wakes instantly
+        else
+          pending=$((pending+1))       # followers coalesce into one wake
+        fi
+      elif (( rcv > 128 )); then       # tick: flush any coalesced followers
+        if (( pending > 0 && now - last_wake >= window )); then
+          _wake_guarded "$pending"; pending=0
+        fi
+      else
+        break                          # pipe closed: reconnect with backoff
+      fi
+    done < <(provider_listen "$me")
+    lpid=""
+    sleep 2
+  done
+}
+
+loc_sub() { # loc_sub [--watch-pid <pid>] — register attendance
+  local me wpid=""
+  while [[ $# -gt 0 ]]; do case "$1" in
+    --watch-pid) wpid="${2:?--watch-pid needs a value}"; shift 2 ;;
+    *) loc_die "usage: loc sub [--watch-pid <pid>]" ;;
+  esac; done
+  me="$(loc_identity)"
+  provider_endpoint_exists "$me" || loc_die "unknown endpoint '$me' (not in this deployment's registry)"
+  local rundir; rundir="$(_loc_rundir)"
+  if _loc_listener_alive "$me"; then
+    echo "already attending → queue.$me (listener $(sed -n 1p "$rundir/$me.listener.pid"))"
+    return 0
+  fi
+  # Channel capture is the deployment's business; the token is opaque here.
+  local reg="$LOC_HOME/hooks/register"
+  [[ -x "$reg" ]] && "$reg" "$me" || true
+  ( _loc_listener "$me" "$wpid" ) >> "$rundir/$me.listener.log" 2>&1 &
+  local pid=$!
+  disown "$pid" 2>/dev/null || true
+  { echo "$pid"; _loc_pid_start "$pid"; } > "$rundir/$me.listener.pid"
+  chmod 600 "$rundir/$me.listener.pid"
+  echo "attending → queue.$me (listener $pid)"
+}
+
+loc_unsub() { # end attendance; the queue keeps holding messages regardless
+  local me rundir pid
+  me="$(loc_identity)"
+  rundir="$(_loc_rundir)"
+  if _loc_listener_alive "$me"; then
+    pid="$(sed -n 1p "$rundir/$me.listener.pid")"
+    kill "$pid" 2>/dev/null || true
+  fi
+  rm -f "$rundir/$me.listener.pid"
+  echo "not attending → queue.$me"
+}
+
+loc_registry() { provider_registry; }
+
 # ----------------------------------------------------------------- verbs ----
 loc_send() { # loc_send <endpoint> <body>
   local to="$1" body="$2" from env
   from="$(loc_identity)"
   provider_endpoint_exists "$to" || loc_die "unknown endpoint '$to' (not in this deployment's registry)"
+  # Say-semantics (config-gated; enable only once every endpoint registers at
+  # session-up): a send expects an attending peer. When the deployment KNOWS
+  # nobody is attending, accepting the message would manufacture a false
+  # belief in the sender. A crash inside the liveness window still stores —
+  # bounded, and repaired by wake-on-backlog. Durable store-and-forward
+  # semantics belong to a different channel, not to send.
+  if [[ "$(loc_config send_requires_attendance no)" == "yes" ]]; then
+    _loc_listener_alive "$to" \
+      || loc_die "not attending: '$to' has no live listener (say-semantics: a send expects an attending peer; use a durable channel for messages meant to wait)"
+  fi
   env="$(loc_envelope "$from" "$to" "msg" "$body")"
   provider_send_queue "$to" "$env"
   loc_nudge "$to" "[LOC] 1 new → loc read"

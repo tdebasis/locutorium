@@ -122,6 +122,41 @@ provider_watch() { # <identity>
   wait
 }
 
+provider_listen() { # <endpoint> — event stream: one raw envelope line per
+  # arrival on the endpoint's own queue. A plain subscription: it receives a
+  # copy as the message is stored; the stored message is untouched. Exits when
+  # the connection drops — the caller owns reconnect and wake-on-backlog.
+  _nats_env "$1"
+  exec nats subscribe "queue.$1" --raw 2>/dev/null
+}
+
+provider_depth() { # <endpoint> — stored (unconsumed) messages in own queue
+  _nats_env "$1"
+  nats stream info "QUEUE_$1" --json 2>/dev/null | python3 -c '
+import json, sys
+try: print(json.load(sys.stdin)["state"]["messages"])
+except Exception: print(0)' 2>/dev/null || echo 0
+}
+
+provider_registry() { # render live listeners from the medium's own state
+  local url; url="$(loc_config monitor_url "")"
+  [[ -n "$url" ]] || loc_die "registry unavailable: no monitor_url configured (the server exposes no introspection surface)"
+  curl -s -m 3 "$url/connz?subs=1" | python3 -c '
+import json, sys
+try: conns = json.load(sys.stdin).get("connections", [])
+except Exception: sys.exit("registry: cannot read the monitor endpoint")
+rows = []
+for c in conns:
+    user = c.get("authorized_user", "?")
+    for s in c.get("subscriptions_list", []) or []:
+        if s == "queue." + user:
+            rows.append((user, c.get("start", "?"), c.get("cid", "?")))
+if not rows:
+    print("(nobody attending)")
+for user, start, cid in sorted(rows):
+    print("attending: " + user + "  since " + str(start) + "  (conn " + str(cid) + ")")'
+}
+
 provider_doctor() { # [--init]
   local init="no" e ok=0
   [[ "${1:-}" == "--init" ]] && init="yes"

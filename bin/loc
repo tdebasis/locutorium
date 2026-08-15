@@ -20,6 +20,9 @@ usage: loc <verb> [args]
   send <endpoint> <body>    deliver to an endpoint's queue (guaranteed)
   publish <topic> <body>    speak in a topic (@name rings that endpoint)
   read [--peek]             your queue backlog + topic conversations
+  sub [--watch-pid <pid>]   register attendance: start your wake listener
+  unsub                     end attendance (the queue keeps holding messages)
+  registry                  who is attending, read from the medium
   topics                    what conversations are active right now
   status                    unread counts per endpoint
   watch                     follow all traffic, read-only (^C to stop)
@@ -30,12 +33,15 @@ EOF
 
 verb="${1:-}"; shift || true
 case "$verb" in
-  send)    [[ $# -ge 2 ]] || usage; loc_send "$1" "$2" ;;
-  publish) [[ $# -ge 2 ]] || usage; loc_publish "$1" "$2" ;;
-  read)    loc_read "${1:-}" ;;
-  topics)  loc_topics ;;
-  status)  loc_status ;;
-  watch)   loc_watch ;;
-  doctor)  loc_doctor "${1:-}" ;;
-  *)       usage ;;
+  send)     [[ $# -ge 2 ]] || usage; loc_send "$1" "$2" ;;
+  publish)  [[ $# -ge 2 ]] || usage; loc_publish "$1" "$2" ;;
+  read)     loc_read "${1:-}" ;;
+  sub)      loc_sub "$@" ;;
+  unsub)    loc_unsub ;;
+  registry) loc_registry ;;
+  topics)   loc_topics ;;
+  status)   loc_status ;;
+  watch)    loc_watch ;;
+  doctor)   loc_doctor "${1:-}" ;;
+  *)        usage ;;
 esac
