@@ -23,7 +23,16 @@ _nats_env() { # _nats_env <identity> — exports connection env for nats(1)
   export NATS_PASSWORD="$(cat "$credfile")"
 }
 
-_nats_me() { _nats_env "$(loc_identity)"; }
+# Resolve identity in an assignment, not an argument: loc_die inside "$( )"
+# exits only the subshell, and in argument position that failure is discarded,
+# so the parent would carry on with an empty identity and print a second,
+# wrong-layer error ("no credentials for ''"). The assignment form honors the
+# failure; the subshell has already printed the right error.
+_nats_me() {
+  local id
+  id="$(loc_identity)" || exit 1
+  _nats_env "$id"
+}
 
 provider_endpoint_exists() { # <name>
   [[ -f "$LOC_HOME/endpoints" ]] && grep -qxF "$1" "$LOC_HOME/endpoints"
