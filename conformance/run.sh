@@ -196,6 +196,27 @@ LOC_IDENTITY=carol loc read >/dev/null 2>&1
 LOC_IDENTITY=carol loc unsub >/dev/null 2>&1
 sed -i '' '/send_requires_attendance/d' "$LOC_HOME/config"
 
+# Breaker: with a 1/minute cap and a 1s window, three spaced sends must
+# produce exactly one wake and a loud trip line — and the queue must still
+# hold all three messages (suppressed wakes never lose anything).
+printf 'wake_breaker_per_minute = 1\nwake_window_seconds = 1\n' >> "$LOC_HOME/config"
+: > "$LOC_HOME/wakes.log"
+LOC_IDENTITY=alice loc sub >/dev/null 2>&1
+sleep 1
+env LOC_IDENTITY=bob loc send alice "b1" >/dev/null 2>&1; sleep 2
+env LOC_IDENTITY=bob loc send alice "b2" >/dev/null 2>&1; sleep 2
+env LOC_IDENTITY=bob loc send alice "b3" >/dev/null 2>&1; sleep 2
+wakes="$(grep -c '^alice' "$LOC_HOME/wakes.log" 2>/dev/null || echo 0)"
+if [[ "$wakes" == "1" ]] && grep -q "BREAKER TRIPPED" "$LOC_HOME/run/alice.delivery.log"; then
+  ok "breaker caps wakes and trips loud (1 wake for 3 sends at cap 1/min)"
+else bad "breaker caps wakes and trips loud (got $wakes wakes)"; fi
+out="$(LOC_IDENTITY=alice loc read 2>/dev/null)"
+if grep -q "b1" <<<"$out" && grep -q "b3" <<<"$out"; then
+  ok "suppressed wakes lose nothing (all three messages readable)"
+else bad "suppressed wakes lose nothing (all three messages readable)"; fi
+LOC_IDENTITY=alice loc unsub >/dev/null 2>&1
+sed -i '' '/wake_breaker_per_minute/d;/wake_window_seconds/d' "$LOC_HOME/config"
+
 say "— repo cleanliness (future-public discipline) —"
 if "$ROOT/conformance/check-clean.sh" >/dev/null 2>&1; then
   ok "repo carries no deployment/internal vocabulary"
