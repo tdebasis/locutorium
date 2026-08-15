@@ -191,7 +191,10 @@ _loc_listener() { # <endpoint> <watch_pid> — the background body of `loc sub`.
       IFS= read -t 2 -r -u 3 line || rcv=$?
       if _loc_session_dead "$wpid" "$me"; then break 2; fi
       now="$(date +%s)"
-      if (( rcv == 0 )) && [[ -n "$line" ]]; then
+      if (( rcv == 0 )) && [[ -z "$line" ]]; then
+        continue                       # record separator: --raw prints a blank
+                                       # line after each message; not EOF
+      elif (( rcv == 0 )); then
         if (( now - last_wake >= window )); then
           _wake_guarded 1              # the first message wakes instantly
         else
