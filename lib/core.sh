@@ -147,7 +147,7 @@ _loc_listener() { # <endpoint> <watch_pid> — the background body of `loc sub`.
   _cleanup() {
     [[ -n "$lpid" ]] && kill "$lpid" 2>/dev/null
     pkill -P "$BASHPID" 2>/dev/null
-    rm -f "$LOC_HOME/run/$me.listener.pid"
+    rm -f "$LOC_HOME/run/$me.listener.pid" "$LOC_HOME/run/$me.listen.fifo"
   }
   trap '_cleanup; exit 0' TERM INT
   trap '_cleanup' EXIT
@@ -172,9 +172,18 @@ _loc_listener() { # <endpoint> <watch_pid> — the background body of `loc sub`.
     [[ "$depth" =~ ^[0-9]+$ ]] || depth=0
     (( depth > 0 )) && _wake_guarded "$depth"
     pending=0
+    # The event tap runs as an explicitly tracked child writing to a fifo. A
+    # process substitution would leak it: a subscriber on a quiet queue never
+    # writes, so it never takes SIGPIPE when its reader vanishes, and every
+    # reconnect cycle would orphan another immortal one.
+    local fifo="$LOC_HOME/run/$me.listen.fifo"
+    rm -f "$fifo"; mkfifo "$fifo"
+    provider_listen "$me" > "$fifo" 2>/dev/null &
+    lpid=$!
+    exec 3< "$fifo"
     while :; do
       local line="" rcv=0
-      IFS= read -t 2 -r line || rcv=$?
+      IFS= read -t 2 -r -u 3 line || rcv=$?
       if _loc_session_dead "$wpid" "$me"; then break 2; fi
       now="$(date +%s)"
       if (( rcv == 0 )) && [[ -n "$line" ]]; then
@@ -188,10 +197,13 @@ _loc_listener() { # <endpoint> <watch_pid> — the background body of `loc sub`.
           _wake_guarded "$pending"; pending=0
         fi
       else
-        break                          # pipe closed: reconnect with backoff
+        break                          # tap died: reconnect with backoff
       fi
-    done < <(provider_listen "$me")
+    done
+    exec 3<&-
+    kill "$lpid" 2>/dev/null; wait "$lpid" 2>/dev/null
     lpid=""
+    rm -f "$fifo"
     sleep 2
   done
 }
