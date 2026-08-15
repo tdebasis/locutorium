@@ -142,12 +142,17 @@ _loc_listener() { # <endpoint> <watch_pid> — the background body of `loc sub`.
   perm="$(loc_config wake_breaker_per_minute 6)"
   perh="$(loc_config wake_breaker_per_hour 60)"
   local dlog="$LOC_HOME/run/$me.delivery.log"
-  local pending=0 last_wake=0 now m_e=0 m_n=0 h_e=0 h_n=0 tripped="" lpid=""
+  local pending=0 last_wake=0 now m_e=0 m_n=0 h_e=0 h_n=0 tripped=""
+  # Cleanup state lives in subshell globals, NOT locals: the EXIT trap fires
+  # after this function returns, when its locals no longer exist (under set -u
+  # that error aborted cleanup and left a stale pidfile behind).
+  _L_ME="$me"; _L_TAP=""
 
   _cleanup() {
-    [[ -n "$lpid" ]] && kill "$lpid" 2>/dev/null
+    [[ -n "${_L_TAP:-}" ]] && kill "$_L_TAP" 2>/dev/null
     pkill -P "$BASHPID" 2>/dev/null
-    rm -f "$LOC_HOME/run/$me.listener.pid" "$LOC_HOME/run/$me.listen.fifo"
+    rm -f "$LOC_HOME/run/${_L_ME:-nobody}.listener.pid" \
+          "$LOC_HOME/run/${_L_ME:-nobody}.listen.fifo"
   }
   trap '_cleanup; exit 0' TERM INT
   trap '_cleanup' EXIT
@@ -179,7 +184,7 @@ _loc_listener() { # <endpoint> <watch_pid> — the background body of `loc sub`.
     local fifo="$LOC_HOME/run/$me.listen.fifo"
     rm -f "$fifo"; mkfifo "$fifo"
     provider_listen "$me" > "$fifo" 2>/dev/null &
-    lpid=$!
+    _L_TAP=$!
     exec 3< "$fifo"
     while :; do
       local line="" rcv=0
@@ -201,8 +206,8 @@ _loc_listener() { # <endpoint> <watch_pid> — the background body of `loc sub`.
       fi
     done
     exec 3<&-
-    kill "$lpid" 2>/dev/null; wait "$lpid" 2>/dev/null
-    lpid=""
+    kill "$_L_TAP" 2>/dev/null; wait "$_L_TAP" 2>/dev/null
+    _L_TAP=""
     rm -f "$fifo"
     sleep 2
   done

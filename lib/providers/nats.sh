@@ -141,7 +141,7 @@ except Exception: print(0)' 2>/dev/null || echo 0
 provider_registry() { # render live listeners from the medium's own state
   local url; url="$(loc_config monitor_url "")"
   [[ -n "$url" ]] || loc_die "registry unavailable: no monitor_url configured (the server exposes no introspection surface)"
-  curl -s -m 3 "$url/connz?subs=1" | python3 -c '
+  curl -s -m 3 "$url/connz?subs=1&auth=1" | python3 -c '
 import json, sys
 try: conns = json.load(sys.stdin).get("connections", [])
 except Exception: sys.exit("registry: cannot read the monitor endpoint")
