@@ -160,6 +160,16 @@ _loc_listener() { # <endpoint> <watch_pid> — the background body of `loc sub`.
   trap '_cleanup' EXIT
 
   _wake_guarded() { # <count> — the breaker sits between policy and the hook
+    # Fire-time depth check: the reader may have drained the queue between the
+    # arrival event and now (readers and listeners share no lock, by design).
+    # One query kills the common spurious wake; the residual race is accepted
+    # because it only over-delivers — an empty read, never a lost message.
+    local d; d="$(provider_depth "$me" 2>/dev/null)"
+    [[ "$d" =~ ^[0-9]+$ ]] || d=0
+    if (( d == 0 )); then
+      echo "$(date -u +%FT%TZ) wake $me skipped: queue already drained" >> "$dlog"
+      return 0
+    fi
     now="$(date +%s)"
     (( now/60  != m_e )) && { m_e=$((now/60));  m_n=0; }
     (( now/3600 != h_e )) && { h_e=$((now/3600)); h_n=0; tripped=""; }
