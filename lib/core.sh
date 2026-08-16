@@ -24,16 +24,23 @@ LOC_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # four bytes, so two messages of visibly equal length would fail differently depending
 # on how many status markers they carry.
 #
-# WHY 4000, MEASURED not inherited (2026-08-16, receiving-side verified with a token at
-# the END of the body so truncation was distinguishable from non-delivery): bodies
-# delivered intact at 700, 1500, 3000, 8000, 12000 and 16000 characters, and multi-line
-# at 4026. The only observed failure is the terminal multiplexer's own argument limit at
-# ~20000, and it is LOUD (rc=1, reproduced twice). So this sits at a 4x margin under a
-# failure that cannot be silent.
+# 🔴 WHAT KIND OF NUMBER THIS IS, because getting that wrong is the whole story below:
+# 4000 is MESSAGE DISCIPLINE, not a technical bound. It is a choice about what this
+# channel is for, and raising it is a policy conversation, not a physics one.
+#
+# The transport carries far more, and THAT is what was measured (2026-08-16,
+# receiving-side verified with a token at the END of the body so truncation was
+# distinguishable from non-delivery): bodies delivered intact at 700, 1500, 3000, 8000,
+# 12000 and 16000 characters, and multi-line at 4026. The only observed failure is the
+# terminal multiplexer's own argument limit near 20000, and it is LOUD (rc=1, reproduced
+# twice). So the CEILING is measured, the LIMIT is chosen, and 4000 sits at a 4x margin
+# under a failure that cannot be silent.
 #
 # This replaced a believed 700 ceiling that did not reproduce at any size or newline
-# count. Anyone changing the delivery mechanism should re-run that measurement rather
-# than trust this number, which is the mistake 700 taught.
+# count. That number was treated as physics, was never tested, and every design decision
+# touching message length bent around it for nine days. Do not let 4000 become the same
+# thing: it is an opinion with a margin, and anyone changing the delivery mechanism owes
+# a fresh measurement rather than trust in this constant.
 LOC_MAX_BODY_CHARS=4000
 
 # ---------------------------------------------------------------- config ----
