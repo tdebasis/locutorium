@@ -303,14 +303,59 @@ loc_publish() { # loc_publish <topic> <body>
   echo "published → #$topic"
 }
 
+# Reading is the one verb that DESTROYS. Queues are workqueue-retention, so the
+# provider's ack is a delete with no recovery — and the ack is atomic with the
+# fetch (nats CLI has no ack-after-the-fact; see providers/nats.sh). So the only
+# available safety is to get the bytes onto disk before anything fallible runs,
+# and to forget them only once rendering has actually succeeded.
+#
+# This used to be `provider_read_queue ... | loc_render`, which acked INSIDE the
+# pipeline: `loc read | head`, a dead terminal, or a renderer error destroyed
+# whatever had been fetched. On 2026-08-16 the same shape, one layer up in the
+# prompt-ingest hook, destroyed five messages.
+#
+# Failure now costs a duplicate, never a deletion: an uncleared spool is
+# re-rendered by the next read.
 loc_read() { # loc_read [--peek]
-  local me peek="no"
+  local me peek="no" spool
   [[ "${1:-}" == "--peek" ]] && peek="yes"
   me="$(loc_identity)"
+
+  if [[ "$peek" == "yes" ]]; then
+    # --peek must not consume anything. It previously still drained TOPICS with
+    # --ack, so "peeking" destroyed topic messages; topics are simply not read
+    # here now, and the output says so rather than implying an empty room.
+    echo "── queue.$me ──"
+    provider_read_queue "$me" 50 yes | loc_render "$me"
+    echo "── topics ── (not shown: --peek never consumes, and topic reads cannot yet be non-consuming)"
+    return 0
+  fi
+
+  # One spool per section. A single spool with an in-band separator would break
+  # exactly when it matters: after two failed renders it holds two separators,
+  # and every split rule then mis-sorts the carried-over lines.
+  local qspool tspool rundir
+  rundir="$(_loc_rundir)"
+  qspool="$rundir/$me.read.spool"
+  tspool="$rundir/$me.topics.spool"
+  for spool in "$qspool" "$tspool"; do
+    [[ -f "$spool" ]] || : > "$spool"
+    chmod 600 "$spool" 2>/dev/null || true
+  done
+
+  # Append, never overwrite: a spool may already hold envelopes a previous read
+  # fetched and failed to render.
+  provider_read_queue  "$me" 50 no >> "$qspool"
+  provider_read_topics "$me" 100   >> "$tspool"
+
+  # Everything below is fallible and reads the files, not the socket.
   echo "── queue.$me ──"
-  provider_read_queue "$me" 50 "$peek" | loc_render "$me"
+  loc_render "$me" < "$qspool" || return 1
   echo "── topics ──"
-  provider_read_topics "$me" 100 | loc_render "$me"
+  loc_render "$me" < "$tspool" || return 1
+
+  # Forgotten only now, once rendering has actually succeeded.
+  : > "$qspool"; : > "$tspool"
 }
 
 loc_topics()  { provider_topics; }

@@ -76,6 +76,49 @@ if grep -q "message-one" <<<"$out2"; then
 else ok "queue messages are consumed exactly once"; fi
 check "nudge hook fired on queue send" grep -q "bob" "$LOC_HOME/nudges.log"
 
+say "— reading must not destroy what it failed to show —"
+# Consumption is irreversible (workqueue retention: the ack is a delete), so a
+# read that fetches but fails to present must not be a deletion. Regression
+# cover for a defect that destroyed five real messages: the ack happened inside
+# a `fetch | render` pipeline, so a broken pipe or a renderer error consumed the
+# message and showed nobody anything.
+env LOC_IDENTITY=alice loc send bob "loss-canary" >/dev/null 2>&1
+# Reader dies after one byte; every later write gets SIGPIPE mid-render.
+LOC_IDENTITY=bob loc read 2>/dev/null | head -c 1 >/dev/null 2>&1
+out3="$(LOC_IDENTITY=bob loc read 2>/dev/null)"
+if grep -q "loss-canary" <<<"$out3"; then
+  ok "a read that fails mid-render re-presents the message instead of losing it"
+else bad "a read that fails mid-render re-presents the message instead of losing it"; fi
+
+# --peek is the non-destructive read. It previously drained TOPICS with --ack,
+# so peeking silently destroyed topic messages.
+env LOC_IDENTITY=alice loc send bob "peek-canary" >/dev/null 2>&1
+env LOC_IDENTITY=alice loc publish standup "peek-topic-canary" >/dev/null 2>&1
+LOC_IDENTITY=bob loc read --peek >/dev/null 2>&1
+# The guarantee is that peeking never DESTROYS. Note the sharp edge this poll
+# exposes: a peeked message goes in-flight for the consumer's ack_wait, so an
+# immediate real read shows an EMPTY queue and an agent reasonably concludes the
+# message was lost. It returns on redelivery. Non-destructive, but the window is
+# indistinguishable from loss at the moment it matters, and it is a live
+# suspect for the "nudge says 1 new, read shows nothing" reports.
+# ACCUMULATE across polls. Assigning each iteration would discard the topic
+# line, which only ever appears in the first read (topics are consumed there),
+# and the topic assertion below would then fail for a reason that has nothing
+# to do with peeking.
+out4=""
+for _i in $(seq 1 40); do
+  out4="$out4
+$(LOC_IDENTITY=bob loc read 2>/dev/null)"
+  grep -q "peek-canary" <<<"$out4" && break
+  sleep 1
+done
+if grep -q "peek-canary" <<<"$out4"; then
+  ok "--peek never destroys the queue message (returns on redelivery)"
+else bad "--peek never destroys the queue message (returns on redelivery)"; fi
+if grep -q "peek-topic-canary" <<<"$out4"; then
+  ok "--peek does not consume topic messages"
+else bad "--peek does not consume topic messages"; fi
+
 say "— topics: window, mentions, independent cursors —"
 env LOC_IDENTITY=alice loc publish standup "@carol please look at this" >/dev/null 2>&1
 check "topic appears in the active list" \
