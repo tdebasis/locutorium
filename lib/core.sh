@@ -230,6 +230,22 @@ _loc_listener() { # <endpoint> <watch_pid> — the background body of `loc sub`.
     fi
     m_n=$((m_n+1)); h_n=$((h_n+1)); last_wake="$now"
     echo "$(date -u +%FT%TZ) wake $me count=$1" >> "$dlog"
+    # Take the bodies BEFORE handing off. The deployment's wake hook presents
+    # them, and presenting creates a turn boundary, which runs whatever else the
+    # deployment attaches to boundaries; if the messages were still on the queue
+    # at that instant, two readers would race for them. Consuming first is what
+    # removes the race, and the spool is what makes consuming-first survivable.
+    #
+    # STREAMED, never captured into a variable first: the fetch acks, and on a
+    # work queue an ack is a delete, so between the acked fetch and a durable
+    # write the message would exist only in memory. That gap is exactly the
+    # defect this file spent 2026-08-16 removing one layer up.
+    #
+    # Append, because a previous hand-off may have failed to present and its
+    # bodies are still owed. Order is fetch order, which is queue order, so a
+    # retry cannot silently reorder a conversation.
+    provider_read_queue "$me" 50 no 2>/dev/null | loc_render "$me" \
+      >> "$(_loc_rundir)/$me.spool" || true
     _loc_wake "$me" "$1"
   }
 
