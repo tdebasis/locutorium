@@ -12,6 +12,30 @@ set -euo pipefail
 LOC_HOME="${LOC_HOME:-$HOME/.locutorium}"
 LOC_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Maximum message body, in CHARACTERS. Deliberately not configurable: that a limit
+# exists and that breaking it is a loud refusal is the product's opinion, and it is what
+# makes the guarantee mean anything. A deployment wanting different conversational norms
+# changes this constant.
+#
+# WHY A LIMIT: this carries conversation, not documents. A message is a text, not an
+# essay. Long content belongs in files or an archive.
+#
+# WHY CHARACTERS AND NOT BYTES: both are deterministic, bytes are unfair. An emoji is
+# four bytes, so two messages of visibly equal length would fail differently depending
+# on how many status markers they carry.
+#
+# WHY 4000, MEASURED not inherited (2026-08-16, receiving-side verified with a token at
+# the END of the body so truncation was distinguishable from non-delivery): bodies
+# delivered intact at 700, 1500, 3000, 8000, 12000 and 16000 characters, and multi-line
+# at 4026. The only observed failure is the terminal multiplexer's own argument limit at
+# ~20000, and it is LOUD (rc=1, reproduced twice). So this sits at a 4x margin under a
+# failure that cannot be silent.
+#
+# This replaced a believed 700 ceiling that did not reproduce at any size or newline
+# count. Anyone changing the delivery mechanism should re-run that measurement rather
+# than trust this number, which is the mistake 700 taught.
+LOC_MAX_BODY_CHARS=4000
+
 # ---------------------------------------------------------------- config ----
 # Flat key=value file. No YAML, no parser to own.
 loc_config() { # loc_config <key> [default]
@@ -45,6 +69,26 @@ loc_identity() {
     if [[ -n "$id" ]]; then printf '%s' "$id"; return; fi
   fi
   loc_die "cannot determine sender identity: set LOC_IDENTITY or provide an executable $LOC_HOME/hooks/identity"
+}
+
+# ------------------------------------------------------------ body size ----
+# Counting is decided in ONE place, and it always means codepoints. bash's ${#var}
+# counts bytes or characters depending on the locale, and `wc -c` and `wc -m` disagree
+# on the same text; a limit that means different things in different scripts is not a
+# limit. Body arrives on stdin rather than as an argument so an absurd payload hits this
+# check rather than the OS argument limit, and is decoded explicitly so a C locale
+# cannot turn an emoji into a different answer.
+_loc_body_chars() { # <body>
+  printf '%s' "$1" | python3 -c \
+    'import sys; print(len(sys.stdin.buffer.read().decode("utf-8", "replace")))'
+}
+
+# Refuse before the message reaches the medium. Names BOTH numbers: a refusal that only
+# says "too long" makes the sender guess how much to cut.
+_loc_check_body() { # <body>
+  local n; n="$(_loc_body_chars "$1")"
+  [[ "$n" -le "$LOC_MAX_BODY_CHARS" ]] || loc_die \
+    "message too long: $n characters, limit $LOC_MAX_BODY_CHARS. This channel carries conversation, not documents. Put the content in a file or the archive and send a pointer to it."
 }
 
 # -------------------------------------------------------------- envelope ----
@@ -273,6 +317,7 @@ loc_registry() { provider_registry; }
 loc_send() { # loc_send <endpoint> <body>
   local to="$1" body="$2" from env
   from="$(loc_identity)"
+  _loc_check_body "$body"
   provider_endpoint_exists "$to" || loc_die "unknown endpoint '$to' (not in this deployment's registry)"
   # Say-semantics (config-gated; enable only once every endpoint registers at
   # session-up): a send expects an attending peer. When the deployment KNOWS
@@ -293,6 +338,8 @@ loc_send() { # loc_send <endpoint> <body>
 loc_publish() { # loc_publish <topic> <body>
   local topic="$1" body="$2" from env m
   [[ "$topic" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || loc_die "invalid topic name '$topic'"
+  # Same medium, same limit: a room is not a document store either.
+  _loc_check_body "$body"
   from="$(loc_identity)"
   env="$(loc_envelope "$from" "#$topic" "msg" "$body")"
   provider_publish_topic "$topic" "$env"

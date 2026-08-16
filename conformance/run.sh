@@ -119,6 +119,30 @@ if grep -q "peek-topic-canary" <<<"$out4"; then
   ok "--peek does not consume topic messages"
 else bad "--peek does not consume topic messages"; fi
 
+say "— message size is a guarantee, not a suggestion —"
+# This carries conversation, not documents. The limit is in CHARACTERS: an emoji is
+# four bytes, so a byte limit would refuse messages that look perfectly ordinary to
+# whoever wrote them. Refusal happens at send, before the medium sees anything, and a
+# warning-then-send-anyway is not a limit.
+AT_LIMIT="$(python3 -c 'print("x"*4000)')"
+check "a body at the limit is accepted" \
+  env LOC_IDENTITY=alice loc send bob "$AT_LIMIT"
+OVER="OVERSIZE-CANARY$(python3 -c 'print("x"*4001)')"
+check_not "a body over the limit is refused at send" \
+  env LOC_IDENTITY=alice loc send bob "$OVER"
+# The refusal must be real: nothing may have reached the medium.
+out_sz="$(LOC_IDENTITY=bob loc read 2>/dev/null)"
+if grep -q "OVERSIZE-CANARY" <<<"$out_sz"; then
+  bad "a refused body never reaches the queue"
+else ok "a refused body never reaches the queue"; fi
+# 3999 emoji is ~16000 bytes. Accepted on characters, refused on bytes: this case is
+# the entire reason the unit was chosen, so it fails loudly if someone "optimises" the
+# counter into ${#var} or wc -c.
+EMOJI_BODY="$(python3 -c 'print("\U0001F534"*3999)')"
+check "an emoji body under the character limit is accepted (not judged by bytes)" \
+  env LOC_IDENTITY=alice loc send bob "$EMOJI_BODY"
+LOC_IDENTITY=bob loc read >/dev/null 2>&1
+
 say "— topics: window, mentions, independent cursors —"
 env LOC_IDENTITY=alice loc publish standup "@carol please look at this" >/dev/null 2>&1
 check "topic appears in the active list" \
