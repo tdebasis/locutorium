@@ -131,7 +131,12 @@ for line in sys.stdin:
     # queue at a terminal, where the recipient is obvious because they typed the
     # command. Delivery now puts this line in front of whoever is watching the
     # pane, and "FORGE -> you" tells that reader nothing about who "you" is.
-    print(e.get("from", "?") + " -> " + e.get("to", "?") + "   " + e.get("ts", "?"))
+    # Backticks are the ONLY colour lever available. Measured 2026-08-16 against
+    # a real pane: markdown renders (bold, italic, fences), inline code renders
+    # COLOURED, and ANSI escapes are stripped in transit and arrive as literal
+    # "[34m" junk. So the endpoints are marked as inline code to colour them,
+    # and the timestamp is left plain so it recedes behind the names.
+    print("`" + e.get("from", "?") + " -> " + e.get("to", "?") + "`   " + e.get("ts", "?"))
     print()
     # The body is QUOTED, not boxed. A box needs a left gutter on every line,
     # which pushes the body off column zero and stops a heading, list, table or
