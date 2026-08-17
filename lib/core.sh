@@ -115,7 +115,9 @@ loc_render() { # reads envelope JSON lines on stdin, renders for a reader
   # Script passed via -c, never via stdin: stdin belongs to the data pipe.
   python3 -c '
 import json, sys
-me = sys.argv[1]
+# argv[1] is the reading endpoint. It was used to collapse the recipient to
+# "you"; both ends are named now, so it is accepted and ignored rather than
+# removed, because every caller passes it.
 for line in sys.stdin:
     line = line.strip()
     if not line:
@@ -125,9 +127,25 @@ for line in sys.stdin:
     except ValueError:
         print("  [unparseable] " + line[:120])
         continue
-    dest = "you" if e.get("to") == me else e.get("to", "?")
-    print("[" + e.get("from", "?").upper() + " -> " + dest + "] "
-          + e.get("ts", "?") + "  " + e.get("body", ""))
+    # Both ends NAMED, always. "you" was written for someone reading their own
+    # queue at a terminal, where the recipient is obvious because they typed the
+    # command. Delivery now puts this line in front of whoever is watching the
+    # pane, and "FORGE -> you" tells that reader nothing about who "you" is.
+    print(e.get("from", "?") + " -> " + e.get("to", "?") + "   " + e.get("ts", "?"))
+    print()
+    # The body is QUOTED, not boxed. A box needs a left gutter on every line,
+    # which pushes the body off column zero and stops a heading, list, table or
+    # fence from ever being read as one — the formatting arrives intact and
+    # renders as literal characters. A blockquote is the one gutter markdown
+    # understands: "> ## head" and "> - item" still render. Separation without
+    # paying for it in formatting.
+    for b in e.get("body", "").split("\n"):
+        # A BARE blank line ends a blockquote, splitting one message into two
+        # quoted fragments with an unquoted gap. Blank lines inside the body
+        # carry the marker so the block stays whole.
+        print("> " + b if b else ">")
+    # Between envelopes, so a batch does not run together.
+    print()
 ' "$1"
 }
 
