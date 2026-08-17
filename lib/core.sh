@@ -136,19 +136,46 @@ for line in sys.stdin:
     # COLOURED, and ANSI escapes are stripped in transit and arrive as literal
     # "[34m" junk. So the endpoints are marked as inline code to colour them,
     # and the timestamp is left plain so it recedes behind the names.
-    print("`" + e.get("from", "?") + " -> " + e.get("to", "?") + "`   " + e.get("ts", "?"))
+    # Bold AROUND the code span, not inside it: markdown does not parse emphasis
+    # within a span, so **text** inside backticks arrives as literal asterisks.
+    # Wrapping the other way gives a bold code span, which is the only way to
+    # differentiate the header now that the body is also blue.
+    #
+    # There is no colour PALETTE here to reach for. Inline code is the single
+    # colour lever the renderer offers, and ANSI escapes are stripped in transit
+    # (measured 2026-08-16, they arrive as literal "[34m"). So "a different
+    # colour" is really bold-blue against plain-blue, plus emoji if a sender
+    # wants an accent.
+    print("**`" + e.get("from", "?") + " -> " + e.get("to", "?") + "`**   " + e.get("ts", "?"))
     print()
-    # The body is QUOTED, not boxed. A box needs a left gutter on every line,
-    # which pushes the body off column zero and stops a heading, list, table or
-    # fence from ever being read as one — the formatting arrives intact and
-    # renders as literal characters. A blockquote is the one gutter markdown
-    # understands: "> ## head" and "> - item" still render. Separation without
-    # paying for it in formatting.
+    # Each line is its own INLINE CODE SPAN, which is what renders blue. Chosen by
+    # the Convener from three measured against a real pane on 2026-08-16:
+    #
+    #   blockquote  REJECTED — this renderer paints a background behind every WORD
+    #               and leaves the gaps dark, so the text arrives striped and is
+    #               genuinely hard to read.
+    #   plain       readable, but no colour.
+    #   code span   blue and legible. Chosen.
+    #
+    # ⚠️ THE COST, because it must not be rediscovered as a bug: markdown does NOT
+    # render inside a code span. Bold, headings, lists and tables arrive as literal
+    # characters. Blue body and rendered formatting are mutually exclusive, and
+    # this picks blue deliberately.
+    #
+    # Per LINE, not one span for the whole body: a code span does not cross a line
+    # break, so a single pair of backticks would colour the first line and leak raw
+    # backticks into the rest.
     for b in e.get("body", "").split("\n"):
-        # A BARE blank line ends a blockquote, splitting one message into two
-        # quoted fragments with an unquoted gap. Blank lines inside the body
-        # carry the marker so the block stays whole.
-        print("> " + b if b else ">")
+        if not b:
+            print()
+        elif "`" in b:
+            # A body containing a backtick would close the span early and spill the
+            # remainder unstyled. Markdown allows a longer fence, and the padding
+            # spaces are required so a leading or trailing backtick in the text is
+            # not read as part of the delimiter.
+            print("`` " + b + " ``")
+        else:
+            print("`" + b + "`")
     # Between envelopes, so a batch does not run together.
     print()
 ' "$1"
