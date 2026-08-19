@@ -259,8 +259,17 @@ _loc_listener() { # <endpoint> <watch_pid> — the background body of `loc sub`.
   _cleanup() {
     [[ -n "${_L_TAP:-}" ]] && kill "$_L_TAP" 2>/dev/null
     [[ -n "${_L_SELF:-}" ]] && pkill -P "$_L_SELF" 2>/dev/null
-    rm -f "$LOC_HOME/run/${_L_ME:-nobody}.listener.pid" \
-          "$LOC_HOME/run/${_L_ME:-nobody}.listen.fifo"
+    # Remove the pidfile ONLY if it still names this listener. Between the
+    # kill that ends this one and this trap running (a read tick can hold the
+    # signal ~2s), a successor may already have registered and written its
+    # own pid here — blindly removing the file orphans that successor:
+    # invisible to the liveness check, unkillable by unsub, waking beside the
+    # next registration forever. Found live: it contributed two extra wakes
+    # to the conformance breaker case.
+    local pf="$LOC_HOME/run/${_L_ME:-nobody}.listener.pid"
+    if [[ "$(sed -n '1p' "$pf" 2>/dev/null)" == "${_L_SELF:-}" ]]; then
+      rm -f "$pf" "$LOC_HOME/run/${_L_ME:-nobody}.listen.fifo"
+    fi
   }
   trap '_cleanup; exit 0' TERM INT
   trap '_cleanup' EXIT
