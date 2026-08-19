@@ -494,6 +494,33 @@ loc_read() { # loc_read [--peek]
 
   # Everything below is fallible and reads the files, not the socket.
   echo "── queue.$me ──"
+
+  # A wake may have drained messages into the LISTENER'S spools for the
+  # deployment hook to present. Until something presents them they are on no
+  # queue and in no fetch, so a read that skipped them would show an empty
+  # mailbox while messages sit owed on disk. Present them here too: claim the
+  # file by rename first (atomic; an appender mid-write keeps its own copy),
+  # remove only after printing succeeds. A failed present strands the claim
+  # file, and the recovery line below re-presents it on the next read. The
+  # deployment hook may present the same bodies concurrently — a duplicate,
+  # never a deletion, and the claim is skipped rather than overwritten when a
+  # stranded one already exists.
+  local wraw="$rundir/$me.wake.spool.raw" wsp="$rundir/$me.spool" claim
+  claim="$rundir/$me.wake.spool.raw.presenting"
+  if [[ -s "$claim" ]]; then
+    if loc_render "$me" < "$claim"; then rm -f "$claim"; fi
+  fi
+  if [[ -s "$wraw" && ! -s "$claim" ]] && mv "$wraw" "$claim" 2>/dev/null; then
+    if loc_render "$me" < "$claim"; then rm -f "$claim"; fi
+  fi
+  claim="$rundir/$me.spool.presenting"
+  if [[ -s "$claim" ]]; then
+    if cat "$claim"; then rm -f "$claim"; fi
+  fi
+  if [[ -s "$wsp" && ! -s "$claim" ]] && mv "$wsp" "$claim" 2>/dev/null; then
+    if cat "$claim"; then rm -f "$claim"; fi
+  fi
+
   loc_render "$me" < "$qspool" || return 1
   echo "── topics ──"
   loc_render "$me" < "$tspool" || return 1
