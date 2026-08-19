@@ -149,7 +149,7 @@ for line in sys.stdin:
     print("**`" + e.get("from", "?") + " -> " + e.get("to", "?") + "`**   " + e.get("ts", "?"))
     print()
     # Each line is its own INLINE CODE SPAN, which is what renders blue. Chosen by
-    # the Convener from three measured against a real pane on 2026-08-16:
+    # the deployment operator from three measured against a real pane on 2026-08-16:
     #
     #   blockquote  REJECTED — this renderer paints a background behind every WORD
     #               and leaves the gaps dark, so the text arrives striped and is
