@@ -223,16 +223,21 @@ env LOC_IDENTITY=bob loc send alice "wake-me" >/dev/null 2>&1
 sleep 2
 check "wake hook fired on arrival (first message wakes instantly)" \
   grep -q "^alice 1" "$LOC_HOME/wakes.log"
-# Observe-without-consume: the wake must not have eaten the message.
+# A wake must never make a message unreadable. The listener drains the queue
+# into a spool for the deployment hook to present (consuming first is what
+# stops the hook racing a reader), and `loc read` presents that spool too —
+# so wherever the body sits at this instant (queue, raw spool, rendered
+# spool), the read must show it. This replaced "listener observes without
+# consuming", which asserted the pre-drain design.
 out="$(LOC_IDENTITY=alice loc read 2>/dev/null)"
 if grep -q "wake-me" <<<"$out"; then
-  ok "listener observes without consuming (message still readable)"
-else bad "listener observes without consuming (message still readable)"; fi
+  ok "a wake never makes a message unreadable (read presents queue and spool)"
+else bad "a wake never makes a message unreadable (read presents queue and spool)"; fi
 # Stability: one message means ONE wake, and the tap outlives the event.
 # (A churning listener re-wakes on every reconnect cycle and still passed
 # every grep -q above — this case is why that can never happen again.)
 sleep 8
-wakes_now="$(grep -c '^alice' "$LOC_HOME/wakes.log" 2>/dev/null || echo 0)"
+wakes_now="$(grep -c '^alice' "$LOC_HOME/wakes.log" 2>/dev/null || true)"; wakes_now="${wakes_now:-0}"
 if [[ "$wakes_now" == "1" ]] && pgrep -f "nats subscribe queue.alice" >/dev/null; then
   ok "one message, one wake; the tap survives the event (no churn)"
 else bad "one message, one wake; the tap survives the event (got $wakes_now wakes, tap $(pgrep -f 'nats subscribe queue.alice' >/dev/null && echo alive || echo dead))"; fi
@@ -284,7 +289,7 @@ sleep 1
 env LOC_IDENTITY=bob loc send alice "b1" >/dev/null 2>&1; sleep 2
 env LOC_IDENTITY=bob loc send alice "b2" >/dev/null 2>&1; sleep 2
 env LOC_IDENTITY=bob loc send alice "b3" >/dev/null 2>&1; sleep 2
-wakes="$(grep -c '^alice' "$LOC_HOME/wakes.log" 2>/dev/null || echo 0)"
+wakes="$(grep -c '^alice' "$LOC_HOME/wakes.log" 2>/dev/null || true)"; wakes="${wakes:-0}"
 if [[ "$wakes" == "1" ]] && grep -q "BREAKER TRIPPED" "$LOC_HOME/run/alice.delivery.log"; then
   ok "breaker caps wakes and trips loud (1 wake for 3 sends at cap 1/min)"
 else bad "breaker caps wakes and trips loud (got $wakes wakes)"; fi
@@ -294,6 +299,40 @@ if grep -q "b1" <<<"$out" && grep -q "b3" <<<"$out"; then
 else bad "suppressed wakes lose nothing (all three messages readable)"; fi
 LOC_IDENTITY=alice loc unsub >/dev/null 2>&1
 sed -i '' '/wake_breaker_per_minute/d;/wake_window_seconds/d' "$LOC_HOME/config"
+
+say "— rapid unsub/resub leaves no orphan listener —"
+# A dying listener's cleanup runs up to a read-tick (~2s) after the kill. If a
+# successor registers inside that window, cleanup must not remove the
+# successor's pidfile — an orphaned listener is invisible to the liveness
+# check, unkillable by unsub, and wakes forever beside the next registration.
+LOC_IDENTITY=alice loc sub >/dev/null 2>&1
+LOC_IDENTITY=alice loc unsub >/dev/null 2>&1
+LOC_IDENTITY=alice loc sub >/dev/null 2>&1   # registers inside the death window
+sleep 3                                       # let the first listener finish dying
+LOC_IDENTITY=alice loc unsub >/dev/null 2>&1  # must actually kill the successor
+: > "$LOC_HOME/wakes.log"
+env LOC_IDENTITY=bob loc send alice "orphan-bait" >/dev/null 2>&1
+sleep 8
+if ! grep -q '^alice' "$LOC_HOME/wakes.log"; then
+  ok "rapid unsub/resub leaves no orphan listener (no wake after final unsub)"
+else bad "rapid unsub/resub leaves no orphan listener (no wake after final unsub)"; fi
+LOC_IDENTITY=alice loc read >/dev/null 2>&1   # drain the bait
+
+say "— a stranded wake spool is recovered by the next read —"
+# A listener that died between fetching (acked = deleted from the queue) and
+# rendering leaves raw envelopes in its wake spool. Those bodies exist nowhere
+# else; the next read must present them rather than show an empty mailbox.
+printf '%s\n' '{"id":"x","ts":"2026-08-19T00:00:00Z","from":"bob","to":"alice","kind":"msg","body":"stranded-in-wake-spool"}' \
+  >> "$LOC_HOME/run/alice.wake.spool.raw"
+out="$(LOC_IDENTITY=alice loc read 2>/dev/null)"
+if grep -q "stranded-in-wake-spool" <<<"$out"; then
+  ok "stranded wake-spool bodies are presented by the next read"
+else bad "stranded wake-spool bodies are presented by the next read"; fi
+# And presenting forgot it: claimed and removed, so a second read is clean.
+out="$(LOC_IDENTITY=alice loc read 2>/dev/null)"
+if ! grep -q "stranded-in-wake-spool" <<<"$out"; then
+  ok "a presented wake-spool body is forgotten, not re-presented"
+else bad "a presented wake-spool body is forgotten, not re-presented"; fi
 
 say "— repo cleanliness (future-public discipline) —"
 if "$ROOT/conformance/check-clean.sh" >/dev/null 2>&1; then
