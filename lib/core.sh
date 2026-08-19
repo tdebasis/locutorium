@@ -192,13 +192,18 @@ loc_mentions() { # print @mentioned endpoints in a body, one per line
 }
 
 # -------------------------------------------------------------- delivery ----
-# Registration is attendance. `loc sub` starts a listener that observes the
-# endpoint's own queue WITHOUT consuming it and wakes the registered channel
-# through the deployment's wake hook. Employment-tied: the listener watches
-# what it was told to watch and exits when that dies. Every start or reconnect
-# begins with a depth check (wake-on-backlog), so a missed event can never
-# become a missed message. The listener never sends through this tool's own
-# verbs: a delivery layer that speaks on the bus can recurse into it.
+# Registration is attendance. `loc sub` starts a listener that, on each
+# arrival, DRAINS the endpoint's own queue into a durable per-endpoint spool
+# and then wakes the registered channel through the deployment's wake hook,
+# which presents the spool. (It observed without consuming until 2026-08-16;
+# consuming first is what stops the hook's presentation racing a concurrent
+# reader for the same messages.) The spool is part of the read surface: what
+# a wake has drained but nothing has presented is still shown by `loc read`.
+# Employment-tied: the listener watches what it was told to watch and exits
+# when that dies. Every start or reconnect begins with a depth check
+# (wake-on-backlog), so a missed event can never become a missed message. The
+# listener never sends through this tool's own verbs: a delivery layer that
+# speaks on the bus can recurse into it.
 
 _loc_rundir() { mkdir -p "$LOC_HOME/run"; chmod 700 "$LOC_HOME/run"; printf '%s' "$LOC_HOME/run"; }
 _loc_pid_start() { ps -o lstart= -p "$1" 2>/dev/null | sed 's/^[[:space:]]*//'; }
@@ -286,16 +291,35 @@ _loc_listener() { # <endpoint> <watch_pid> — the background body of `loc sub`.
     # at that instant, two readers would race for them. Consuming first is what
     # removes the race, and the spool is what makes consuming-first survivable.
     #
-    # STREAMED, never captured into a variable first: the fetch acks, and on a
-    # work queue an ack is a delete, so between the acked fetch and a durable
-    # write the message would exist only in memory. That gap is exactly the
-    # defect this file spent 2026-08-16 removing one layer up.
+    # RAW BYTES TO DISK FIRST, rendered second. The fetch acks, and on a work
+    # queue an ack is a delete — so the gap between the acked fetch and a
+    # durable write must be one message, never a pipeline. Piping the fetch
+    # through the renderer (the shape this replaced) held every fetched-and-
+    # acked body in the renderer's output buffer until the whole drain ended:
+    # a listener dying mid-drain lost all of it. That is the defect `loc read`
+    # had removed on 2026-08-16, rebuilt one layer down. Now each message hits
+    # the raw spool as it is fetched; render failure strands the raw file for
+    # the next read to recover, costing a duplicate, never a deletion.
+    #
+    # DRAIN EXACTLY THE MEASURED DEPTH, not a batch cap. The provider's drain
+    # ends on its first miss, and a miss costs its full fetch timeout — so
+    # asking for more than is there delayed every wake by that timeout, and
+    # arrivals landing inside the wait kept extending it. Fetching what the
+    # depth check just counted returns immediately. Anything past the cap, and
+    # anything arriving mid-drain, wakes again through the pending counter or
+    # the reconnect backlog check — over-waking is the accepted direction.
     #
     # Append, because a previous hand-off may have failed to present and its
     # bodies are still owed. Order is fetch order, which is queue order, so a
     # retry cannot silently reorder a conversation.
-    provider_read_queue "$me" 50 no 2>/dev/null | loc_render "$me" \
-      >> "$(_loc_rundir)/$me.spool" || true
+    local rundir batch rawspool
+    rundir="$(_loc_rundir)"
+    rawspool="$rundir/$me.wake.spool.raw"
+    batch="$d"; (( batch > 50 )) && batch=50
+    provider_read_queue "$me" "$batch" no 2>/dev/null >> "$rawspool" || true
+    if loc_render "$me" < "$rawspool" >> "$rundir/$me.spool"; then
+      : > "$rawspool"
+    fi
     _loc_wake "$me" "$1"
   }
 
