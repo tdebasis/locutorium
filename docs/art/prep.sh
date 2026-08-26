@@ -10,4 +10,4 @@ nats-server -c "$LOC_HOME/nats-server.conf" >"$LOC_HOME/server.log" 2>&1 &
 export DEMO_SERVER=$!
 sleep 1
 LOC_IDENTITY=admin loc doctor --init >/dev/null
-clear
+printf '\033[2J\033[3J\033[H'

@@ -12,7 +12,8 @@ Set TypingSpeed 40ms
 Hide
 Type "source ./prep.sh"
 Enter
-Sleep 2s
+Wait+Line@60s /^> ?$/
+Sleep 500ms
 Show
 
 Type `LOC_IDENTITY=ada loc send bob "the build is green; the tag is yours"`
