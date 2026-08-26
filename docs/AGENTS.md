@@ -46,6 +46,8 @@ it as one, not work around it.
 
 ## Attendance — what happens between a send and your reading it
 
+![attendance: send → queue → listener → spool → knock; read presents spools, then the queue, then the rooms](art/attendance.png)
+
 ```
 sender: loc send you …  ─▶  queue.you  ─▶  your listener (loc sub) taps it
                                                   ─▶ drains the arrivals to run/you.wake.spool.raw

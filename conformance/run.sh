@@ -359,6 +359,31 @@ if ! grep -q "stranded-in-wake-spool" <<<"$out"; then
   ok "a presented wake-spool body is forgotten, not re-presented"
 else bad "a presented wake-spool body is forgotten, not re-presented"; fi
 
+say "— the front page shows what the tool prints —"
+# README's "Two agents, one conversation" block is captured, not typed. This case
+# replays its five commands in a fresh house (ada/bob/carol, own port, own server)
+# and diffs the output against the block with timestamps masked. If the tool's
+# output ever moves, the page moves with it or this fails.
+DEMO_HOME="$(mktemp -d)/house"; DEMO_PORT=$(( 20000 + RANDOM % 20000 ))
+LOC_HOME="$DEMO_HOME" "$ROOT/providers/nats/bootstrap.sh" ada bob carol >/dev/null
+sed -i '' "s|127.0.0.1:4222|127.0.0.1:$DEMO_PORT|" "$DEMO_HOME/config" "$DEMO_HOME/nats-server.conf"
+nats-server -c "$DEMO_HOME/nats-server.conf" >"$DEMO_HOME/server.log" 2>&1 &
+DEMO_PID=$!; sleep 1
+LOC_HOME="$DEMO_HOME" LOC_IDENTITY=admin loc doctor --init >/dev/null 2>&1
+mask() { sed -E 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z/<ts>/g'; }
+expected="$(awk '/^```console$/{f=1;next} f&&/^```$/{exit} f' "$ROOT/README.md" | mask)"
+actual="$(
+  while IFS= read -r c; do
+    printf '$ %s\n' "$c"; LOC_HOME="$DEMO_HOME" bash -c "$c" 2>&1
+  done <<<"$(awk '/^```console$/{f=1;next} f&&/^```$/{exit} f&&/^\$ /{sub(/^\$ /,"");print}' "$ROOT/README.md")" | mask)"
+if [[ -n "$expected" && "$expected" == "$actual" ]]; then
+  ok "README transcript equals a fresh run (timestamps masked)"
+else
+  bad "README transcript equals a fresh run (timestamps masked)"
+  diff <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") | head -20 | sed 's/^/      /'
+fi
+kill "$DEMO_PID" 2>/dev/null; rm -rf "$(dirname "$DEMO_HOME")"
+
 say "— one version, stated once —"
 if "$ROOT/conformance/check-version.sh" >/dev/null 2>&1; then
   ok "VERSION, loc version, docs and tag agree"

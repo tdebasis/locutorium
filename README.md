@@ -1,48 +1,83 @@
 <div align="center">
 
-```
-                 ┌──────────────────────── the medium ────────────────────────┐
-  ┌─────────┐    │  nats-server · loopback 127.0.0.1:4222 · JetStream          │    ┌─────────┐
-  │   ada   │    │                                                             │    │   bob   │
-  │         │ ─── loc send bob … ──▶  queue.bob ─────▶ QUEUE_bob  (held until  ├───▶│ loc sub │── tap ──▶ drain ──▶ spool ──▶ hooks/wake
-  │ hooks:  │    │                                     bob reads it)           │    │ loc read│◀────────── spools + queue ──▶ rendered
-  │identity │ ─── loc publish standup … ▶ topic.standup ▶ TOPICS  (the room,   │    │ hooks:  │
-  │ nudge   │    │                                     7-day window)           │    │ …       │
-  │ …       │ ┄┄┄ hooks/nudge (the doorbell) ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄▶│         │
-  └─────────┘    │                          ◀── loc watch (read-only) ──       │    └─────────┘
-                 └─────────────────────────────────────────────────────────────┘
-          the house is silent; this is the one room where speaking is allowed.
-```
+<img src="docs/art/wordmark.png" alt="Locutorium" width="560">
 
-**v0.1.0** · macOS · bash 3.2+ · a provider *is* a Locutorium provider iff `conformance/run.sh` passes
+**Where agents talk to one another, in one place.**
+
+*In a silent house, the locutorium is the one room where speaking is allowed.*
+
+<img src="docs/art/architecture.png" alt="ada sends a word into the medium; a queue holds it for bob until bob reads it; a topic is the room; the knock wakes bob" width="920">
+
+![version](https://img.shields.io/badge/version-v0.1.0-1e1e1e) ![macOS](https://img.shields.io/badge/macOS-launchd-a5d8ff) ![bash](https://img.shields.io/badge/bash-3.2%2B-ffec99) ![conformance](https://img.shields.io/badge/conformance-50%20cases-b2f2bb)
 
 </div>
 
-# Locutorium
+`loc` is a message bus for agents that live on one machine. Each **endpoint** (an agent's mailbox, named in a
+roster) can say something to one other endpoint through its **queue** (a per-endpoint stream, held until read),
+or speak in a **topic** (a shared room that everyone reads and that forgets itself after a window). Delivery to
+a queue survives downtime; a topic is born when someone speaks in it and gone when the talking stops.
 
-In a silent house, the locutorium is the one room where speaking is permitted.
+> [!IMPORTANT]
+> **Nothing here is a record.** What matters gets written down elsewhere, deliberately, by whoever it
+> mattered to. The bus carries conversation; a message points at the file.
 
-`loc` is a message bus for agents that live on one machine: each **endpoint** (an agent's mailbox,
-named in a roster) can say something to one other endpoint through its **queue** (a per-endpoint
-stream held until read), or speak in a **topic** (a shared room that everyone reads and that forgets
-itself after a window). Delivery to a queue is guaranteed through downtime; a topic is born when
-someone speaks in it and gone when the talking stops. **Nothing here is a record** — what matters
-gets written down elsewhere, deliberately, by whoever it mattered to.
+## Why a house needs one
 
-```
+You run several AI agents on one machine — a coordinator, a builder, a researcher, a watcher — each in its own
+terminal, each with its own memory. They cannot see each other. The ways to pass a word between them were bad
+ones: type into another agent's window, or drop a file somewhere and hope somebody looks.
+
+Both fail in measurable ways. Keystrokes typed into another agent's window collide with whatever it was typing
+and submit the mixture; a word typed into a window wakes nobody and is gone when the window is. A file dropped
+where another agent might look has no knock, and *absent from where I looked* gets mistaken for *absent*.
+
+The locutorium gives every agent a **mailbox** that holds a word through any downtime and hands it over exactly
+once; a **room** where the house can talk and that forgets itself after a week; and a **knock** — an idle agent
+is woken when something arrives for it, and only then, by a hook the house owns rather than the sender's guess.
+Nothing leaves the machine.
+
+It is for the moment a coordinator says *"builder, the tests are green — tag it,"* and the builder is asleep.
+
+**What people use it for:** *delegate and wait* — send the ask, sleep, be woken by the answer ·
+*report a finding* — publish the pointer in the room; whoever is attending reads it from their own cursor ·
+*sleep until spoken to* — attend, and the knock is the only clock you keep.
+
+## Two agents, one conversation
+
+```console
 $ LOC_IDENTITY=ada loc send bob "the build is green; the tag is yours"
 sent → queue.bob
 $ LOC_IDENTITY=ada loc publish standup "@bob please look at the restore proof"
+published → #standup
 $ LOC_IDENTITY=bob loc read
 ── queue.bob ──
-**`ada -> bob`**   2026-08-25T21:04:11Z
+**`ada -> bob`**   2026-08-26T03:54:39Z
+
 `the build is green; the tag is yours`
+
 ── topics ──
-#standup  ada: @bob please look at the restore proof
-$ loc topics
-standup   2 speakers · last 14s ago
-$ loc watch          # every envelope as it passes, read-only, ^C to stop
+**`ada -> #standup`**   2026-08-26T03:54:39Z
+
+`@bob please look at the restore proof`
+
+$ LOC_IDENTITY=bob loc topics
+#standup  (1 in window)
+$ LOC_IDENTITY=bob loc status
+ada          unread: 0
+bob          unread: 0
+carol        unread: 0
 ```
+
+<img src="docs/art/demo.gif" alt="the five commands above, played against a scratch house" width="800">
+
+A word held for bob until bob took it; a word spoken in the room; bob read both from one place. The queue is
+empty again, and the room keeps its word for the window. Captured, not typed: the suite replays these five
+commands and fails if the page and the tool ever disagree.
+
+- **Held until read.** A queue keeps a word through downtime and gives it up exactly once (Contract: *Delivery*).
+- **Wake on arrival, never poll.** Attendance is a listener at the door; the knock is the deployment's hook, and a wake never hides a message (Contract: *Semantics*).
+- **Rooms that forget.** A topic expires at the edge of its window; teardown by retention, nothing to clean (Contract: *Semantics*).
+- **Nothing leaves the machine.** Loopback only, one credential per endpoint, and the server refuses you another's queue — `loc doctor` proves it (Contract: *Identity and security*).
 
 ## Install
 
@@ -50,13 +85,16 @@ $ loc watch          # every envelope as it passes, read-only, ^C to stop
 git clone git@github.com:tdebasis/locutorium.git && cd locutorium && ./install.sh
 ```
 
-The installer writes exactly two things: a symlink `loc` in your Homebrew `bin` (or `~/.local/bin`)
-and a LaunchAgent `com.locutorium.nats-server` that runs the medium under launchd. It never touches
-`~/.locutorium` and never restarts a running server unless you pass `--restart-service`. Try
-`./install.sh --dry-run` first; `./install.sh --uninstall` removes only what it made.
+> [!IMPORTANT]
+> The installer writes exactly two things: a symlink `loc` in your Homebrew `bin` (or `~/.local/bin`)
+> and a LaunchAgent `com.locutorium.nats-server` that runs the medium under launchd. It never touches
+> `~/.locutorium` and never restarts a running server unless you pass `--restart-service`. `--dry-run`
+> shows the two before making them; `--uninstall` removes only what it made.
+
 Dependencies: `nats-server`, `nats` (`brew install nats-server nats-io/nats-tools/nats`), `python3`.
 
-## First deployment
+<details>
+<summary><b>First deployment</b> — four lines</summary>
 
 ```
 providers/nats/bootstrap.sh ada bob carol   # endpoints, credentials, server config → ~/.locutorium
@@ -65,46 +103,59 @@ LOC_IDENTITY=admin loc doctor --init        # create the streams (once)
 LOC_IDENTITY=ada   loc doctor               # four checks, as a real endpoint
 ```
 
-## Send and read
+</details>
 
-`loc send <endpoint> <body>` puts one message in one queue; it stays there until `loc read` takes
-it, and it is taken exactly once. Bodies are limited to **4000 characters** — this carries
-conversation, not documents; put a document somewhere durable and send its path. `loc read --peek`
-looks without taking.
+<details>
+<summary><b>The eleven verbs</b></summary>
 
-## Attend — wake on arrival
+| verb | in the house | what it does |
+|---|---|---|
+| `loc send <endpoint> <body>` | a word for one | one envelope into that endpoint's queue; held until read |
+| `loc publish <topic> <body>` | a word in the room | everyone attending reads it from their own cursor; `@name` rings a doorbell |
+| `loc read [--peek]` | take what is yours | spools, then your queue, then the rooms; without `--peek`, taken exactly once |
+| `loc sub [--watch-pid P]` | attend | a listener taps your queue, spools arrivals, and knocks (`hooks/wake`) |
+| `loc unsub` | leave the door | ends attendance; the queue keeps holding |
+| `loc status` | unread, by name | unread counts per endpoint |
+| `loc topics` | the rooms alive now | active topics in the window |
+| `loc registry` | who is at the door | who is attending, read from the medium |
+| `loc watch` | the gallery | every envelope as it passes, read-only |
+| `loc doctor [--init]` | the four checks | reachable · your queue · the topics stream · the ACL refuses you another's queue |
+| `loc version` | the number | prints the version in `VERSION` |
 
-`loc sub` registers **attendance**: a listener taps your queue and, when something arrives, drains
-it to a **spool** (a file at your door, `run/<you>.spool`) and knocks — it runs your deployment's
-`hooks/wake` with the count. A wake never makes a message unreadable: `loc read` presents spools as
-well as the queue. `loc unsub` ends attendance; the queue keeps holding messages regardless.
-`loc status` shows unread counts; `loc registry` shows who is attending.
+</details>
 
-## Talk in a room
+## Send, speak, check
 
-`loc publish <topic> <body>` speaks in a topic. Every attending endpoint sees the conversation from
-its own cursor; `@name` in a body rings that endpoint's **doorbell** (`hooks/nudge`). Topics expire
-at the edge of the window (`topic_window`, default 7 days) — teardown by retention, nothing to clean.
+**Send and read.** `loc send <endpoint> <body>` puts one message in one queue; it stays there until `loc read` takes it, and it is taken exactly once. Bodies are limited to **4000 characters** — this carries conversation, not documents; put a document somewhere durable and send its path. `loc read --peek` looks without taking.
 
-## Check health
+**Attend — wake on arrival.** `loc sub` registers **attendance**: a listener taps your queue and, when something arrives, drains it to a **spool** (a file at your door, `run/<you>.spool`) and knocks — it runs your deployment's `hooks/wake` with the count. A wake never makes a message unreadable: `loc read` presents spools as well as the queue. `loc unsub` ends attendance; the queue keeps holding regardless.
 
-`loc doctor` — server reachable with your credentials · your queue exists · the topics stream
-exists · the ACL refuses you another endpoint's queue. `loc doctor --init` (as `admin`) creates
-what is missing. `loc version` prints the version.
+<img src="docs/art/attendance.png" alt="send → queue → listener → spool → knock; read presents spools, then the queue, then the rooms" width="920">
+
+**Talk in a room.** `loc publish <topic> <body>` speaks in a topic. Every attending endpoint sees the conversation from its own cursor; `@name` in a body rings that endpoint's **doorbell** (`hooks/nudge`). Topics expire at the edge of the window (`topic_window`, default 7 days) — teardown by retention, nothing to clean.
+
+**Check health.** `loc doctor` — server reachable with your credentials · your queue exists · the topics stream exists · the ACL refuses you another endpoint's queue. `loc doctor --init` (as `admin`) creates what is missing.
 
 ## For agents
 
-If you are an agent joining the house, read [`AGENTS.md`](AGENTS.md) — identity, what a send and a
-read actually do, how attendance works, and what to check when a message seems missing.
+If you are an agent joining the house, read [`docs/AGENTS.md`](docs/AGENTS.md) — the endpoint's guide. If you
+are changing this repository, read [`AGENTS.md`](AGENTS.md).
 
 ## Docs
 
-- **Start:** [`docs/INSTALL.md`](docs/INSTALL.md) · [`docs/OPERATORS.md`](docs/OPERATORS.md) — deploying and running the house
-- **Rules:** [`docs/CONTRACT.md`](docs/CONTRACT.md) · [`docs/PROTOCOL.md`](docs/PROTOCOL.md) — what a Locutorium is, and how its messages are shaped
-- **Reference:** [`docs/AGENTS.md`](docs/AGENTS.md) · [`docs/GLOSSARY.md`](docs/GLOSSARY.md) · [`RELEASE.md`](RELEASE.md)
+| Read this | If you are… | It answers |
+|---|---|---|
+| [`docs/INSTALL.md`](docs/INSTALL.md) | an operator deploying | what goes where, and how to take it out again |
+| [`docs/OPERATORS.md`](docs/OPERATORS.md) | an operator running the house | the service, the hooks, what to check when it is quiet |
+| [`docs/AGENTS.md`](docs/AGENTS.md) | an agent joining the house | identity, what a send and a read do, attendance, what "missing" means |
+| [`AGENTS.md`](AGENTS.md) | changing this repository | the house's style and the rules a change must keep |
+| [`docs/CONTRACT.md`](docs/CONTRACT.md) | deciding whether this is a Locutorium | the guarantees a provider must keep |
+| [`docs/PROTOCOL.md`](docs/PROTOCOL.md) | building a provider or a client | how a message is shaped, and what a version number means |
+| [`docs/GLOSSARY.md`](docs/GLOSSARY.md) | new to the words | endpoint, queue, topic, attendance, spool, knock |
+| [`RELEASE.md`](RELEASE.md) | cutting a version | the steps, and what the number promises |
 
 ## Status
 
-Early; interfaces may move. The version is in `VERSION`; the definition of the product is the
-conformance suite; `docs/PROTOCOL.md` §8 says what a change in version means. Private by default:
-the medium listens on loopback, and exposure is added deliberately, never removed belatedly.
+Early; interfaces may move. The version is in `VERSION`; the definition of the product is the conformance suite;
+`docs/PROTOCOL.md` §8 says what a change in version means. Private by default: the medium listens on loopback,
+and exposure is added deliberately, never removed belatedly.

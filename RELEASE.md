@@ -11,6 +11,8 @@ HEAD equals it.
 5. `git tag -a vX.Y.Z -m vX.Y.Z`
 6. `git push origin main --follow-tags`
 7. A GitHub release entry: deferred until the repository is public.
+8. The README's conformance badge is static text; paste the count the suite prints
+   (`conformance: N passed`) so the badge never claims more than the run did.
 
 What a number means (`docs/PROTOCOL.md` §8): additive envelope fields are minor; changed meanings are
 major; `kind` registry changes are minor. CLI-only changes that keep the envelope follow the same
