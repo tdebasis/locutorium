@@ -184,6 +184,22 @@ say "— cwd-independence —"
 check "every verb works from an unrelated cwd" \
   bash -c "cd / && LOC_IDENTITY=alice loc doctor >/dev/null && LOC_IDENTITY=alice loc send bob from-root >/dev/null && LOC_IDENTITY=alice loc topics >/dev/null && LOC_IDENTITY=alice loc status >/dev/null"
 
+say "— the CLI finds its own house —"
+# loc is reached through a link on PATH. Whatever shape that link takes, loc
+# must find the tree it belongs to; a bare copy has no tree and must say so.
+L="$(dirname "$LOC_HOME")/links"; mkdir -p "$L/bin"
+# Relative links are resolved by the kernel against PHYSICAL paths; a relpath computed
+# from a logical path under a symlinked directory dangles before loc ever runs.
+rel="$(python3 -c 'import os,sys;print(os.path.relpath(os.path.realpath(sys.argv[1]),os.path.realpath(sys.argv[2])))' "$ROOT/bin/loc" "$L")"
+ln -s "$rel" "$L/loc-rel"
+check "a relative symlink to loc finds its house" env LOC_IDENTITY=alice "$L/loc-rel" topics
+ln -s "$ROOT/bin/loc" "$L/hop1"; ln -s hop1 "$L/hop2"
+check "a two-hop symlink to loc finds its house" env LOC_IDENTITY=alice "$L/hop2" topics
+cp "$ROOT/bin/loc" "$L/loc-copy"
+check_not "a copied loc refuses to run" env LOC_IDENTITY=alice "$L/loc-copy" topics
+copy_out="$(env LOC_IDENTITY=alice "$L/loc-copy" topics 2>&1 || true)"
+if grep -q "copy, not a link" <<<"$copy_out"; then ok "…and says why (copy, not a link)"; else bad "…and says why (copy, not a link)"; fi
+
 say "— cold read —"
 check "endpoint with zero prior state reads cleanly" \
   env LOC_IDENTITY=carol loc read

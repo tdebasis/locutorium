@@ -8,7 +8,28 @@
 
 set -euo pipefail
 
-LOC_ROOT="$(cd "$(dirname "$(readlink "${BASH_SOURCE[0]}" || echo "${BASH_SOURCE[0]}")")/.." && pwd)"
+# Find the house this loc belongs to by walking the symlink chain one hop at a
+# time: readlink -f is not everywhere, and a relative target is relative to the
+# link that named it, not to whoever is calling. A copied loc has no house and
+# says so, instead of failing on a missing file three lines later.
+_self="${BASH_SOURCE[0]}"; _hops=0
+while [[ -L "$_self" ]]; do
+  _t="$(readlink "$_self")"
+  case "$_t" in
+    /*) _self="$_t" ;;
+    *)  _self="$(dirname "$_self")/$_t" ;;
+  esac
+  _hops=$((_hops + 1))
+  if [[ $_hops -gt 40 ]]; then echo "loc: symlink loop while resolving $0" >&2; exit 1; fi
+done
+LOC_ROOT="$(cd "$(dirname "$_self")/.." && pwd -P)"
+unset _self _hops _t
+if [[ ! -f "$LOC_ROOT/lib/core.sh" ]]; then
+  echo "loc: no lib/core.sh under $LOC_ROOT — this loc is a copy, not a link." >&2
+  echo "     Clone the repository and run ./install.sh, which links loc into your PATH;" >&2
+  echo "     never copy bin/loc out of its tree." >&2
+  exit 1
+fi
 # shellcheck source=lib/core.sh
 source "$LOC_ROOT/lib/core.sh"
 loc_load_provider
