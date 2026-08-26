@@ -187,7 +187,8 @@ provider_doctor() { # [--init]
     echo "✓ server reachable, credentials for '$id' accepted"
   else
     echo "✗ cannot reach the server as '$id' at ${NATS_URL}"
-    echo "  if it is not running:  brew services start nats-server"
+    echo "  if it is not running:  launchctl bootstrap gui/\$(id -u) \$HOME/Library/LaunchAgents/com.locutorium.nats-server.plist"
+    echo "  (or ./install.sh from your clone, which renders and loads that agent)"
     ok=1
   fi
   if provider_endpoint_exists "$id"; then
