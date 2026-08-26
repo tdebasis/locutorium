@@ -200,6 +200,15 @@ check_not "a copied loc refuses to run" env LOC_IDENTITY=alice "$L/loc-copy" top
 copy_out="$(env LOC_IDENTITY=alice "$L/loc-copy" topics 2>&1 || true)"
 if grep -q "copy, not a link" <<<"$copy_out"; then ok "…and says why (copy, not a link)"; else bad "…and says why (copy, not a link)"; fi
 
+say "— the installer links loc and leaves when told —"
+check "install.sh links loc into a prefix (no service)" \
+  "$ROOT/install.sh" --prefix "$L/bin" --no-service
+check "the installed link runs loc" env LOC_IDENTITY=alice "$L/bin/loc" topics
+inst2="$("$ROOT/install.sh" --prefix "$L/bin" --no-service 2>&1 || true)"
+if grep -q "nothing to do" <<<"$inst2"; then ok "a second install has nothing to do"; else bad "a second install has nothing to do"; fi
+"$ROOT/install.sh" --uninstall --prefix "$L/bin" --no-service >/dev/null 2>&1 || true
+check_not "uninstall removes the link it made" test -e "$L/bin/loc"
+
 say "— cold read —"
 check "endpoint with zero prior state reads cleanly" \
   env LOC_IDENTITY=carol loc read
@@ -349,6 +358,11 @@ out="$(LOC_IDENTITY=alice loc read 2>/dev/null)"
 if ! grep -q "stranded-in-wake-spool" <<<"$out"; then
   ok "a presented wake-spool body is forgotten, not re-presented"
 else bad "a presented wake-spool body is forgotten, not re-presented"; fi
+
+say "— one version, stated once —"
+if "$ROOT/conformance/check-version.sh" >/dev/null 2>&1; then
+  ok "VERSION, loc version, docs and tag agree"
+else bad "VERSION, loc version, docs and tag agree (run conformance/check-version.sh)"; fi
 
 say "— repo cleanliness (future-public discipline) —"
 if "$ROOT/conformance/check-clean.sh" >/dev/null 2>&1; then

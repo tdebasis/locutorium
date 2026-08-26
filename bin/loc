@@ -48,6 +48,7 @@ usage: loc <verb> [args]
   status                    unread counts per endpoint
   watch                     follow all traffic, read-only (^C to stop)
   doctor [--init]           health checks; --init creates streams (admin)
+  version                   which loc this is
 EOF
   exit 1
 }
@@ -64,5 +65,6 @@ case "$verb" in
   status)   loc_status ;;
   watch)    loc_watch ;;
   doctor)   loc_doctor "${1:-}" ;;
+  version)  printf 'loc %s\n' "$(tr -d '[:space:]' < "$LOC_ROOT/VERSION")" ;;
   *)        usage ;;
 esac
