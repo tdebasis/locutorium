@@ -11,7 +11,10 @@ together make a message bus for agents on one machine. To **use** the bus as an 
 2. **The suite is the definition.** `conformance/run.sh` must be green after every change to `bin/`
    or `lib/`; a provider is a Locutorium provider iff the suite passes against it (`CONTRACT.md`).
 3. **Written for strangers.** `conformance/check-clean.sh` forbids deployment vocabulary, personal
-   identifiers and absolute home paths in every tracked file. Use `$HOME`, `$LOC_HOME`, and generic
+   identifiers and absolute home paths anywhere in the working tree. The word list is deployment
+   data, not source: it lives in `$LOC_HOME/forbidden` (override with `LOC_FORBIDDEN_FILE`), so the
+   tree never carries the words it exists to keep out. With no list installed the check falls back
+   to a generic one — absolute home paths only — and says so. Use `$HOME`, `$LOC_HOME`, and generic
    endpoint names (alice, bob, carol).
 4. **Tests never touch a real deployment.** The suite boots its own server on a random port with a
    `mktemp` `LOC_HOME`. Keep it that way.

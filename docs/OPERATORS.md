@@ -16,6 +16,28 @@ how to undo anything.
 | `run/` | live state: listener pidfiles, spools, delivery logs — never edit | `loc` |
 | `store/` | JetStream data | the medium |
 | `server.log` | the medium's stdout/stderr | launchd |
+| `forbidden` | your deployment's vocabulary, for the cleanliness check (below); mode 0600 | you |
+
+## Your deployment's vocabulary
+
+This tree is written to be readable by strangers, and `conformance/check-clean.sh` enforces that: it
+refuses a working tree that carries your deployment's own words — org names, member names, internal
+tool names, your absolute home path. Those words are **your** data, so they are not in the
+repository. Write them, one per line, to `$LOC_HOME/forbidden` (`chmod 600`); point elsewhere with
+`LOC_FORBIDDEN_FILE`. Each line is one extended-regex alternative; blank lines and lines starting
+with `#` are ignored:
+
+```
+# names this house uses that a stranger must never read
+acme-internal
+codename-lyra
+/[Uu]sers/ada
+```
+
+Run it with `conformance/check-clean.sh`; it prints the list it used and the number of patterns.
+With no file installed it still runs, against a built-in generic list holding only absolute home
+paths, and says on stderr that the deployment list is missing. A missing list is a weaker check,
+never a silent pass.
 
 ## Bootstrap
 

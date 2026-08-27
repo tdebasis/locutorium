@@ -15,6 +15,10 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PORT=$(( 20000 + RANDOM % 20000 ))
+# The operator's real house, remembered BEFORE the scratch one replaces it: the
+# cleanliness check reads its vocabulary list from there, so the suite must
+# still check the tree against the deployment the machine actually runs.
+REAL_LOC_HOME="${LOC_HOME:-$HOME/.locutorium}"
 export LOC_HOME="$(mktemp -d)/deployment"
 PATH="$ROOT/bin:$PATH"
 SERVER_PID=""
@@ -390,9 +394,26 @@ if "$ROOT/conformance/check-version.sh" >/dev/null 2>&1; then
 else bad "VERSION, loc version, docs and tag agree (run conformance/check-version.sh)"; fi
 
 say "— repo cleanliness (future-public discipline) —"
-if "$ROOT/conformance/check-clean.sh" >/dev/null 2>&1; then
+if LOC_FORBIDDEN_FILE="$REAL_LOC_HOME/forbidden" "$ROOT/conformance/check-clean.sh" >/dev/null 2>&1; then
   ok "repo carries no deployment/internal vocabulary"
 else bad "repo carries no deployment/internal vocabulary (run conformance/check-clean.sh)"; fi
+# With no list on the machine at all the check must still run and still pass on
+# a clean tree — a missing list is a weaker check, never a hard failure.
+check "cleanliness check runs on its generic list when no list is installed" \
+  env LOC_FORBIDDEN_FILE=/nonexistent "$ROOT/conformance/check-clean.sh"
+# And it must actually FAIL on a dirty tree. Asserting pass-only proves nothing:
+# a checker that always exits 0 passes that. A scratch tree, one file holding a
+# nonce word, a list naming that nonce — the check has to find it. The copy of
+# the script sits at <tree>/conformance/ because the check walks up one level
+# from itself to decide what tree it is checking.
+CLEAN_T="$(mktemp -d)"; mkdir -p "$CLEAN_T/conformance"
+cp "$ROOT/conformance/check-clean.sh" "$CLEAN_T/conformance/check-clean.sh"
+CLEAN_NONCE="zzq$(( RANDOM ))vocab"
+printf 'a line that says %s and should not survive review\n' "$CLEAN_NONCE" > "$CLEAN_T/leaky.md"
+printf '# scratch list\n%s\n' "$CLEAN_NONCE" > "$CLEAN_T/list"
+check_not "cleanliness check fails on a tree that carries a listed word" \
+  env LOC_FORBIDDEN_FILE="$CLEAN_T/list" "$CLEAN_T/conformance/check-clean.sh"
+rm -rf "$CLEAN_T"
 
 say ""
 say "conformance: $PASS passed, $FAIL failed"
