@@ -1,9 +1,9 @@
 # NOTES — the orphan listener (2026-08-26)
 
-Status: **reproduced and captured. Not fixed.** The capture below names the
-mechanism; the fix is deliberately not in this commit, because a change to the
-listener's lifetime has to be certified by a green suite and this suite is not
-green yet.
+Status: **fixed 2026-08-31, mechanism below stands.** The capture and the
+reasoning are kept verbatim because they are what the fix answers to; see
+[The fix](#the-fix) at the end for what was actually changed. Nothing above
+that section has been rewritten to match the outcome.
 
 ## The symptom
 
@@ -135,3 +135,61 @@ survivors between runs — `pgrep -f 'nats subscribe queue.alice'` — because a
 orphan left alive makes the *next* run's tap-liveness case pass for the wrong
 reason. `conformance/orphan-probe.sh` remains in the tree as the narrow
 instrument: it is the thing that proved the sequence alone is innocent.
+
+## The fix
+
+One mechanism, applied in three places, all in `lib/core.sh`: **a listener's
+pidfile entry is its licence to live, and the listener checks its own licence.**
+Nothing else about the pidfile changed — same path, same two lines — because
+out-of-tree readers depend on both.
+
+1. **The listener writes its own pidfile, before its first drain**
+   (`_loc_listener`). It used to be written by `loc sub` after the fork, so
+   under load a listener existed for its whole first drain with no entry naming
+   it, and an `unsub` landing in that window killed nothing while deleting the
+   file. Written to `<pidfile>.tmp`, `chmod 600`, then `mv` — atomic, so a
+   reader never sees a torn two-line file. `loc sub` no longer writes it; it
+   polls for the entry (10 × 0.2 s) and fails with *listener did not register*
+   rather than printing "attending" over a listener nobody can reach.
+
+2. **Policing, once per tick.** At the top of the outer loop and at the top of
+   each inner tick, the listener asks two questions of the disk: does
+   `$LOC_HOME/run` still exist, and does line 1 of its pidfile still name it? A
+   definite "no" to either ends it. This is the positive liveness signal
+   point 2 of *The shape of the fix* asked for — `kill -0 "$_L_TAP"` could
+   never supply one, because a `nats subscribe` outlives its server. It is
+   checked at BOTH loop levels so a listener still inside its first drain
+   leaves too. Only a definite mismatch exits: if the read itself errors the
+   listener assumes itself and retries next tick, since a real retirement is
+   still true two seconds later, while a spurious exit loses attendance
+   silently.
+
+3. **Per-generation fifo names** — `run/<ep>.<pid>.listen.fifo`, removed
+   unconditionally by `_cleanup`. Two generations overlap by seconds during a
+   rapid unsub/resub, and on the old shared path the survivor's `rm -f` pulled
+   the fifo out from under the newcomer.
+
+   *Unconditionally* is the whole of it, and it was got wrong first. The fifo's
+   removal originally sat inside the same guard that protects the pidfile — and
+   that guard is about successors, which a pid-named fifo cannot have. Since
+   `unsub` removes the pidfile immediately after its kill, the guard's read
+   usually failed and the rm was skipped. Under the old shared name that cost
+   one stale file, reclaimed by the next generation's `mkfifo`; under
+   per-generation names nothing ever reclaims them, so they accumulate — 1, 2,
+   3 over three sub/unsub cycles, in a directory nobody prunes. A rename that
+   looks purely cosmetic turned a bounded leak into an unbounded one.
+
+`loc unsub` is unchanged in behaviour: kill by pidfile if alive, then `rm`. The
+difference is that the `rm` is now sufficient on its own. It was the hazard
+before — it removed the last handle to a listener the kill had missed; it is the
+eviction mechanism now.
+
+Certified by two cases in `conformance/run.sh`, both red against the pre-fix
+`core.sh` and green against this one:
+
+- *"listener exits within 5 s when its pidfile is removed"* sends no signal at
+  all — it subs, removes the pidfile, waits, and asserts that neither the
+  listener, nor its tap, nor its fifo is left.
+- *"repeated sub/unsub leaves no stale fifo behind"* walks the everyday path
+  three times and counts what is left in the run dir. Three cycles, not one:
+  a single leftover is a leftover, a rising count is a leak.

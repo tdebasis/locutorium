@@ -249,6 +249,7 @@ _loc_listener() { # <endpoint> <watch_pid> — the background body of `loc sub`.
   perh="$(loc_config wake_breaker_per_hour 60)"
   local dlog="$LOC_HOME/run/$me.delivery.log"
   local pending=0 last_wake=0 now m_e=0 m_n=0 h_e=0 h_n=0 tripped=""
+  local l1=""
   # Cleanup state lives in subshell globals, NOT locals: the EXIT trap fires
   # after this function returns, when its locals no longer exist (under set -u
   # that error aborted cleanup and left a stale pidfile behind). Own pid via
@@ -256,9 +257,35 @@ _loc_listener() { # <endpoint> <watch_pid> — the background body of `loc sub`.
   _L_ME="$me"; _L_TAP=""
   _L_SELF="$(exec sh -c 'echo "$PPID"')"
 
+  # THE PIDFILE IS THIS LISTENER'S LICENCE TO LIVE, and it writes its own.
+  #
+  # It used to be written by `loc sub` AFTER the fork, so under load a listener
+  # spent its whole first drain (~11s observed) with no entry naming it: an
+  # `unsub` landing in that window deleted a file that was not yet this
+  # listener's, killed nothing, and left a listener no later verb could see or
+  # reach. Writing it here, before the first depth check, closes that window —
+  # the entry exists from the listener's first instruction.
+  #
+  # Written to a temp name and moved, so a reader never sees a half-written
+  # file: the two-line format (pid, then `ps -o lstart=` start time) is a
+  # frozen contract with `_loc_listener_alive` and with out-of-tree readers,
+  # and a torn read of it is indistinguishable from a mismatch.
+  local pf="$LOC_HOME/run/$me.listener.pid"
+  { echo "$_L_SELF"; _loc_pid_start "$_L_SELF"; } > "$pf.tmp" \
+    && chmod 600 "$pf.tmp" && mv "$pf.tmp" "$pf"
+
   _cleanup() {
     [[ -n "${_L_TAP:-}" ]] && kill "$_L_TAP" 2>/dev/null
     [[ -n "${_L_SELF:-}" ]] && pkill -P "$_L_SELF" 2>/dev/null
+    # The fifo goes UNCONDITIONALLY. Its name carries this generation's pid, so
+    # it can never be a successor's, and the successor-protection guard below
+    # protects nothing for it. Guarding it anyway leaked one fifo per unsub —
+    # `unsub` removes the pidfile immediately after its kill, so the read below
+    # usually loses that race and the rm was skipped. With a shared fifo name
+    # that cost one stale file, reclaimed by the next generation; with a
+    # per-generation name they accumulate forever in a directory nobody prunes
+    # (measured over three sub/unsub cycles: 1, 2, 3).
+    rm -f "$LOC_HOME/run/${_L_ME:-nobody}.${_L_SELF:-nobody}.listen.fifo"
     # Remove the pidfile ONLY if it still names this listener. Between the
     # kill that ends this one and this trap running (a read tick can hold the
     # signal ~2s), a successor may already have registered and written its
@@ -268,7 +295,7 @@ _loc_listener() { # <endpoint> <watch_pid> — the background body of `loc sub`.
     # to the conformance breaker case.
     local pf="$LOC_HOME/run/${_L_ME:-nobody}.listener.pid"
     if [[ "$(sed -n '1p' "$pf" 2>/dev/null)" == "${_L_SELF:-}" ]]; then
-      rm -f "$pf" "$LOC_HOME/run/${_L_ME:-nobody}.listen.fifo"
+      rm -f "$pf"
     fi
   }
   trap '_cleanup; exit 0' TERM INT
@@ -334,6 +361,14 @@ _loc_listener() { # <endpoint> <watch_pid> — the background body of `loc sub`.
 
   while :; do
     _loc_session_dead "$wpid" "$me" && break
+    # THE POLICING PAIR (see the inner loop for the reasoning). Repeated here so
+    # a listener that is still inside its first drain — the window in which the
+    # old bug's orphans were made — leaves too, instead of only checking once
+    # its tap is up.
+    [[ -d "$LOC_HOME/run" ]] || break
+    [[ -e "$pf" ]] || break
+    l1="$(sed -n 1p "$pf" 2>/dev/null)" || l1="$_L_SELF"
+    [[ "$l1" == "$_L_SELF" ]] || break
     # wake-on-backlog: every start and every reconnect begins at the queue
     local depth; depth="$(provider_depth "$me" 2>/dev/null)"
     [[ "$depth" =~ ^[0-9]+$ ]] || depth=0
@@ -343,7 +378,11 @@ _loc_listener() { # <endpoint> <watch_pid> — the background body of `loc sub`.
     # process substitution would leak it: a subscriber on a quiet queue never
     # writes, so it never takes SIGPIPE when its reader vanishes, and every
     # reconnect cycle would orphan another immortal one.
-    local fifo="$LOC_HOME/run/$me.listen.fifo"
+    # Per-generation fifo name. Two generations can overlap by seconds (a dying
+    # listener's cleanup runs up to a read-tick after the kill), and on a shared
+    # path the survivor's `rm -f` would pull the fifo out from under the
+    # newcomer. Keyed by pid, they never contend.
+    local fifo="$LOC_HOME/run/$me.$_L_SELF.listen.fifo"
     rm -f "$fifo"; mkfifo "$fifo"
     provider_listen "$me" > "$fifo" 2>/dev/null &
     _L_TAP=$!
@@ -352,6 +391,30 @@ _loc_listener() { # <endpoint> <watch_pid> — the background body of `loc sub`.
       local line="" rcv=0
       IFS= read -t 2 -r -u 3 line || rcv=$?
       if _loc_session_dead "$wpid" "$me"; then break 2; fi
+      # THE POLICING PAIR: once per tick, the listener asks whether it is still
+      # the endpoint's listener, and leaves if it is demonstrably not.
+      #
+      # This is the positive signal the loop was missing. `kill -0 "$_L_TAP"`
+      # below cannot supply it: a `nats subscribe` whose server has died stays
+      # alive, so every timeout reads as a quiet tick and a listener waiting on
+      # an unlinked fifo waits forever (captured 2026-08-26). Two things on
+      # disk can say otherwise, and both are cheap:
+      #
+      #   the run dir  — gone means the house is gone (a teardown, an operator
+      #                  clearing state); nothing here has an endpoint to serve.
+      #   the pidfile  — absent, or naming somebody else, means this generation
+      #                  has been retired. That is what makes `unsub`'s `rm`
+      #                  sufficient on its own, whether or not its kill landed.
+      #
+      # ONE read per tick, and only a DEFINITE mismatch ends it: if the read
+      # itself fails we assume ourselves and try again next tick, because
+      # exiting on a transient error would kill a healthy listener for nothing.
+      # Erring toward staying is safe — a real retirement is still true in two
+      # seconds — while erring toward leaving loses attendance silently.
+      [[ -d "$LOC_HOME/run" ]] || break 2
+      [[ -e "$pf" ]] || break 2
+      l1="$(sed -n 1p "$pf" 2>/dev/null)" || l1="$_L_SELF"
+      [[ "$l1" == "$_L_SELF" ]] || break 2
       now="$(date +%s)"
       if (( rcv == 0 )) && [[ -z "$line" ]]; then
         continue                       # record separator: --raw prints a blank
@@ -400,8 +463,19 @@ loc_sub() { # loc_sub [--watch-pid <pid>] — register attendance
   ( _loc_listener "$me" "$wpid" ) >> "$rundir/$me.listener.log" 2>&1 &
   local pid=$!
   disown "$pid" 2>/dev/null || true
-  { echo "$pid"; _loc_pid_start "$pid"; } > "$rundir/$me.listener.pid"
-  chmod 600 "$rundir/$me.listener.pid"
+  # The listener writes its own pidfile, first thing (see _loc_listener). We
+  # only WAIT for it, because a listener that exists without an entry naming it
+  # is exactly the unreachable generation this fix is about — so registration
+  # is not complete until the entry is there, and if it never arrives we say so
+  # instead of printing "attending" over a listener nobody can reach.
+  local i=0 seen=""
+  while [[ $i -lt 10 ]]; do
+    seen="$(sed -n 1p "$rundir/$me.listener.pid" 2>/dev/null || true)"
+    if [[ "$seen" == "$pid" ]]; then break; fi
+    sleep 0.2
+    i=$((i+1))
+  done
+  [[ "$seen" == "$pid" ]] || loc_die "listener did not register"
   echo "attending → queue.$me (listener $pid)"
 }
 
@@ -413,6 +487,11 @@ loc_unsub() { # end attendance; the queue keeps holding messages regardless
     pid="$(sed -n 1p "$rundir/$me.listener.pid")"
     kill "$pid" 2>/dev/null || true
   fi
+  # Unchanged behaviour, but the `rm` is now SUFFICIENT ON ITS OWN: a listener
+  # polices its own pidfile every tick and leaves when the entry stops naming
+  # it. The kill above is only there to make the common case immediate. Before,
+  # this rm was the whole hazard — it removed the only handle to a listener the
+  # kill had missed, and that listener attended forever.
   rm -f "$rundir/$me.listener.pid"
   echo "not attending → queue.$me"
 }

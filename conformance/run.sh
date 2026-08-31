@@ -347,6 +347,75 @@ if ! grep -q '^alice' "$LOC_HOME/wakes.log"; then
 else bad "rapid unsub/resub leaves no orphan listener (no wake after final unsub)"; fi
 LOC_IDENTITY=alice loc read >/dev/null 2>&1   # drain the bait
 
+say "— the pidfile is the listener's licence to live —"
+# The pidfile is not a RECORD of the listener, it is its MANDATE: remove the
+# entry and the listener must go, with no signal sent to it at all. That is the
+# property `unsub` needs, because its kill can miss — the listener may be
+# seconds deep in a drain, or a generation the pidfile never named — and before
+# this, the rm that followed simply deleted the last handle to it. The captured
+# survivor (docs/NOTES-orphan-listener.md) held an unlinked fifo, a tap whose
+# server was dead, and no file on disk naming it: nothing could reach it again.
+#
+# No signal is sent here on purpose. A case that unsubs would pass on the kill
+# alone and prove nothing about the mandate.
+LOC_IDENTITY=alice loc sub >/dev/null 2>&1
+sleep 1
+rm -f "$LOC_HOME/run/alice.listener.pid"
+sleep 5
+# macOS pgrep has no -c. Count only listeners from THIS tree: the operator's own
+# deployment may be attending on the same machine and must not be counted, and
+# must certainly not be killed.
+survivors="$(pgrep -fl 'loc sub' 2>/dev/null | grep -c "$ROOT/bin/loc" || true)"
+survivors="${survivors:-0}"
+# Leaving is not enough: it must leave nothing behind. The fifo is named for the
+# generation that made it, so one left here is one left forever — nothing will
+# ever reuse that name. Counted by glob, not by ls|grep, so "no match" is simply
+# a path that does not exist.
+stale_fifos=0
+for f in "$LOC_HOME/run/"alice*.listen.fifo; do [[ -e "$f" ]] && stale_fifos=$((stale_fifos+1)); done
+if [[ "$survivors" == "0" ]] && ! pgrep -f "nats subscribe queue.alice" >/dev/null 2>&1 \
+   && [[ "$stale_fifos" == "0" ]]; then
+  ok "listener exits within 5 s when its pidfile is removed"
+else
+  bad "listener exits within 5 s when its pidfile is removed ($survivors listener(s) from this tree, tap $(pgrep -f 'nats subscribe queue.alice' >/dev/null && echo alive || echo dead), $stale_fifos stale fifo(s))"
+  rm -f "$LOC_HOME/run/"alice*.listen.fifo
+  # Do not leave the orphan behind for the next run to trip over. Again: only
+  # processes whose command line names this tree. Its tap goes with it — the
+  # listener's TERM trap reaps its own children.
+  pgrep -fl 'loc sub' 2>/dev/null | grep "$ROOT/bin/loc" | while IFS= read -r _p; do
+    kill "${_p%% *}" 2>/dev/null
+  done
+fi
+
+say "— attendance leaves nothing behind on disk —"
+# The case above covers the eviction path. This one covers the path the machine
+# actually walks a dozen times a day: plain sub, plain unsub. Both end in the
+# same cleanup, but they reach it differently, and a future change could easily
+# tidy the fifo on one path only — so the everyday path gets its own case.
+#
+# THREE CYCLES, because one proves nothing here. A single stale fifo is a
+# harmless leftover that the next generation would once have reclaimed; what
+# makes it a defect is that per-generation names never repeat, so the count
+# GROWS. Guarded, this counted 1, then 2, then 3.
+#
+# The sub count is asserted too: with no listeners ever started there would be
+# no fifos to leak, and this case would pass by doing nothing.
+subs_ok=0
+for _n in 1 2 3; do
+  LOC_IDENTITY=alice loc sub >/dev/null 2>&1 && subs_ok=$((subs_ok+1))
+  sleep 2
+  LOC_IDENTITY=alice loc unsub >/dev/null 2>&1
+  sleep 3
+done
+stale_fifos=0
+for f in "$LOC_HOME/run/"alice*.listen.fifo; do [[ -e "$f" ]] && stale_fifos=$((stale_fifos+1)); done
+if [[ "$stale_fifos" == "0" ]] && [[ "$subs_ok" == "3" ]]; then
+  ok "repeated sub/unsub leaves no stale fifo behind"
+else
+  bad "repeated sub/unsub leaves no stale fifo behind ($stale_fifos after 3 cycles, $subs_ok/3 subs registered)"
+  rm -f "$LOC_HOME/run/"alice*.listen.fifo
+fi
+
 say "— a stranded wake spool is recovered by the next read —"
 # A listener that died between fetching (acked = deleted from the queue) and
 # rendering leaves raw envelopes in its wake spool. Those bodies exist nowhere
