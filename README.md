@@ -152,6 +152,7 @@ are changing this repository, read [`AGENTS.md`](AGENTS.md).
 | [`AGENTS.md`](AGENTS.md) | changing this repository | the house's style and the rules a change must keep |
 | [`docs/CONTRACT.md`](docs/CONTRACT.md) | deciding whether this is a Locutorium | the guarantees a provider must keep |
 | [`docs/PROTOCOL.md`](docs/PROTOCOL.md) | building a provider or a client | how a message is shaped, and what a version number means |
+| [`docs/PRESENCE.md`](docs/PRESENCE.md) | asking who is here and what they are doing | how the house knows which agents exist, whether each is alive, and what it is working on |
 | [`docs/GLOSSARY.md`](docs/GLOSSARY.md) | new to the words | endpoint, queue, topic, attendance, spool, knock |
 | [`RELEASE.md`](RELEASE.md) | cutting a version | the steps, and what the number promises |
 
