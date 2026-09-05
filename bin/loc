@@ -32,7 +32,20 @@ if [[ ! -f "$LOC_ROOT/lib/core.sh" ]]; then
 fi
 # shellcheck source=lib/core.sh
 source "$LOC_ROOT/lib/core.sh"
-loc_load_provider
+
+# Not every verb needs a deployment, and `version` needs one least of all: it
+# answers from the VERSION file and touches no medium. Loading the provider
+# first made it die with "no provider configured" on any machine without a
+# config — which is to say, on the machine of anyone who had just cloned this
+# and wanted to check what they had. Usage is the same: telling someone what the
+# verbs are must not require them to have finished setting up.
+#
+# Found by CI, and only CI could have found it: every machine that has ever run
+# this by hand already had a deployment on it.
+case "${1:-}" in
+  version|""|-h|--help|help) : ;;
+  *) loc_load_provider ;;
+esac
 
 usage() {
   cat <<'EOF'
