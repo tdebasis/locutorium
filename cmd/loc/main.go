@@ -7,7 +7,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 
@@ -35,73 +37,99 @@ const usage = `usage: loc <verb> [args]
   version                   which loc this is
 `
 
-func main() {
-	args := os.Args[1:]
+// main is a wrapper and nothing else. Every decision, the exit code included,
+// is made in run, which writes to the streams it is handed — so the whole tool
+// can be driven by a test without a process boundary, and the process boundary
+// is not the only place its behaviour is pinned down.
+func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
+
+// errUsage means "you typed it wrong". It is the one failure that prints the
+// verb list on STDOUT rather than a `loc:` line on stderr: someone who has not
+// got the invocation right yet is reading, not scripting.
+var errUsage = errors.New("usage")
+
+// errNotImplemented is a verb this build knows the name of and cannot do. It
+// is an ordinary error, so it prints in the ordinary shape: naming it here is
+// what keeps "this build cannot" from being mistaken for "you typed it wrong".
+var errNotImplemented = errors.New("not implemented in this build")
+
+// run dispatches one invocation and returns the process's exit code.
+//
+// THIS TOOL HAS EXACTLY TWO OUTCOMES, and which one it is gets decided here
+// rather than wherever the problem was noticed: 0, or `loc: <what>` on stderr
+// and 1. Nothing below this function writes to stderr or picks a code, so the
+// error shape the conformance suite diffs cannot drift one verb at a time.
+func run(args []string, stdout, stderr io.Writer) int {
+	err := dispatch(args, stdout)
+	switch {
+	case err == nil:
+		return 0
+	case errors.Is(err, errUsage):
+		fmt.Fprint(stdout, usage)
+		return 1
+	default:
+		fmt.Fprintf(stderr, "loc: %v\n", err)
+		return 1
+	}
+}
+
+// dispatch runs one verb, writing whatever it has to say to w.
+func dispatch(args []string, w io.Writer) error {
 	if len(args) == 0 {
-		fmt.Print(usage)
-		os.Exit(1)
+		return errUsage
 	}
 	verb, rest := args[0], args[1:]
 
 	switch verb {
 	case "version":
+		// Answered before any provider is opened: `version` reads the VERSION
+		// file and touches no medium, so it must work on a machine that has
+		// just cloned this and has no deployment yet.
 		v, err := version()
 		if err != nil {
-			die(err)
+			return err
 		}
-		fmt.Printf("loc %s\n", v)
-		return
+		fmt.Fprintf(w, "loc %s\n", v)
+		return nil
 
 	case "send":
 		if len(rest) < 2 {
-			fmt.Print(usage)
-			os.Exit(1)
+			return errUsage
 		}
-		run(func(p provider.Provider) error { return send(p, rest[0], rest[1]) })
+		return withProvider(func(p provider.Provider) error { return send(p, w, rest[0], rest[1]) })
 
 	case "publish":
 		if len(rest) < 2 {
-			fmt.Print(usage)
-			os.Exit(1)
+			return errUsage
 		}
-		run(func(p provider.Provider) error { return publish(p, rest[0], rest[1]) })
+		return withProvider(func(p provider.Provider) error { return publish(p, w, rest[0], rest[1]) })
 
 	case "topics":
-		run(func(p provider.Provider) error { return p.Topics(os.Stdout) })
+		return withProvider(func(p provider.Provider) error { return p.Topics(w) })
 
 	case "status":
-		run(func(p provider.Provider) error { return p.Status(os.Stdout) })
+		return withProvider(func(p provider.Provider) error { return p.Status(w) })
 
 	// The read path and the listener are not in this binary yet. They are
-	// named here rather than falling through to usage, so that "this build
-	// cannot" is never mistaken for "you typed it wrong".
+	// named here rather than falling through to usage.
 	case "read", "sub", "unsub", "registry", "watch", "doctor":
-		fmt.Fprintln(os.Stderr, "loc: not implemented in this build")
-		os.Exit(1)
+		return errNotImplemented
 
 	default:
-		fmt.Print(usage)
-		os.Exit(1)
+		return errUsage
 	}
 }
 
-// run opens the configured provider, hands it to one verb, and turns any
-// failure into the single error shape this tool has: `loc: <what>` on stderr,
-// exit 1.
-func run(fn func(provider.Provider) error) {
+// withProvider opens the configured provider and hands it to one verb. Any
+// failure — opening the medium, or the verb itself — comes back as an error
+// for run to turn into the single shape this tool has.
+func withProvider(fn func(provider.Provider) error) error {
 	p, err := provider.Open(config.Get("provider", ""))
 	if err != nil {
-		die(err)
+		return err
 	}
 	defer p.Close()
-	if err := fn(p); err != nil {
-		die(err)
-	}
-}
-
-func die(err error) {
-	fmt.Fprintf(os.Stderr, "loc: %v\n", err)
-	os.Exit(1)
+	return fn(p)
 }
 
 // send puts one envelope in one endpoint's queue.
@@ -110,7 +138,7 @@ func die(err error) {
 // registry, then attendance. Everything that can refuse a message does so
 // BEFORE the envelope exists, so a refusal never leaves a half-sent thing
 // behind.
-func send(p provider.Provider, to, body string) error {
+func send(p provider.Provider, w io.Writer, to, body string) error {
 	from, err := loc.Identity()
 	if err != nil {
 		return err
@@ -139,7 +167,7 @@ func send(p provider.Provider, to, body string) error {
 		return err
 	}
 	loc.Nudge(to, "[LOC] 1 new → loc read")
-	fmt.Printf("sent → queue.%s\n", to)
+	fmt.Fprintf(w, "sent → queue.%s\n", to)
 	return nil
 }
 
@@ -149,7 +177,7 @@ func send(p provider.Provider, to, body string) error {
 var topicName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
 // publish speaks one envelope in a topic and rings whoever was named.
-func publish(p provider.Provider, topic, body string) error {
+func publish(p provider.Provider, w io.Writer, topic, body string) error {
 	if !topicName.MatchString(topic) {
 		return fmt.Errorf("invalid topic name '%s'", topic)
 	}
@@ -173,6 +201,6 @@ func publish(p provider.Provider, topic, body string) error {
 			loc.Nudge(m, fmt.Sprintf("[LOC] 1 new in #%s → loc read", topic))
 		}
 	}
-	fmt.Printf("published → #%s\n", topic)
+	fmt.Fprintf(w, "published → #%s\n", topic)
 	return nil
 }
