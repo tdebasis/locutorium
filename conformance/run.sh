@@ -14,13 +14,18 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Which `loc` the suite drives. Defaults to the tree's own bin/, so an ordinary
+# run is unchanged. The Go port points this at its build output and runs THIS
+# IDENTICAL FILE against the new binary — the suite is the gate for both
+# implementations, so it must not name one of them.
+LOC_BIN_DIR="${LOC_BIN_DIR:-$ROOT/bin}"
 PORT=$(( 20000 + RANDOM % 20000 ))
 # The operator's real house, remembered BEFORE the scratch one replaces it: the
 # cleanliness check reads its vocabulary list from there, so the suite must
 # still check the tree against the deployment the machine actually runs.
 REAL_LOC_HOME="${LOC_HOME:-$HOME/.locutorium}"
 export LOC_HOME="$(mktemp -d)/deployment"
-PATH="$ROOT/bin:$PATH"
+PATH="$LOC_BIN_DIR:$PATH"
 SERVER_PID=""
 PASS=0; FAIL=0
 
@@ -194,12 +199,12 @@ say "— the CLI finds its own house —"
 L="$(dirname "$LOC_HOME")/links"; mkdir -p "$L/bin"
 # Relative links are resolved by the kernel against PHYSICAL paths; a relpath computed
 # from a logical path under a symlinked directory dangles before loc ever runs.
-rel="$(python3 -c 'import os,sys;print(os.path.relpath(os.path.realpath(sys.argv[1]),os.path.realpath(sys.argv[2])))' "$ROOT/bin/loc" "$L")"
+rel="$(python3 -c 'import os,sys;print(os.path.relpath(os.path.realpath(sys.argv[1]),os.path.realpath(sys.argv[2])))' "$LOC_BIN_DIR/loc" "$L")"
 ln -s "$rel" "$L/loc-rel"
 check "a relative symlink to loc finds its house" env LOC_IDENTITY=alice "$L/loc-rel" topics
-ln -s "$ROOT/bin/loc" "$L/hop1"; ln -s hop1 "$L/hop2"
+ln -s "$LOC_BIN_DIR/loc" "$L/hop1"; ln -s hop1 "$L/hop2"
 check "a two-hop symlink to loc finds its house" env LOC_IDENTITY=alice "$L/hop2" topics
-cp "$ROOT/bin/loc" "$L/loc-copy"
+cp "$LOC_BIN_DIR/loc" "$L/loc-copy"
 check_not "a copied loc refuses to run" env LOC_IDENTITY=alice "$L/loc-copy" topics
 copy_out="$(env LOC_IDENTITY=alice "$L/loc-copy" topics 2>&1 || true)"
 if grep -q "copy, not a link" <<<"$copy_out"; then ok "…and says why (copy, not a link)"; else bad "…and says why (copy, not a link)"; fi
@@ -365,7 +370,7 @@ sleep 5
 # macOS pgrep has no -c. Count only listeners from THIS tree: the operator's own
 # deployment may be attending on the same machine and must not be counted, and
 # must certainly not be killed.
-survivors="$(pgrep -fl 'loc sub' 2>/dev/null | grep -c "$ROOT/bin/loc" || true)"
+survivors="$(pgrep -fl 'loc sub' 2>/dev/null | grep -c "$LOC_BIN_DIR/loc" || true)"
 survivors="${survivors:-0}"
 # Leaving is not enough: it must leave nothing behind. The fifo is named for the
 # generation that made it, so one left here is one left forever — nothing will
@@ -382,7 +387,7 @@ else
   # Do not leave the orphan behind for the next run to trip over. Again: only
   # processes whose command line names this tree. Its tap goes with it — the
   # listener's TERM trap reaps its own children.
-  pgrep -fl 'loc sub' 2>/dev/null | grep "$ROOT/bin/loc" | while IFS= read -r _p; do
+  pgrep -fl 'loc sub' 2>/dev/null | grep "$LOC_BIN_DIR/loc" | while IFS= read -r _p; do
     kill "${_p%% *}" 2>/dev/null
   done
 fi
