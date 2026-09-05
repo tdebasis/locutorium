@@ -1,3 +1,9 @@
 # Deployment data never lives in this tree — it belongs to $LOC_HOME.
 *.log
 .DS_Store
+
+# The Go build tree. Binaries are artifacts, not source.
+/build/
+
+# Dependencies come from the module proxy, verified against go.sum.
+/vendor/
