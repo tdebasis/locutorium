@@ -52,7 +52,45 @@ jobs:
         run: go vet ./...
       - name: test
         if: steps.probe.outputs.present == 'true'
-        run: go test ./...
+        run: go test -cover -coverprofile=coverage.out ./... | tee /tmp/cov.txt
+
+      # Reported, deliberately not gated. A coverage threshold gets satisfied by
+      # writing tests that move a number; the gate here is the conformance suite,
+      # which is the specification. This is for seeing what has no evidence
+      # behind it, which is a different question from whether to merge.
+      - name: coverage
+        if: steps.probe.outputs.present == 'true'
+        run: |
+          {
+            echo '## Go coverage'
+            echo
+            echo '```'
+            grep 'coverage:' /tmp/cov.txt || true
+            echo '```'
+            echo
+            echo '<details><summary>Functions below 100%</summary>'
+            echo
+            echo '```'
+            go tool cover -func=coverage.out | awk '$3+0 < 100'
+            echo '```'
+            echo
+            echo '</details>'
+            echo
+            echo '_Low numbers in `cmd/loc` and `internal/provider/nats` are expected:'
+            echo 'those paths are driven by the conformance suite, which produces no'
+            echo 'coverage figure of its own._'
+          } >> "$GITHUB_STEP_SUMMARY"
+          go tool cover -html=coverage.out -o coverage.html
+
+      - name: keep the coverage report
+        if: steps.probe.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-coverage
+          path: |
+            coverage.html
+            coverage.out
+          retention-days: 14
 
   conformance:
     name: conformance
