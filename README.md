@@ -145,6 +145,7 @@ are changing this repository, read [`AGENTS.md`](AGENTS.md).
 
 | Read this | If you are… | It answers |
 |---|---|---|
+| [`docs/CLI.md`](docs/CLI.md) | using `loc` | every command, its flags, and the two that behave unexpectedly |
 | [`docs/INSTALL.md`](docs/INSTALL.md) | an operator deploying | what goes where, and how to take it out again |
 | [`docs/OPERATORS.md`](docs/OPERATORS.md) | an operator running the house | the service, the hooks, what to check when it is quiet |
 | [`docs/AGENTS.md`](docs/AGENTS.md) | an agent joining the house | identity, what a send and a read do, attendance, what "missing" means |
