@@ -40,7 +40,7 @@ jobs:
           fi
           changed="$(git diff --name-only "$base" "$head")"
           echo "changed files:"; echo "$changed" | sed 's/^/  /'
-          if echo "$changed" | grep -qE '^(bin/|lib/|cmd/|internal/|go\.(mod|sum)$|conformance/|providers/|install\.sh$)'; then
+          if echo "$changed" | grep -qE '^(bin/|lib/|cmd/|internal/|go\.(mod|sum)$|conformance/|providers/|install\.sh$|README\.md$)'; then
             echo "product=true" >> "$GITHUB_OUTPUT"
           else
             echo "product=false" >> "$GITHUB_OUTPUT"
@@ -112,6 +112,38 @@ jobs:
             echo 'coverage figure of its own._'
           } >> "$GITHUB_STEP_SUMMARY"
           go tool cover -html=coverage.out -o coverage.html
+
+      # A RATCHET, not a target. The floors are what these packages measure
+      # today; the check is that they do not fall. Nobody invented these numbers,
+      # so there is nothing to write a fake test toward — the only way to trip it
+      # is to actually remove coverage.
+      #
+      # Only the packages where a unit test is the right instrument. cmd/loc and
+      # internal/provider/nats read near zero because the conformance suite drives
+      # them end to end against a live server, and Go cannot see that. Gating the
+      # total would push somebody into writing pretend unit tests for NATS
+      # plumbing that the suite already covers properly.
+      - name: coverage must not fall
+        if: steps.probe.outputs.present == 'true'
+        run: |
+          fail=0
+          # The per-package figure go test already printed. Averaging the
+          # per-function percentages from `cover -func` is NOT package coverage
+          # — it weights a one-line function the same as a hundred-line one.
+          check() {           # <package> <floor>
+            got=$(grep "locutorium/$1\b" /tmp/cov.txt | sed -n 's/.*coverage: \([0-9.]*\)% of statements.*/\1/p' | head -1)
+            if [ -z "$got" ]; then
+              echo "::error::no coverage figure for $1"; fail=1; return
+            fi
+            if awk -v g="$got" -v f="$2" 'BEGIN{exit !(g+0 < f+0)}'; then
+              echo "::error::$1 coverage ${got}% is below its floor of $2%"; fail=1
+            else
+              echo "  $1: ${got}% (floor $2%)"
+            fi
+          }
+          check internal/loc    88
+          check internal/config 95
+          exit $fail
 
       - name: keep the coverage report
         if: steps.probe.outputs.present == 'true'
