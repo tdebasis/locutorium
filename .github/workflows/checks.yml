@@ -107,22 +107,24 @@ jobs:
             echo
             echo '</details>'
             echo
-            echo '_Low numbers in `cmd/loc` and `internal/provider/nats` are expected:'
-            echo 'those paths are driven by the conformance suite, which produces no'
-            echo 'coverage figure of its own._'
+            echo '_Every package is gated by a floor just under its current figure._'
+            echo 'The conformance suite is still the real gate; this is the narrower'
+            echo 'question of which lines nothing has executed._'
           } >> "$GITHUB_STEP_SUMMARY"
           go tool cover -html=coverage.out -o coverage.html
 
-      # A RATCHET, not a target. The floors are what these packages measure
-      # today; the check is that they do not fall. Nobody invented these numbers,
-      # so there is nothing to write a fake test toward — the only way to trip it
-      # is to actually remove coverage.
+      # A RATCHET, not a target. The floors are a little under what each
+      # package measures today; the check is that they do not fall. Nobody
+      # invented these numbers from a standard, so there is nothing to write a
+      # pretend test toward — the only way to trip it is to remove coverage.
       #
-      # Only the packages where a unit test is the right instrument. cmd/loc and
-      # internal/provider/nats read near zero because the conformance suite drives
-      # them end to end against a live server, and Go cannot see that. Gating the
-      # total would push somebody into writing pretend unit tests for NATS
-      # plumbing that the suite already covers properly.
+      # Every package is gated now. An earlier version of this gated only two,
+      # on the grounds that cmd/loc and internal/provider/nats were driven end
+      # to end by the conformance suite and could not be unit-tested. That was
+      # true of how they were WRITTEN, not of what was possible: cmd/loc called
+      # os.Exit from leaf functions so nothing was reachable from a test, and
+      # the provider had no in-process server to talk to. Both were fixed rather
+      # than excused, and the exemption went with them.
       - name: coverage must not fall
         if: steps.probe.outputs.present == 'true'
         run: |
@@ -141,8 +143,11 @@ jobs:
               echo "  $1: ${got}% (floor $2%)"
             fi
           }
-          check internal/loc    88
-          check internal/config 95
+          check cmd/loc                93
+          check internal/config        98
+          check internal/loc           88
+          check internal/provider      95
+          check internal/provider/nats 94
           exit $fail
 
       - name: keep the coverage report
