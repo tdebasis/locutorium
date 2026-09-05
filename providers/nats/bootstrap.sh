@@ -38,6 +38,7 @@ bcrypt_for() { nats server passwd -p "$1"; }
 cat > "$LOC_HOME/config" <<EOF
 provider = nats
 nats_url = nats://127.0.0.1:4222
+monitor_url = http://127.0.0.1:8222
 topic_window = 7d
 EOF
 printf '%s\n' "${ENDPOINTS[@]}" > "$LOC_HOME/endpoints"
@@ -79,6 +80,16 @@ cat > "$LOC_HOME/nats-server.conf" <<EOF
 # Loopback only: this instance is the inner room. Nothing here listens
 # beyond the machine.
 listen: 127.0.0.1:4222
+# The monitoring port, loopback like everything else. The registry verb
+# reads who is attending from the server's own connection table, so
+# without this the verb exists, is documented, and cannot work.
+#
+# NO BACKTICKS ANYWHERE IN THIS HEREDOC. It is unquoted so that LOC_HOME
+# expands, which also makes backticks command substitution: a comment
+# naming a command in backticks RUNS it and pastes its output into the
+# generated config. That happened here, and the config it produced held a
+# live listing of the operator's own endpoints.
+http: 127.0.0.1:8222
 server_name: locutorium
 
 jetstream {
