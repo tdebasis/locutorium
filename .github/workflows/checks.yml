@@ -16,6 +16,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  scope:
+    name: scope
+    runs-on: ubuntu-latest
+    outputs:
+      product: ${{ steps.diff.outputs.product }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        # conformance runs on macOS, which bills at ten times the Linux rate and
+        # is the only expensive thing here. It exists to test the PRODUCT, so a
+        # change that touches no product file does not need it. Doc-only and
+        # CI-only pull requests were each paying four minutes of macOS to prove
+        # something they could not have broken.
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          if [ -z "$base" ]; then
+            echo "product=true" >> "$GITHUB_OUTPUT"   # a push to main: always
+            exit 0
+          fi
+          changed="$(git diff --name-only "$base" "$head")"
+          echo "changed files:"; echo "$changed" | sed 's/^/  /'
+          if echo "$changed" | grep -qE '^(bin/|lib/|cmd/|internal/|go\.(mod|sum)$|conformance/|providers/|install\.sh$)'; then
+            echo "product=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "product=false" >> "$GITHUB_OUTPUT"
+            echo "no product files touched — conformance not warranted"
+          fi
+
   hygiene:
     name: hygiene
     runs-on: ubuntu-latest
@@ -94,6 +125,8 @@ jobs:
 
   conformance:
     name: conformance
+    needs: scope
+    if: needs.scope.outputs.product == 'true'
     # macOS on purpose: the suite drives BSD `sed -i ''` and `ps -o lstart=`,
     # and the pidfile's second line is that exact BSD string by contract. A
     # Linux runner would not be testing the thing this house actually ships.
