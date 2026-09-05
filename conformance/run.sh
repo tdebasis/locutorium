@@ -20,6 +20,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # implementations, so it must not name one of them.
 LOC_BIN_DIR="${LOC_BIN_DIR:-$ROOT/bin}"
 PORT=$(( 20000 + RANDOM % 20000 ))
+# The monitor port moves with the client port: a scratch server must not
+# collide with the operator's own deployment on the default 8222.
+MPORT=$(( PORT + 1 ))
 # The operator's real house, remembered BEFORE the scratch one replaces it: the
 # cleanliness check reads its vocabulary list from there, so the suite must
 # still check the tree against the deployment the machine actually runs.
@@ -49,7 +52,8 @@ trap cleanup EXIT
 
 say "conformance: scratch deployment on port $PORT"
 "$ROOT/providers/nats/bootstrap.sh" alice bob carol >/dev/null
-sed -i '' "s|127.0.0.1:4222|127.0.0.1:$PORT|" "$LOC_HOME/config" "$LOC_HOME/nats-server.conf"
+sed -i '' -e "s|127.0.0.1:4222|127.0.0.1:$PORT|" -e "s|127.0.0.1:8222|127.0.0.1:$MPORT|" \
+  "$LOC_HOME/config" "$LOC_HOME/nats-server.conf"
 nats-server -c "$LOC_HOME/nats-server.conf" >"$LOC_HOME/server.log" 2>&1 &
 SERVER_PID=$!
 sleep 1
@@ -253,6 +257,17 @@ check "registration starts a live listener (verified pid, not file existence)" \
   test -f "$LOC_HOME/run/alice.listener.pid"
 check "registration invoked the channel-capture hook" \
   grep -qx "alice" "$LOC_HOME/registers.log"
+# The verb is documented in four places and, until the deployment gained a
+# monitor port, could not work on anything bootstrap.sh produced — it worked
+# only where somebody had hand-edited the server config. Nothing tested it, so
+# nothing said so. Alice is attending by now, so registry must name her.
+reg_out="$(env LOC_IDENTITY=alice loc registry 2>&1 || true)"
+if grep -q 'alice' <<<"$reg_out"; then
+  ok "registry names an attending endpoint on a freshly bootstrapped deployment"
+else
+  bad "registry names an attending endpoint on a freshly bootstrapped deployment"
+  say "    registry said: $reg_out"
+fi
 env LOC_IDENTITY=bob loc send alice "wake-me" >/dev/null 2>&1
 sleep 2
 check "wake hook fired on arrival (first message wakes instantly)" \
@@ -442,9 +457,10 @@ say "— the front page shows what the tool prints —"
 # replays its five commands in a fresh house (ada/bob/carol, own port, own server)
 # and diffs the output against the block with timestamps masked. If the tool's
 # output ever moves, the page moves with it or this fails.
-DEMO_HOME="$(mktemp -d)/house"; DEMO_PORT=$(( 20000 + RANDOM % 20000 ))
+DEMO_HOME="$(mktemp -d)/house"; DEMO_PORT=$(( 20000 + RANDOM % 20000 )); DEMO_MPORT=$(( DEMO_PORT + 1 ))
 LOC_HOME="$DEMO_HOME" "$ROOT/providers/nats/bootstrap.sh" ada bob carol >/dev/null
-sed -i '' "s|127.0.0.1:4222|127.0.0.1:$DEMO_PORT|" "$DEMO_HOME/config" "$DEMO_HOME/nats-server.conf"
+sed -i '' -e "s|127.0.0.1:4222|127.0.0.1:$DEMO_PORT|" -e "s|127.0.0.1:8222|127.0.0.1:$DEMO_MPORT|" \
+  "$DEMO_HOME/config" "$DEMO_HOME/nats-server.conf"
 nats-server -c "$DEMO_HOME/nats-server.conf" >"$DEMO_HOME/server.log" 2>&1 &
 DEMO_PID=$!; sleep 1
 LOC_HOME="$DEMO_HOME" LOC_IDENTITY=admin loc doctor --init >/dev/null 2>&1
