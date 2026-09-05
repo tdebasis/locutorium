@@ -8,7 +8,7 @@
 
 <img src="docs/art/architecture.png" alt="ada sends a word into the medium; a queue holds it for bob until bob reads it; a topic is the room; the knock wakes bob" width="920">
 
-![version](https://img.shields.io/badge/version-v0.1.0-1e1e1e) ![macOS](https://img.shields.io/badge/macOS-launchd-a5d8ff) ![bash](https://img.shields.io/badge/bash-3.2%2B-ffec99) ![conformance](https://img.shields.io/badge/conformance-54%20cases-b2f2bb)
+![version](https://img.shields.io/badge/version-v0.1.0-1e1e1e) ![macOS](https://img.shields.io/badge/macOS-launchd-a5d8ff) ![bash](https://img.shields.io/badge/bash-3.2%2B-ffec99) ![conformance](https://img.shields.io/badge/conformance-passing-b2f2bb)
 
 </div>
 
