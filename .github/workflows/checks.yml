@@ -1,0 +1,73 @@
+# The gate. `docs/CONTRACT.md`: a provider is a Locutorium provider iff
+# conformance/run.sh passes against it — so the suite is not a test job here,
+# it is the specification being executed. Everything else is hygiene around it.
+name: checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hygiene:
+    name: hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # check-version asks git whether HEAD is tagged
+      - name: written for strangers
+        run: bash conformance/check-clean.sh
+      - name: one version, agreed everywhere
+        run: bash conformance/check-version.sh
+
+  go:
+    name: go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: probe
+        # There is no Go in the tree until the port lands. Skipping is correct;
+        # failing would make every bash-only change red for no reason.
+        run: |
+          if [ -f go.mod ]; then echo "present=true" >> "$GITHUB_OUTPUT"
+          else echo "present=false" >> "$GITHUB_OUTPUT"; echo "no go.mod yet — skipping"; fi
+      - uses: actions/setup-go@v5
+        if: steps.probe.outputs.present == 'true'
+        with:
+          go-version: '1.27'
+          cache: true
+      - name: build
+        if: steps.probe.outputs.present == 'true'
+        run: go build ./...
+      - name: vet
+        if: steps.probe.outputs.present == 'true'
+        run: go vet ./...
+      - name: test
+        if: steps.probe.outputs.present == 'true'
+        run: go test ./...
+
+  conformance:
+    name: conformance
+    # macOS on purpose: the suite drives BSD `sed -i ''` and `ps -o lstart=`,
+    # and the pidfile's second line is that exact BSD string by contract. A
+    # Linux runner would not be testing the thing this house actually ships.
+    runs-on: macos-14
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: the medium
+        run: |
+          brew install nats-server
+          brew install nats-io/nats-tools/nats
+      - name: the suite is the specification
+        # It boots its own server on a random port in its own temp LOC_HOME and
+        # tears both down, so nothing here needs a service or a fixture.
+        run: bash conformance/run.sh
