@@ -2,7 +2,6 @@ package nats
 
 import (
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	natsgo "github.com/nats-io/nats.go"
 
 	"github.com/tdebasis/locutorium/internal/loc"
+	"github.com/tdebasis/locutorium/internal/loctest"
 	"github.com/tdebasis/locutorium/internal/provider"
 )
 
@@ -38,7 +38,7 @@ const topicWindow = 7 * 24 * time.Hour
 // Storage is memory rather than file: the retention semantics under test are
 // identical, and nothing survives the test that way.
 type harness struct {
-	srv       *natsserver.Server
+	srv       *loctest.Server
 	home      string
 	url       string
 	endpoints []string
@@ -50,32 +50,16 @@ func newHarness(t *testing.T, endpoints ...string) *harness {
 	home := t.TempDir()
 	users := append([]string{"admin"}, endpoints...)
 
-	opts := &natsserver.Options{
-		Host:      "127.0.0.1",
-		Port:      -1, // ephemeral: the kernel picks, we ask afterwards
-		JetStream: true,
-		StoreDir:  t.TempDir(),
-		NoLog:     true,
-		NoSigs:    true,
-	}
+	// The server boot, the admin observer, closedPort and write are shared with
+	// the CLI-level presence suite through internal/loctest; the stream shapes
+	// and the flat single-password user set are this package's own.
+	uu := make([]*natsserver.User, 0, len(users))
 	for _, u := range users {
-		opts.Users = append(opts.Users, &natsserver.User{Username: u, Password: testPassword})
+		uu = append(uu, &natsserver.User{Username: u, Password: testPassword})
 	}
-	srv, err := natsserver.NewServer(opts)
-	if err != nil {
-		t.Fatalf("start scratch server: %v", err)
-	}
-	go srv.Start()
-	if !srv.ReadyForConnections(10 * time.Second) {
-		srv.Shutdown()
-		t.Fatal("scratch server did not become ready")
-	}
-	t.Cleanup(func() {
-		srv.Shutdown()
-		srv.WaitForShutdown()
-	})
+	srv := loctest.Boot(t, uu, false)
 
-	h := &harness{srv: srv, home: home, url: srv.ClientURL(), endpoints: endpoints}
+	h := &harness{srv: srv, home: home, url: srv.URL, endpoints: endpoints}
 
 	write(t, filepath.Join(home, "config"), "nats_url = "+h.url+"\n")
 	write(t, filepath.Join(home, "endpoints"), strings.Join(endpoints, "\n")+"\n")
@@ -128,16 +112,7 @@ func (h *harness) initStreams(t *testing.T) {
 // here reaches through the provider it is checking.
 func (h *harness) admin(t *testing.T) (*natsgo.Conn, natsgo.JetStreamContext) {
 	t.Helper()
-	nc, err := natsgo.Connect(h.url, natsgo.UserInfo("admin", testPassword), natsgo.Timeout(5*time.Second))
-	if err != nil {
-		t.Fatalf("admin connect: %v", err)
-	}
-	js, err := nc.JetStream()
-	if err != nil {
-		nc.Close()
-		t.Fatalf("admin jetstream: %v", err)
-	}
-	return nc, js
+	return h.srv.Admin(t, "admin", testPassword)
 }
 
 // as returns a connected provider speaking as id, closed at test end.
@@ -151,25 +126,14 @@ func (h *harness) as(t *testing.T, id string) *Provider {
 
 func write(t *testing.T, path, content string) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
-	}
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatalf("write %s: %v", path, err)
-	}
+	loctest.Write(t, path, content)
 }
 
 // closedPort returns a loopback address nothing is listening on. Used for the
 // unreachable-medium cases, so they never hit a real server by accident.
 func closedPort(t *testing.T) string {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("reserve a port: %v", err)
-	}
-	addr := l.Addr().String()
-	l.Close()
-	return "nats://" + addr
+	return loctest.ClosedPort(t)
 }
 
 // ---------------------------------------------------------------- New/Close
