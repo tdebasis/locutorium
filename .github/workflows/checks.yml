@@ -179,7 +179,7 @@ jobs:
       # where there is a conversation to comment on.
       - name: comment coverage on the pull request
         if: github.event_name == 'pull_request' && steps.probe.outputs.present == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
           COVERAGE_TITLE: 'Go coverage'
           COVERAGE_NOTE: 'Reported, not gated. The conformance suite is the gate; the per-package ratchet guards against coverage falling.'
