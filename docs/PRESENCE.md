@@ -113,6 +113,14 @@ More than one host may run on a machine, sharing a broker. Namespacing by instan
 called `scribe` without either being able to receive the other's mail. Relying on everyone choosing
 distinct names does not survive somebody copying a configuration.
 
+Each segment — the instance and the agent — is `[a-z0-9-]+`, with exactly one dot between them and the
+underscore barred. That makes the dots-to-underscores substitution used for backing-object names
+(below) **injective by construction**: no endpoint can contain the `_` the substitution introduces, so
+two endpoints can never collide on a backing name. And an endpoint always appears in this
+fully-qualified `<instance>.<agent>` form — on the wire, in a CLI argument, in an event payload, in a
+registry reply. A bare agent name is never a valid endpoint: a consumer watching two instances could
+not tell two agents of the same name apart.
+
 ### Where things are published
 
 | Purpose | Subject |
@@ -186,7 +194,7 @@ an agent comes from here or from the registry.
   "id": "ev_7f3a91c2",
   "ts": "2026-01-14T09:12:04.318Z",
   "kind": "agent.subscribe",
-  "endpoint": "scribe",
+  "endpoint": "workshop.scribe",
   "instance": "workshop",
   "agent":   { "type": "acme-cli", "version": "3.2.0" },
   "process": { "pid": 48213, "started": "2026-01-14T09:12:04.006Z" },
@@ -198,6 +206,10 @@ an agent comes from here or from the registry.
 `process.started` is the operating system's start time for that pid. The pair `(pid, started)` is the
 identity; the number alone is not, because operating systems reuse them.
 
+The `endpoint` field is the fully-qualified `<instance>.<agent>`; the separate `instance` field is a
+convenience for a consumer that wants the prefix without parsing, and it must equal that prefix. Later
+events carry only `endpoint`, and the instance is read from it.
+
 **`agent.unsubscribe`**
 
 ```json
@@ -205,7 +217,7 @@ identity; the number alone is not, because operating systems reuse them.
   "id": "ev_a02d5518",
   "ts": "2026-01-14T11:47:52.902Z",
   "kind": "agent.unsubscribe",
-  "endpoint": "scribe",
+  "endpoint": "workshop.scribe",
   "reason": "expiry"
 }
 ```
@@ -217,7 +229,7 @@ added as **values here**, never as new event kinds.
 
 ```json
 { "id": "ev_c41b0d7e", "ts": "2026-01-14T09:31:20.114Z",
-  "kind": "activity.start", "endpoint": "scribe" }
+  "kind": "activity.start", "endpoint": "workshop.scribe" }
 ```
 
 **`tool.pre`** and **`tool.post`** — `tool` names what is being run. `tool.post` references the
@@ -226,10 +238,10 @@ which finish belongs to which start.
 
 ```json
 { "id": "ev_15c8ff40", "ts": "2026-01-14T09:31:21.006Z",
-  "kind": "tool.pre",  "endpoint": "scribe", "tool": "shell" }
+  "kind": "tool.pre",  "endpoint": "workshop.scribe", "tool": "shell" }
 
 { "id": "ev_9be271aa", "ts": "2026-01-14T09:31:23.882Z",
-  "kind": "tool.post", "endpoint": "scribe", "tool": "shell",
+  "kind": "tool.post", "endpoint": "workshop.scribe", "tool": "shell",
   "refs": ["ev_15c8ff40"] }
 ```
 
@@ -308,6 +320,11 @@ window passes; a dropped `tool.pre` costs nothing; a dropped `agent.subscribe` i
 and is recoverable by asking the registry.
 
 **If the medium is unavailable, the operation returns an error immediately. There is no retry.**
+
+**`emit` is the sole exception**, for the reason above: it drops the event and exits 0 rather than
+erroring, because it runs inside the agent's hook and must never make the agent wait. No other verb
+inherits this carve-out — for every other operation an unavailable medium is an immediate, non-zero
+error.
 
 Whether to start the agent anyway, try again, or refuse outright is policy, and policy belongs to
 whoever is calling. Locutorium reports the failure accurately and does not decide what should be done
@@ -397,6 +414,11 @@ understand and can apply a reply exactly as it would apply the events it missed.
 The host answers because the host holds the registrations — it created them. **The bus stores
 nothing**; if no host is running, the request goes unanswered, which is the truthful reply.
 
+With the instance omitted, `registry` means the caller's **own** instance, taken from its configured
+identity; a caller with no identity configured is refused — non-zero, with a message saying so. There
+is no "list every instance" in the inner parlor: each instance is a separate request subject with its
+own host, so asking for all of them is undefined.
+
 The same request is what a person's tooling uses to list registered agents with their details.
 
 **After a host restart** the host rebuilds by asking the broker which endpoints in its namespace are
@@ -429,7 +451,7 @@ omitted the publish time is used, which is only correct for something reporting 
 
 | Operation | Effect |
 |---|---|
-| `registry [<instance>] [--json]` | Lists current registrations with their details — type, version, process, display, working directory, and how long each has been registered. This is the request described in *Who is here right now*. |
+| `registry [<instance>] [--json]` | Lists current registrations with their details — type, version, process, display, working directory, and how long each has been registered. With `<instance>` omitted it means the caller's configured instance; with no identity configured it refuses (non-zero). Listing every instance is undefined in the inner parlor. This is the request described in *Who is here right now*. |
 | `watch [<instance>]` | Follows the event stream, printing events as they arrive. Read-only. |
 | `status <endpoint>` | Reports one agent: registered or not, process alive or not, and its current activity state with the reason for that conclusion. |
 
