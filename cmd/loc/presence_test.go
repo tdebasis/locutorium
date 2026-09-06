@@ -261,6 +261,24 @@ func checkOnStderr(t *testing.T, pat string, args ...string) {
 	}
 }
 
+// checkRefusalNamingIncumbent asserts a refusal that names the incumbent
+// CONCRETELY: a non-zero exit, the incumbent's pid digits on stderr, AND a
+// start-time-shaped token. A bare "already held" with no pid cannot satisfy it —
+// which is the whole point, since the spec says the refusal names the incumbent's
+// pid AND start time (PRESENCE.md §One agent per endpoint; PR #12/#16 text). The
+// exact start-time rendering is the implementation's to choose, so only its shape
+// is asserted, not a byte-exact value.
+var startTimeShape = regexp.MustCompile(`\b(19|20)\d\d\b|\d{4}-\d{2}-\d{2}T`)
+
+func checkRefusalNamingIncumbent(t *testing.T, pid int, args ...string) {
+	t.Helper()
+	code, _, errOut := exec(args...)
+	if code == 0 || !strings.Contains(errOut, pidStr(pid)) || !startTimeShape.MatchString(errOut) {
+		t.Errorf("want a refusal naming the incumbent's pid %d AND its start time; got exit=%d stderr=%q",
+			pid, code, errOut)
+	}
+}
+
 // execWithin runs exec() under a deadline. `emit` is the model's sole
 // non-blocking verb (PRESENCE.md §Failure and degradation): it must return
 // immediately even against a dead broker, so a blocking or retrying impl has to
@@ -380,7 +398,9 @@ func TestPresence_Subscribe_CreatesInjectiveBackingObjects(t *testing.T) {
 	}
 }
 
-// Mail for one instance's scribe must never fall into the other's queue.
+// Mail for one instance's scribe must never fall into the other's queue —
+// namespacing makes the collision impossible by construction. PRESENCE.md
+// §Subjects, endpoints and queues → "Endpoint names are namespaced by instance".
 func TestPresence_Send_ReachesOnlyItsOwnQueue(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
@@ -433,18 +453,28 @@ func TestPresence_Subscribe_PublishesFullyQualifiedJoinEvent(t *testing.T) {
 		t.Errorf("join event endpoint = %v, want the fully-qualified %q", m["endpoint"], e2)
 	}
 	agent, _ := m["agent"].(map[string]any)
-	if agent == nil || agent["type"] != "acme-cli" {
-		t.Errorf("join event carries no agent.type; got %v", m["agent"])
+	if agent == nil || agent["type"] != "acme-cli" || agent["version"] != "3.2.0" {
+		t.Errorf("join event carries the wrong agent.type/version; got %v, want type acme-cli version 3.2.0", m["agent"])
 	}
 	proc, _ := m["process"].(map[string]any)
 	if proc == nil || proc["pid"] != float64(pid) {
 		t.Errorf("join event carries no process.pid=%d; got %v", pid, m["process"])
 	}
-	if _, has := m["display"]; !has {
-		t.Errorf("join event carries no display; got keys %v", keysOf(m))
+	if started, _ := proc["started"].(string); started == "" {
+		t.Errorf("join event carries no non-empty process.started; got %v", m["process"])
 	}
-	if _, has := m["cwd"]; !has {
-		t.Errorf("join event carries no cwd; got keys %v", keysOf(m))
+	// PR #16: the convenience `instance` field must equal the endpoint prefix.
+	if m["instance"] != "workshop" {
+		t.Errorf("join event instance = %v, want the endpoint prefix %q", m["instance"], "workshop")
+	}
+	// The display and cwd VALUES passed on the command line must survive, not
+	// merely the keys. display may be a string or a {name,...} object, so the
+	// value is sought within it rather than pinned to a shape the spec leaves open.
+	if dj, _ := json.Marshal(m["display"]); !strings.Contains(string(dj), "The Clerk") {
+		t.Errorf("join event display does not carry the value passed (%q); got %v", "The Clerk", m["display"])
+	}
+	if m["cwd"] != "/workspaces/clerk" {
+		t.Errorf("join event cwd = %v, want the value passed %q", m["cwd"], "/workspaces/clerk")
 	}
 }
 
@@ -630,12 +660,18 @@ func TestPresence_Emit_ToolPostRefsToolPreInRefsArray(t *testing.T) {
 	if preID == "" {
 		t.Fatalf("tool.pre event carried no id to reference")
 	}
+	if pre["endpoint"] != e1 {
+		t.Errorf("tool.pre endpoint = %v, want the fully-qualified %q", pre["endpoint"], e1)
+	}
 
 	sub2 := p.witness(t, "topic.workshop")
 	exec("emit", "tool.post", e1, "--tool", "shell", "--refs", preID)
 	post, ok := findEvent(t, collect(sub2, 2*time.Second), "tool.post")
 	if !ok {
 		t.Fatalf("emit published no tool.post event")
+	}
+	if post["endpoint"] != e1 {
+		t.Errorf("tool.post endpoint = %v, want the fully-qualified %q", post["endpoint"], e1)
 	}
 	refs, isArray := post["refs"].([]any)
 	if !isArray {
@@ -787,7 +823,7 @@ func TestPresence_Subscribe_OnHeldEndpoint_RefusedNamingIncumbentPid(t *testing.
 	pid := livePid(t)
 	exec("subscribe", e1, "--pid", pidStr(pid), "--type", "acme-cli", "--version", "3.2.0") // holds e1
 
-	checkRefusal(t, pidStr(pid)+"|held|already|incumbent|in use",
+	checkRefusalNamingIncumbent(t, pid,
 		"subscribe", e1, "--pid", pidStr(pid), "--type", "acme-cli", "--version", "3.2.0")
 }
 
@@ -799,7 +835,7 @@ func TestPresence_Unsubscribe_RefusesLiveIncumbent(t *testing.T) {
 	pid := livePid(t)
 	exec("subscribe", e1, "--pid", pidStr(pid), "--type", "acme-cli", "--version", "3.2.0")
 
-	checkRefusal(t, pidStr(pid)+"|live|running|still|--force",
+	checkRefusalNamingIncumbent(t, pid,
 		"unsubscribe", e1)
 }
 
@@ -838,10 +874,20 @@ func TestPresence_Unsubscribe_ClearsDeadIncumbent(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
 	exec("subscribe", e2, "--pid", pidStr(deadPid(t)), "--type", "acme-cli", "--version", "3.2.0")
+	// Stand the queue up so "cleared" measures the verb's effect, not a queue that
+	// was never created; witness the departure event, as the clean/force cases do.
+	p.seedQueue(t, q2, "queue."+e2)
+	sub := p.witness(t, "topic.workshop")
 
 	code, _, errOut := exec("unsubscribe", e2)
 	if code != 0 {
 		t.Errorf("plain unsubscribe on a dead incumbent exited %d (stderr %q), want 0 (restart needs no pre-check)", code, errOut)
+	}
+	if p.qexists(q2) {
+		t.Errorf("plain unsubscribe did not clear the dead incumbent's queue %s", q2)
+	}
+	if _, ok := findEvent(t, collect(sub, 2*time.Second), "agent.unsubscribe"); !ok {
+		t.Errorf("plain unsubscribe on a dead incumbent published no agent.unsubscribe event")
 	}
 }
 
@@ -878,7 +924,9 @@ func TestPresence_RegistryFailure_SpeaksOnStderrOnly(t *testing.T) {
 // SEPARATE — a bootstrap invariant, NOT counted among the presence cases.
 // The watch credential cannot publish: the server itself denies it, below the
 // tool. This holds for any conformant deployment, so it passes even on the
-// current build. PRESENCE.md §Trust (the watch role publishes nothing).
+// current build. PRESENCE.md §Command-line operations → watch ("Follows the
+// event stream … Read-only") and the scratch ACL design — NOT §Trust, which
+// concerns accidental collision between instances, not watch's publish rights.
 // ════════════════════════════════════════════════════════════════════════════
 
 func TestBootstrap_WatchCredentialIsDeniedPublish(t *testing.T) {
