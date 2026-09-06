@@ -11,7 +11,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"regexp"
+	"syscall"
 
 	"github.com/tdebasis/locutorium/internal/config"
 	"github.com/tdebasis/locutorium/internal/loc"
@@ -63,7 +65,26 @@ other
 // is made in run, which writes to the streams it is handed — so the whole tool
 // can be driven by a test without a process boundary, and the process boundary
 // is not the only place its behaviour is pinned down.
-func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
+func main() {
+	// A READER THAT GOES AWAY IS A WRITE ERROR, NOT A DEATH.
+	//
+	// Go's rule: a write to descriptor 1 or 2 that gets EPIPE raises SIGPIPE,
+	// and a program that has not said otherwise is killed by it. That is the
+	// wrong ending for this tool. `read` fetches before it prints and
+	// acknowledges only after the write that carried the bytes returned nil,
+	// so an EPIPE is already handled everywhere it can arrive: stop, take
+	// nothing further, return the error — and the close on the way out hands
+	// the unshown message back with a negative acknowledgement. Being killed
+	// at the write skips that close, and the message it never showed stays in
+	// flight for the consumer's whole ack-wait while the next read shows an
+	// empty mailbox. Ignoring the signal is what turns EPIPE back into an
+	// ordinary error the verbs already know what to do with.
+	//
+	// Only main gains this. run stays a plain function with no process-wide
+	// state of its own, so it remains drivable by a test.
+	signal.Ignore(syscall.SIGPIPE)
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+}
 
 // errUsage means "you typed it wrong". It is the one failure that prints the
 // verb list on STDOUT rather than a `loc:` line on stderr: someone who has not

@@ -79,7 +79,9 @@ negatively acknowledges everything it was handed and did not take, so an interru
 duplicate and nothing else. A `read` **killed by a signal** (^C, `kill`) never reaches that step,
 so its in-flight message comes back only when the window expires — up to that half minute in which
 the mailbox reads emptier than it is. Catching the signal and closing through the same path is a
-follow-up; this build does not do it yet.
+follow-up; this build does not do it yet. A **reader that closes early** — a pipe whose other end
+went away, a dead terminal — is not one of those deaths: for this build it is an ordinary **write
+error**, so `read` stops without acknowledging and the unshown message is handed back on exit.
 
 A queue that is empty, or an endpoint that has never had a queue, reads as the two headings and a
 zero exit. A **medium that cannot be reached** is the opposite: nothing on standard out, the reason
