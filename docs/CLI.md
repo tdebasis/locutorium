@@ -24,7 +24,7 @@ Errors print `loc: <message>` on stderr and exit **1**. Everything else exits **
 | `loc doctor [--init]` | health checks; `--init` creates the streams |
 | `loc version` | version string |
 
-`read`, `sub`, `unsub` and `doctor` are the shell tool's verbs. The Go build names them and answers
+`sub`, `unsub` and `doctor` are the shell tool's verbs. The Go build names them and answers
 `not implemented in this build`; every other row it answers itself.
 
 ---
@@ -64,20 +64,32 @@ loc read
 loc read --peek
 ```
 
-Without a flag: presents anything your listener spooled, then your queue, then topics — and
-**consumes** all of it. A message is handed over exactly once.
+Without a flag: presents your queue, then topics — and **consumes** all of it. A message is handed
+over exactly once.
 
-If rendering fails part way, the message is **re-presented next time, never dropped.** The failure
-direction is deliberate: duplicate rather than lose.
+Each message is **acknowledged only after it has been shown**, and the acknowledgement is what
+deletes it. So if presenting fails part way — a dead terminal, a broken pipe — the message is
+**re-presented next time, never dropped.** The failure direction is deliberate: duplicate rather
+than lose, and `id` is the key for spotting the duplicate (PROTOCOL.md §5).
+
+A queue that is empty, or an endpoint that has never had a queue, reads as the two headings and a
+zero exit. A **medium that cannot be reached** is the opposite: nothing on standard out, the reason
+on standard error, exit 1. Silence and an unreachable broker are different facts and only one of
+them is about your mailbox.
 
 `--peek` is much narrower than it looks, and this is worth knowing before relying on it:
 
 - shows **at most one** queue message, not your backlog
-- shows **no spool** and **no topics**
+- shows **no topics**, and says so in place of the heading rather than implying an empty room
 - consumes nothing
 
-> **Trap:** any argument that isn't exactly `--peek` is silently ignored — so `loc read --pekk`
-> performs a normal, **consuming** read. There is no error.
+> **Trap, in the shell tool only:** there, any argument that isn't exactly `--peek` is silently
+> ignored — so `loc read --pekk` performs a normal, **consuming** read, with no error. The Go build
+> **refuses** it: anything but exactly `--peek` prints the verb list and exits 1.
+
+The Go build presents the queue and the topics, and **no spools**. `run/<endpoint>.spool` and
+`.wake.spool.raw` belong to the shell tool's listener and to whatever presents what it drained;
+this build runs no listener and does not read them.
 
 ## sub / unsub
 
@@ -95,7 +107,8 @@ endpoint is gone.
 
 `unsub` ends attendance. **The queue keeps holding messages** — nothing is lost by leaving.
 
-A wake never makes a message unreadable; `read` presents spools as well as the queue.
+A wake never makes a message unreadable; the shell tool's `read` presents its listener's spools as
+well as the queue.
 
 ## subscribe
 
@@ -180,8 +193,10 @@ loc status <endpoint>
 
 Bare, it is the message plane's report: the unread count for each endpoint in `$LOC_HOME/endpoints`.
 If the medium is unreachable this prints `?` rather than failing, so a `?` means "could not ask",
-not "zero". A namespaced endpoint's queue has no consumer on it, so the number is what that queue is
-holding — under work-queue retention a stored message is an untaken one.
+not "zero". The number is what is still **waiting**: once an endpoint has read, it has a cursor, and
+a message handed to it and not yet acknowledged is still stored while no longer owed. Where there is
+no cursor yet, the queue's own count is the figure — under work-queue retention a stored message is
+an untaken one.
 
 With an endpoint it is the presence report: three facts, **each with the reason for it**. *Away*
 because there is no process and *idle* because no event arrived inside the window are different
