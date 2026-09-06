@@ -69,8 +69,8 @@ func shippedSeat(name string) *natsserver.User {
 
 // grantedSeat is the same block with the R2 spelling: every JetStream object
 // name substitutes the dot, and the seat may create the cursor on its own
-// queue. This is what bootstrap.sh writes after the fix, and it is here so the
-// pair red/green is one harness apart rather than one build apart.
+// queue. The cursor grants here are the subset this test exists to check; the
+// shipped template has since gained the stream-lifecycle grants (STREAM.CREATE/INFO/DELETE on the seat's own queue) and `registry.>`, which `bootstrap_test.go` proves against the real script.
 func grantedSeat(name string) *natsserver.User {
 	s := strings.ReplaceAll(name, ".", "_")
 	return &natsserver.User{Username: name, Password: aclPassword, Permissions: &natsserver.Permissions{
