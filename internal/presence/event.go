@@ -67,9 +67,12 @@ type Process struct {
 	Started string `json:"started"`
 }
 
-// Display is what a person or a display should call this agent.
+// Display is what a person or a display should call this agent, and what it
+// is there to do. The role is OPTIONAL and omitted when unset, so a consumer
+// can tell an agent that declared no role from one whose role is empty.
 type Display struct {
 	Name string `json:"name"`
+	Role string `json:"role,omitempty"`
 }
 
 // Event is one thing that happened on the bus.
