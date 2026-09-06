@@ -246,6 +246,25 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - name: environment carries no operator secrets
+        # The job now runs in a person's own account under a launchd service,
+        # not an ephemeral hosted sandbox — this step is the falsifier that the
+        # service environment carries none of that person's credentials. It
+        # runs on hosted runners too, where the environment is already bare and
+        # this is a cheap no-op there.
+        run: |
+          set -euo pipefail
+          names="$(env | cut -d= -f1 | sort)"
+          echo "$names"
+          # ACTIONS_* is GitHub's own runtime, present on hosted runners too —
+          # it is not the operator's, so it is filtered out before matching.
+          filtered="$(printf '%s\n' "$names" | grep -v '^ACTIONS_' || true)"
+          offenders="$(printf '%s\n' "$filtered" | grep -E '^(ANTHROPIC_|SUPABASE_|OPENAI_|AWS_|GOOGLE_|NATS_CREDS|HOMEBREW_GITHUB_API_TOKEN$|GH_TOKEN$|GITHUB_TOKEN$)|SECRET|PASSWORD|API_KEY|PRIVATE_KEY' || true)"
+          if [ -n "$offenders" ]; then
+            echo "::error::operator credentials found in environment:"
+            printf '%s\n' "$offenders"
+            exit 1
+          fi
       - name: the medium
         run: |
           brew install nats-server
