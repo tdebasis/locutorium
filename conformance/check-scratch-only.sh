@@ -42,6 +42,11 @@
 # A connecting nats call with no NATS_URL= on its (joined) line is a failure,
 # reported as file:line so the offending call can be found and fixed. The suite
 # and the release path both gate on the exit status.
+#
+# SCOPE (v0): this guard catches the bare literal word `nats` standing as a
+# command. An invocation through a variable ("$NATS" sub ...) or via
+# `command nats ...` escapes it; that is accepted for now because the suite
+# uses neither form.
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
