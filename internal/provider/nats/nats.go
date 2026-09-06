@@ -44,6 +44,13 @@ const ackTimeout = 3 * time.Second
 type Provider struct {
 	nc *natsgo.Conn
 	js natsgo.JetStreamContext
+
+	// The read path's cursors — one bound pull subscription per backing
+	// object, so a drain that fetches one message at a time does not re-bind
+	// per message — and the messages it has handed out that have not been
+	// acknowledged. See read.go: an untaken message goes back on Close.
+	subs    map[string]*natsgo.Subscription
+	unacked []*natsgo.Msg
 }
 
 // New returns an unconnected provider.
@@ -52,9 +59,15 @@ func New() (provider.Provider, error) { return &Provider{}, nil }
 // Close releases the connection, if one was ever opened.
 func (p *Provider) Close() {
 	if p.nc != nil {
+		// Anything the reader was handed and never took goes back FIRST.
+		// Closing on an outstanding message would leave it in-flight for the
+		// whole ack-wait window, which is the one state a reader cannot tell
+		// apart from having lost it.
+		p.returnUnacked()
 		p.nc.Close()
 		p.nc = nil
 		p.js = nil
+		p.subs = nil
 	}
 }
 
