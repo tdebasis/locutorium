@@ -62,7 +62,13 @@ func (p *Provider) Close() {
 // The identity is resolved here and not passed in, so that every path to the
 // medium is authenticated as the same endpoint the semantics layer thinks is
 // speaking.
-func (p *Provider) connect() error {
+func (p *Provider) connect() error { return p.connectWithin(ackTimeout) }
+
+// connectWithin is connect with the dial bounded by the caller. Every verb but
+// one takes the ordinary timeout; the event emitter takes a much shorter one,
+// because it runs inside an agent's lifecycle hook and the agent waits for
+// whatever it waits for.
+func (p *Provider) connectWithin(dial time.Duration) error {
 	if p.nc != nil {
 		return nil
 	}
@@ -85,7 +91,7 @@ func (p *Provider) connect() error {
 	nc, err := natsgo.Connect(url,
 		natsgo.UserInfo(id, pass),
 		natsgo.Name("loc"),
-		natsgo.Timeout(ackTimeout),
+		natsgo.Timeout(dial),
 		// A CLI process does one thing and leaves. Reconnect logic would only
 		// turn a dead server into a long wait instead of a clear refusal.
 		natsgo.NoReconnect(),

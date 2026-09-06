@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/tdebasis/locutorium/internal/config"
 )
@@ -36,6 +37,43 @@ type Provider interface {
 
 	// Close releases whatever connection the provider holds.
 	Close()
+}
+
+// Presence is the EXTENSION a medium implements when it can carry the presence
+// model: ephemeral queues that exist exactly while an agent is subscribed, an
+// event subject per instance, and a request the instance's supervisor answers.
+//
+// It is separate from Provider rather than folded into it because a medium is
+// allowed to carry messages without carrying presence. A verb that needs these
+// asks for them by type assertion and refuses by name when they are absent,
+// which is a clearer answer than a Provider full of methods that return "not
+// supported".
+type Presence interface {
+	// CreateQueue brings an endpoint's queue into being. It is idempotent:
+	// the queue an already-subscribed endpoint has is the queue it needs.
+	CreateQueue(endpoint string) error
+
+	// DeleteQueue destroys it. A queue that is already gone is a success —
+	// the caller asked for it to be absent, and it is.
+	DeleteQueue(endpoint string) error
+
+	// QueueExists answers whether an endpoint is attended. A medium that
+	// cannot be reached is an ERROR here, never a "no": absence and ignorance
+	// are different answers, and only one of them justifies refusing a send.
+	QueueExists(endpoint string) (bool, error)
+
+	// Emit speaks one event in an instance's subject, without waiting for the
+	// store to acknowledge anything. It is the one path that must be bounded
+	// hard, because the caller is an agent's lifecycle hook.
+	Emit(instance string, event []byte) error
+
+	// Request asks a question of whoever is listening and returns the reply.
+	// Nobody listening is an error, which is the truthful answer.
+	Request(subject string, timeout time.Duration) ([]byte, error)
+
+	// Watch follows an instance's events, writing each as it arrives. It
+	// blocks, and returns when the connection closes.
+	Watch(instance string, w io.Writer) error
 }
 
 // Factory builds a provider. Registration happens in an init function in the
