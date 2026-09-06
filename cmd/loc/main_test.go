@@ -189,13 +189,13 @@ func TestArgumentCheckHappensBeforeTheProviderIsOpened(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------- the four absent
+// --------------------------------------------------------- the three absent
 
 // A verb this build knows the name of but cannot do says so on stderr, in the
 // tool's one error shape, and exits 1. It must never fall through to usage:
 // "this build cannot" and "you typed it wrong" are different answers.
 func TestUnimplementedVerbs(t *testing.T) {
-	for _, verb := range []string{"read", "sub", "unsub", "doctor"} {
+	for _, verb := range []string{"sub", "unsub", "doctor"} {
 		t.Run(verb, func(t *testing.T) {
 			d := newDeployment(t, "ada")
 			code, out, errOut := exec(verb)
@@ -212,7 +212,6 @@ func TestUnimplementedVerbs(t *testing.T) {
 func TestUnimplementedVerbsIgnoreTheirArguments(t *testing.T) {
 	newDeployment(t, "ada")
 	for _, args := range [][]string{
-		{"read", "--peek"},
 		{"sub", "--watch-pid", "1234"},
 		{"doctor", "--init"},
 	} {
