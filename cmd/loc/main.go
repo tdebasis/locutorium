@@ -15,6 +15,10 @@ import (
 
 	"github.com/tdebasis/locutorium/internal/config"
 	"github.com/tdebasis/locutorium/internal/loc"
+	// Aliased: the frozen integration suite in this package already declares a
+	// type called `presence` for its scratch deployment, and a package name and
+	// a type name cannot both be that word here.
+	model "github.com/tdebasis/locutorium/internal/presence"
 	"github.com/tdebasis/locutorium/internal/provider"
 
 	// The medium adapters this binary carries. Importing one is what makes it
@@ -187,7 +191,27 @@ func send(p provider.Provider, w io.Writer, to, body string) error {
 	if err := loc.CheckBody(body); err != nil {
 		return err
 	}
-	if !loc.EndpointExists(to) {
+	// WHERE ATTENDANCE COMES FROM depends on what the medium can tell us. On a
+	// medium that carries presence, a queue exists exactly while an agent is
+	// subscribed to it, so its absence IS an absent recipient — a live fact,
+	// which REPLACES the static registry file for that medium. The file lists
+	// the names a deployment expects; it cannot know whether anyone is there,
+	// and in the inner parlor there are no mailboxes for agents that are not
+	// running. On a medium without presence the file is still the only answer
+	// available, and stays the one used.
+	if pr, ok := p.(provider.Presence); ok {
+		if err := model.ValidEndpoint(to); err != nil {
+			return err
+		}
+		attended, err := pr.QueueExists(to)
+		if err != nil {
+			return err
+		}
+		if !attended {
+			return fmt.Errorf("nobody is attending '%s': no live subscription, "+
+				"so no queue to deliver to", to)
+		}
+	} else if !loc.EndpointExists(to) {
 		return fmt.Errorf("unknown endpoint '%s' (not in this deployment's registry)", to)
 	}
 	// Say-semantics (config-gated; enable only once every endpoint registers

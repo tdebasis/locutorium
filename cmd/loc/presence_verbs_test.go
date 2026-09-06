@@ -769,6 +769,54 @@ func TestStatusStopsWhenTheReaderGoesAway(t *testing.T) {
 	}
 }
 
+// ----------------------------------------------------------------------- send
+
+// On a medium that carries presence, attendance is the live fact and the
+// static registry file has nothing to say about it — in either direction.
+func TestSendDerivesAttendanceFromTheLiveSubscription(t *testing.T) {
+	d := newPresenceDeployment(t)
+	// The file lists nobody, and the send still goes: what matters is that a
+	// queue is there to deliver to.
+	writeFile(t, filepath.Join(d.home, "endpoints"), "")
+	d.spy.exists["workshop.scribe"] = true
+
+	code, out, errOut := exec("send", "workshop.scribe", "hello")
+	assertResult(t, code, out, errOut, 0, "sent → queue.workshop.scribe\n", "")
+
+	// And the file listing a name changes nothing when nobody is attending it.
+	writeFile(t, filepath.Join(d.home, "endpoints"), "workshop.clerk\n")
+	code, out, errOut = exec("send", "workshop.clerk", "hello")
+	assertResult(t, code, out, errOut, 1, "",
+		"loc: nobody is attending 'workshop.clerk': no live subscription, so no queue to deliver to\n")
+	if len(d.spy.sends) != 1 {
+		t.Errorf("SendQueue calls: %v, want only the first", d.spy.sends)
+	}
+}
+
+// A send to something that is not an endpoint at all is refused for what is
+// wrong with it, before anyone is asked whether they are attending.
+func TestSendRefusesAnUnqualifiedNameOnAPresenceMedium(t *testing.T) {
+	newPresenceDeployment(t)
+
+	code, out, errOut := exec("send", "scribe", "hello")
+	if code != 1 || out != "" || !strings.Contains(errOut, "invalid endpoint name 'scribe'") {
+		t.Errorf("exit=%d stdout=%q stderr=%q; want the name refusal", code, out, errOut)
+	}
+}
+
+// A medium that cannot say who is attending fails the send rather than
+// refusing it for absence: the recipient may well be there.
+func TestSendReportsAMediumItCannotAskAboutAttendance(t *testing.T) {
+	d := newPresenceDeployment(t)
+	d.spy.existsErr = fmt.Errorf("cannot reach the medium")
+
+	code, out, errOut := exec("send", "workshop.scribe", "hello")
+	assertResult(t, code, out, errOut, 1, "", "loc: cannot reach the medium\n")
+	if len(d.spy.sends) != 0 {
+		t.Error("a send went out although attendance could not be established")
+	}
+}
+
 // decodeEvent finds the first emitted event of a kind.
 func decodeEvent(t *testing.T, emitted [][]byte, kind string) map[string]any {
 	t.Helper()
