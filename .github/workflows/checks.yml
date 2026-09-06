@@ -40,7 +40,7 @@ jobs:
           fi
           changed="$(git diff --name-only "$base" "$head")"
           echo "changed files:"; echo "$changed" | sed 's/^/  /'
-          if echo "$changed" | grep -qE '^(bin/|lib/|cmd/|internal/|go\.(mod|sum)$|conformance/|providers/|install\.sh$|README\.md$)'; then
+          if echo "$changed" | grep -qE '^(bin/|lib/|cmd/|internal/|go\.(mod|sum)$|Makefile$|conformance/|providers/|install\.sh$|README\.md$)'; then
             echo "product=true" >> "$GITHUB_OUTPUT"
           else
             echo "product=false" >> "$GITHUB_OUTPUT"
@@ -98,6 +98,38 @@ jobs:
       - name: build
         if: steps.probe.outputs.present == 'true'
         run: go build ./...
+
+      - name: the stamped binary
+        id: stamped
+        # `go build ./...` proves every package compiles; it does not produce the
+        # thing that ships. The Makefile does, and it is the SAME command a
+        # person runs by hand — so what CI keeps and what a contributor holds
+        # are made the one way. The assertion is the point of the stamp: the
+        # number is linked in from VERSION, and a binary asked from a directory
+        # with no VERSION above it must still answer.
+        if: steps.probe.outputs.present == 'true'
+        run: |
+          set -euo pipefail
+          make build
+          want="loc $(tr -d '[:space:]' < VERSION)"
+          got="$(cd / && "$GITHUB_WORKSPACE/build/bin/loc" version)"
+          echo "from /: $got"
+          if [ "$got" != "$want" ]; then
+            echo "::error::the binary says '$got' from an unrelated directory; VERSION says '$want'"
+            exit 1
+          fi
+          echo "name=loc-$(go env GOOS)-$(go env GOARCH)" >> "$GITHUB_OUTPUT"
+
+      - name: keep the binary
+        # Named for the platform it was built for, because the artifact list is
+        # where somebody goes looking for a build to try — and an unqualified
+        # `loc` in that list tells them nothing about whether it will run.
+        if: steps.probe.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.stamped.outputs.name }}
+          path: build/bin/loc
+          retention-days: 14
       - name: vet
         if: steps.probe.outputs.present == 'true'
         run: go vet ./...
@@ -326,3 +358,30 @@ jobs:
         # It boots its own server on a random port in its own temp LOC_HOME and
         # tears both down, so nothing here needs a service or a fixture.
         run: bash conformance/run.sh
+
+      - name: the Go toolchain is present
+        # The second suite run needs a compiler. A self-hosted machine is
+        # somebody's computer and this job installs nothing on it — the same
+        # rule the medium keeps two steps up — so an absent toolchain is a setup
+        # fault, reported by name and loudly, and never repaired by the job.
+        run: |
+          set -euo pipefail
+          for tool in go make; do
+            if ! command -v "$tool" >/dev/null 2>&1; then
+              echo "::error::$tool is not on PATH on this runner (${{ runner.environment }}); install it by hand, the job will not"
+              exit 1
+            fi
+          done
+          go version
+          make --version | head -1
+
+      - name: the suite against the Go binary
+        # THE SAME FILE, the same cases, a different binary. This is what makes
+        # the suite the gate for both implementations rather than a test of one:
+        # LOC_BIN_DIR says which loc to drive, LOC_IMPL says which implementation
+        # is being driven, and the run prints by name the cases it did not ask
+        # (the listener's, which this build does not have yet).
+        run: |
+          set -euo pipefail
+          make build
+          LOC_BIN_DIR="$PWD/build/bin" LOC_IMPL=go bash conformance/run.sh
