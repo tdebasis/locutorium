@@ -19,8 +19,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	natsgo "github.com/nats-io/nats.go"
@@ -51,6 +53,12 @@ type Provider struct {
 	// acknowledged. See read.go: an untaken message goes back on Close.
 	subs    map[string]*natsgo.Subscription
 	unacked []*natsgo.Msg
+
+	// What the deployment has refused this connection, by subject. The
+	// server reports a refusal asynchronously, on a goroutine of the
+	// client's, so the slice is guarded — see noteRefusal.
+	mu      sync.Mutex
+	refused []string
 }
 
 // New returns an unconnected provider.
@@ -106,6 +114,8 @@ func (p *Provider) connectWithin(dial time.Duration) error {
 		natsgo.UserInfo(id, pass),
 		natsgo.Name("loc"),
 		natsgo.Timeout(dial),
+		// THE ONLY PLACE A REFUSAL IS EVER SAID OUT LOUD. See noteRefusal.
+		natsgo.ErrorHandler(p.noteRefusal),
 		// A CLI process does one thing and leaves. Reconnect logic would only
 		// turn a dead server into a long wait instead of a clear refusal.
 		natsgo.NoReconnect(),
@@ -123,6 +133,43 @@ func (p *Provider) connectWithin(dial time.Duration) error {
 	}
 	p.nc, p.js = nc, js
 	return nil
+}
+
+// deniedSubject picks the subject out of the server's refusal line, which
+// names it in double quotes after "Publish to" or "Subscription to".
+var deniedSubject = regexp.MustCompile(`Permissions Violation for (?:Publish|Subscription) to "([^"]+)"`)
+
+// noteRefusal records one asynchronous refusal, by the subject it names.
+//
+// A JetStream request the deployment does not permit is answered with an
+// error line ON THE CONNECTION and nothing at all on the reply subject: the
+// request simply expires. This callback is the only place that error is ever
+// available, so the subject is kept for the read path to consult when a cursor
+// comes back empty — the difference between "there is no mail" and "you may
+// not look", which a caller otherwise cannot tell apart.
+//
+// It also displaces the client's default handler, which writes the same line
+// straight to the process's standard error. A refusal belongs in the verb's
+// own refusal, not interleaved with the mail.
+func (p *Provider) noteRefusal(_ *natsgo.Conn, _ *natsgo.Subscription, err error) {
+	if err == nil || !strings.Contains(err.Error(), "Permissions Violation") {
+		return
+	}
+	m := deniedSubject.FindStringSubmatch(err.Error())
+	if len(m) < 2 {
+		return
+	}
+	p.mu.Lock()
+	p.refused = append(p.refused, m[1])
+	p.mu.Unlock()
+}
+
+// refusals is a copy of the subjects refused so far, taken under the lock so
+// the read path never walks a slice the callback is appending to.
+func (p *Provider) refusals() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.refused...)
 }
 
 // errConnect is a sentinel: the caller decides what an unreachable medium
