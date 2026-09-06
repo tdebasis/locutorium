@@ -109,3 +109,45 @@ func Open(name string) (Provider, error) {
 	}
 	return f()
 }
+
+// Message is one envelope a reader has been HANDED but has not yet taken.
+//
+// The two halves are separate on purpose. Reading is the only verb that
+// destroys — a queue is retained until its endpoint consumes, so the
+// acknowledgement is a delete with no recovery — and keeping the fetch apart
+// from the ack is what lets a caller put the bytes in front of a reader
+// BEFORE it forgets them. Everything fallible happens in between.
+type Message interface {
+	// Data is the raw envelope, exactly as it was sent.
+	Data() []byte
+
+	// Ack forgets it. Called only once the message has actually been shown.
+	Ack() error
+}
+
+// Reader is the EXTENSION a medium implements when messages can be taken from
+// it, following the same rule as Presence: a medium is allowed to carry
+// messages without offering a reader's cursor, and a verb that needs one asks
+// by type assertion and refuses by name when it is absent.
+//
+// The failure direction throughout is DUPLICATE, NEVER LOSS. An interrupted
+// read costs a message shown twice, which the protocol's dedupe key exists
+// for; the opposite costs mail that nobody ever saw.
+type Reader interface {
+	// NextQueued fetches at most one queued message for endpoint without
+	// acknowledging it. ok=false means the queue is dry (or absent) — never
+	// an error, because the caller loops until it is dry and a cold endpoint
+	// has simply had no mail. An UNREACHABLE medium is an error: silence and
+	// an absent broker are different facts.
+	NextQueued(endpoint string, wait time.Duration) (m Message, ok bool, err error)
+
+	// PeekQueued returns one queued message without consuming or reserving it
+	// beyond ack-wait.
+	PeekQueued(endpoint string) (m Message, ok bool, err error)
+
+	// NextTopic fetches at most one topic message for reader's own cursor; a
+	// topic is a room rather than a queue, so one reader taking a message does
+	// not take it from anyone else. An absent or forbidden topic store reads
+	// as dry, never as an error — the same rule Topics applies.
+	NextTopic(reader string, wait time.Duration) (m Message, ok bool, err error)
+}
