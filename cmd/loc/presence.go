@@ -121,10 +121,10 @@ func subscribeVerb(args []string) error {
 	if err := model.ValidEndpoint(endpoint); err != nil {
 		return err
 	}
-	var pidArg, agentType, version, display, cwd string
+	var pidArg, agentType, version, display, role, cwd string
 	if err := parseFlags(args[1:], map[string]*string{
 		"--pid": &pidArg, "--type": &agentType, "--version": &version,
-		"--display": &display, "--cwd": &cwd,
+		"--display": &display, "--role": &role, "--cwd": &cwd,
 	}, nil); err != nil {
 		return err
 	}
@@ -157,8 +157,10 @@ func subscribeVerb(args []string) error {
 		Cwd:        cwd,
 		Registered: model.Now(),
 	}
-	if display != "" {
-		reg.Display = &model.Display{Name: display}
+	// Either half stands on its own: a deployment may name its agents without
+	// saying what they are for, or say what they are for without renaming them.
+	if display != "" || role != "" {
+		reg.Display = &model.Display{Name: display, Role: role}
 	}
 
 	return withPresence(func(pr provider.Presence) error {
@@ -423,8 +425,12 @@ func renderRegistry(w io.Writer, reply []byte, asJSON bool) error {
 		return err
 	}
 	for _, a := range roster.Agents {
-		if _, err := fmt.Fprintf(w, "%-24s %s %s  pid %d  since %s  %s\n",
-			a.Endpoint, a.Agent.Type, a.Agent.Version, a.Process.PID, a.Registered, a.Cwd); err != nil {
+		role := ""
+		if a.Display != nil && a.Display.Role != "" {
+			role = "  (" + a.Display.Role + ")"
+		}
+		if _, err := fmt.Fprintf(w, "%-24s %s %s  pid %d  since %s  %s%s\n",
+			a.Endpoint, a.Agent.Type, a.Agent.Version, a.Process.PID, a.Registered, a.Cwd, role); err != nil {
 			return err
 		}
 	}

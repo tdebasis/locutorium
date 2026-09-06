@@ -35,7 +35,8 @@ messages
   topics                    what conversations are active right now
 
 presence — called by whoever launches agents
-  subscribe <endpoint> --pid <n> --type <t> --version <v> [--display <name>] [--cwd <dir>]
+  subscribe <endpoint> --pid <n> --type <t> --version <v>
+                            [--display <name>] [--role <role>] [--cwd <dir>]
                             register an agent instance and create its queue
   unsubscribe <endpoint> [--reason clean|expiry] [--force]
                             free the endpoint and destroy its queue
