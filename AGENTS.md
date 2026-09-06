@@ -18,7 +18,7 @@ conformance suite. To **use** the bus as an endpoint, read `docs/AGENTS.md`. To 
    Under `go` the listener's cases — everything reached through `sub`, `unsub` and `doctor`, which
    that build names and does not implement — are skipped **by name** and counted in the tally. A
    case that is skipped without appearing in the output is a case nobody knows was not run, so
-   nothing may be skipped silently, and nothing else may be skipped at all.
+   A case may be skipped only where the two implementations differ on purpose, and then only by name, with its reason printed, and counted.
 3. **Written for strangers.** `conformance/check-clean.sh` forbids deployment vocabulary, personal
    identifiers and absolute home paths anywhere in the working tree. The word list is deployment
    data, not source: it lives in `$LOC_HOME/forbidden` (override with `LOC_FORBIDDEN_FILE`), so the
