@@ -13,6 +13,7 @@ package nats
 // make impossible.
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -145,10 +146,12 @@ func topicConsumer(reader string) *natsgo.ConsumerConfig {
 // first one made. A look-then-create would have a gap between the look and the
 // create; this has none.
 //
-// ok=false means "there is nothing here to read from" — no stream, or a
-// deployment that does not let this reader near it. Both are dry, and neither
-// is a fault: refusing the whole verb over a room the caller may not enter
-// would make its own mail unreadable.
+// ok=false means "nothing came back" — no stream, or a deployment that does
+// not let this reader near it. WHICH OF THE TWO IT WAS IS THE CALLER'S TO
+// DECIDE, and the two callers decide differently: the topic store is an
+// optional room, so a refusal there stays dry rather than making a reader's own
+// mail unreadable; the caller's own queue is not optional, and a refusal on it
+// is a failure (see refusedOwnQueue).
 func (p *Provider) puller(stream string, cfg *natsgo.ConsumerConfig) (*natsgo.Subscription, bool) {
 	key := stream + "/" + cfg.Durable
 	if sub, ok := p.subs[key]; ok {
@@ -186,16 +189,70 @@ func (p *Provider) fetchOne(sub *natsgo.Subscription, wait time.Duration) (provi
 	return p.hand(msgs[0]), true, nil
 }
 
+// deniedCursorSubject is the subject the medium refused this reader ON ITS OWN
+// QUEUE'S BACKING OBJECT, if it refused one.
+//
+// Three families are the whole of a cursor: MAKING it (a CONSUMER CREATE,
+// DURABLE CREATE or INFO naming the stream), PULLING from it (MSG.NEXT naming
+// the stream) and ACKNOWLEDGING what it handed over ($JS.ACK on the stream).
+// The stream's name is matched as a whole token, so nothing refused on another
+// object — the topic store above all — is ever read as this reader's mailbox
+// being shut.
+func (p *Provider) deniedCursorSubject(stream string) (string, bool) {
+	for _, subject := range p.refusals() {
+		if strings.HasPrefix(subject, "$JS.ACK."+stream+".") {
+			return subject, true
+		}
+		rest, ok := strings.CutPrefix(subject, "$JS.API.CONSUMER.")
+		if !ok {
+			continue
+		}
+		for _, token := range strings.Split(rest, ".") {
+			if token == stream {
+				return subject, true
+			}
+		}
+	}
+	return "", false
+}
+
+// refusedOwnQueue turns a dry cursor into a failure when the medium answered NO
+// rather than NOTHING.
+//
+// A REFUSAL ON THE CALLER'S OWN QUEUE IS NEVER AN EMPTY MAILBOX. The server
+// answers an ungranted JetStream request with silence, so without this the
+// create expires, the fetch finds nothing, and a queue still holding mail reads
+// as empty and exits 0 — the one state a reader cannot tell apart from having
+// lost it. An absent stream records no refusal and stays dry, which is a cold
+// endpoint and not a fault.
+func (p *Provider) refusedOwnQueue(endpoint, stream string) error {
+	subject, ok := p.deniedCursorSubject(stream)
+	if !ok {
+		return nil
+	}
+	return fmt.Errorf("cannot read queue.%s: the medium refused %s (permissions) — "+
+		"the deployment grants this seat no cursor on its own queue; "+
+		"regenerate the access control (providers/nats/bootstrap.sh)", endpoint, subject)
+}
+
 // NextQueued fetches at most one of an endpoint's own messages, unacknowledged.
 func (p *Provider) NextQueued(endpoint string, wait time.Duration) (provider.Message, bool, error) {
 	if err := p.connect(); err != nil {
 		return nil, false, err
 	}
-	sub, ok := p.puller(presence.StreamName(endpoint), queueConsumer(endpoint))
+	stream := presence.StreamName(endpoint)
+	sub, ok := p.puller(stream, queueConsumer(endpoint))
 	if !ok {
-		return nil, false, nil
+		return nil, false, p.refusedOwnQueue(endpoint, stream)
 	}
-	return p.fetchOne(sub, wait)
+	m, got, err := p.fetchOne(sub, wait)
+	if err != nil || got {
+		return m, got, err
+	}
+	// A dry fetch is the other half of the same silence: the create may have
+	// landed and the pull, or the acknowledgement of what came before it, been
+	// the thing refused.
+	return nil, false, p.refusedOwnQueue(endpoint, stream)
 }
 
 // PeekQueued shows one message without taking it.
