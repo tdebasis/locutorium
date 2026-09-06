@@ -24,15 +24,32 @@ import (
 
 const usage = `usage: loc <verb> [args]
 
+messages
   send <endpoint> <body>    deliver to an endpoint's queue (guaranteed)
   publish <topic> <body>    speak in a topic (@name rings that endpoint)
   read [--peek]             your queue backlog + topic conversations
+  topics                    what conversations are active right now
+
+presence — called by whoever launches agents
+  subscribe <endpoint> --pid <n> --type <t> --version <v> [--display <name>] [--cwd <dir>]
+                            register an agent instance and create its queue
+  unsubscribe <endpoint> [--reason clean|expiry] [--force]
+                            free the endpoint and destroy its queue
+  sweep [<instance>]        unsubscribe registrations whose process is gone
+
+presence — called by adapters
+  emit <kind> <endpoint> [--ts <t>] [--tool <name>] [--refs <ids>]
+                            publish one lifecycle or activity event
+
+presence — called by a person, or by a consumer
+  registry [<instance>] [--json]
+                            who is registered, asked of the instance's host
+  status [<endpoint>]       one agent's three facts; bare, unread counts
+  watch [<instance>]        follow the event stream, read-only (^C to stop)
+
+other
   sub [--watch-pid <pid>]   register attendance: start your wake listener
   unsub                     end attendance (the queue keeps holding messages)
-  registry                  who is attending, read from the medium
-  topics                    what conversations are active right now
-  status                    unread counts per endpoint
-  watch                     follow all traffic, read-only (^C to stop)
   doctor [--init]           health checks; --init creates streams (admin)
   version                   which loc this is
 `
@@ -108,11 +125,35 @@ func dispatch(args []string, w io.Writer) error {
 		return withProvider(func(p provider.Provider) error { return p.Topics(w) })
 
 	case "status":
+		// With an endpoint it is the presence report — three facts, each with
+		// its reason. Bare it is the message plane's unread counts, which is
+		// what it has always been.
+		if len(rest) > 0 {
+			return statusEndpoint(w, rest[0])
+		}
 		return withProvider(func(p provider.Provider) error { return p.Status(w) })
+
+	case "subscribe":
+		return subscribeVerb(rest)
+
+	case "unsubscribe":
+		return unsubscribeVerb(rest)
+
+	case "sweep":
+		return sweepVerb(rest)
+
+	case "emit":
+		return emitVerb(rest)
+
+	case "registry":
+		return registryVerb(w, rest)
+
+	case "watch":
+		return watchVerb(w, rest)
 
 	// The read path and the listener are not in this binary yet. They are
 	// named here rather than falling through to usage.
-	case "read", "sub", "unsub", "registry", "watch", "doctor":
+	case "read", "sub", "unsub", "doctor":
 		return errNotImplemented
 
 	default:
