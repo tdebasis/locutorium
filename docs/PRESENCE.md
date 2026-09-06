@@ -332,15 +332,37 @@ property of the inner parlor and is not claimed here.
 
 ## One agent per endpoint
 
-An endpoint holds **one agent instance at a time, and the last subscription wins.** Subscribing an
-endpoint that already holds an instance replaces it: the previous registration is dropped, its queue
-recreated, and an `agent.unsubscribe` published for the instance being displaced.
+An endpoint holds **one agent instance at a time.** Subscribing an endpoint that already holds a
+registration is **refused**: the incumbent keeps its queue, and the subscribe fails with a non-zero
+status that names the incumbent's process id and start time — so the caller can tell a crashed
+predecessor from a live agent — and names the fix. Displacing an instance is a deliberate act, not a
+side effect of someone else subscribing — the consumer frees the endpoint first with `unsubscribe`,
+then subscribes.
 
-Replacing rather than refusing matters because the common case is an agent that restarted before the
-expiry check noticed the old one had gone. Refusing would make the correct action — starting the
-agent again — fail until a sweep happened to run. What must not persist is *two* instances draining
-one queue, each receiving part of the mail; last-wins prevents that without requiring the timing to
-be right.
+**Refusing rather than replacing puts the decision where the knowledge is**, and `unsubscribe`
+enforces it rather than trusting the caller. `unsubscribe <endpoint>` succeeds only when the incumbent's
+recorded process is gone: an empty endpoint is a no-op, a **dead** incumbent is cleared, and a **live**
+incumbent makes `unsubscribe` **fail**, naming the live process. So a host relaunching an agent may call
+`unsubscribe` then `subscribe` without a pre-check — a crashed predecessor is cleared and the new
+instance registers, while a still-live predecessor makes the `unsubscribe` refuse, so a restart can
+never displace a running agent. Stopping the old process before reclaiming its endpoint is the
+consumer's responsibility; the refusal is the warning that it has not. A restarted *host* reconciles the
+same way, by the registry and each recorded process (see *Who is here right now*).
+
+Removing a **live** agent on purpose — a deliberate shutdown or displacement — is a separate, explicit
+act: **`unsubscribe --force`** removes the incumbent regardless of liveness. Plain `unsubscribe` is safe
+reconciliation; `--force` is the deliberate one. In the outer parlor both are authenticated, and
+`--force`, which displaces a live remote agent, is the higher-privilege action. The sweep remains the
+backstop for a host that never cleaned up.
+
+**What must not persist is *two* instances draining one queue**, each receiving part of the mail.
+Refusing the second subscribe prevents that by protecting the incumbent rather than silently killing
+it; a live instance is never displaced by accident.
+
+The rule survives the move outward unchanged: `unsubscribe` is ungated in the inner parlor because
+local processes are trusted (see *Trust, in the inner parlor*), and **authenticated** in the outer
+parlor, where a subscription is a protected resource no remote peer may displace without proving it
+may. See *Inner and outer parlors*.
 
 ## Schema evolution
 
@@ -390,8 +412,8 @@ this document's scope and are not listed.
 
 | Operation | Effect |
 |---|---|
-| `subscribe <endpoint> --pid <n> --type <t> --version <v> [--display …] [--cwd …]` | Registers an agent instance, creates its queue, publishes `agent.subscribe`. Fails if the endpoint already holds one. |
-| `unsubscribe <endpoint> [--reason clean\|expiry]` | Removes the registration, destroys the queue, publishes `agent.unsubscribe`. Defaults to `clean`. |
+| `subscribe <endpoint> --pid <n> --type <t> --version <v> [--display …] [--cwd …]` | Registers an agent instance, creates its queue, publishes `agent.subscribe`. **Refused (non-zero) if the endpoint already holds a registration** — free it with `unsubscribe` first. |
+| `unsubscribe <endpoint> [--reason clean\|expiry] [--force]` | Removes the registration, destroys the queue, publishes `agent.unsubscribe`. Defaults to `clean`. Succeeds on an empty endpoint (no-op) or a **dead** incumbent, and **refuses a live incumbent** (non-zero, naming its process) unless **`--force`** is given. An unconditional `unsubscribe`-then-`subscribe` restart is therefore always safe. |
 | `sweep [<instance>]` | Checks every registration in the namespace against its recorded process and unsubscribes those whose process is gone, with `--reason expiry`. **Must run on the machine holding the processes.** Idempotent; safe to run on a timer. |
 
 ### Called by adapters
@@ -446,6 +468,7 @@ Two scopes with deliberately different guarantees.
 | Queue | Created on subscribe, destroyed on unsubscribe | Durable mailbox |
 | Absent recipient | Send is refused — nowhere to deliver | Normal; the message waits |
 | Liveness | Process id | **Open** — a process id does not cross a machine |
+| Displacing a held endpoint | consumer calls `unsubscribe` (trusted, ungated) | consumer calls **authenticated `unsubscribe`** (the subscription is a protected resource) |
 
 **In the inner parlor there are no mailboxes for agents that are not running.** A message to an agent
 that is not there fails immediately and visibly, rather than waiting for someone who may never
