@@ -86,12 +86,20 @@ git clone git@github.com:tdebasis/locutorium.git && cd locutorium && ./install.s
 ```
 
 > [!IMPORTANT]
-> The installer writes exactly two things: a symlink `loc` in your Homebrew `bin` (or `~/.local/bin`)
-> and a LaunchAgent `com.locutorium.nats-server` that runs the medium under launchd. It never touches
-> `~/.locutorium` and never restarts a running server unless you pass `--restart-service`. `--dry-run`
-> shows the two before making them; `--uninstall` removes only what it made.
+> The installer writes two things: a symlink `loc` in your Homebrew `bin` (or `~/.local/bin`) and a
+> LaunchAgent `com.locutorium.nats-server` that runs the medium under launchd. With `--go` it writes
+> a third — `loc-go`, a symlink to the Go binary it builds first — and leaves the `loc` link alone.
+> It never touches `~/.locutorium` and never restarts a running server unless you pass
+> `--restart-service`. `--dry-run` shows each artifact before making it; `--uninstall` removes only
+> what it made.
+
+There are two implementations of `loc` here and one command reference for both (`docs/CLI.md`): the
+**shell tool**, where the clone is the installation, and the **Go build**, a stamped binary from
+`make build`. The same conformance suite is the gate for each. The Go build answers every verb but
+`sub`, `unsub` and `doctor`, which it names and refuses.
 
 Dependencies: `nats-server`, `nats` (`brew install nats-server nats-io/nats-tools/nats`), `python3`.
+For the Go build only: `go` and `make` (`brew install go`).
 
 <details>
 <summary><b>First deployment</b> — four lines</summary>
