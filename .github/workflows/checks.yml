@@ -62,6 +62,9 @@ jobs:
   go:
     name: go
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write   # the coverage comment is posted by the CI bot, not an agent
     steps:
       - uses: actions/checkout@v4
       - id: probe
@@ -151,6 +154,7 @@ jobs:
           exit $fail
 
       - name: keep the coverage report
+        id: coverage-artifact
         if: steps.probe.outputs.present == 'true'
         uses: actions/upload-artifact@v4
         with:
@@ -159,6 +163,49 @@ jobs:
             coverage.html
             coverage.out
           retention-days: 14
+
+      - name: coverage total
+        id: covtotal
+        if: steps.probe.outputs.present == 'true'
+        run: |
+          # The single project-wide figure, from the profile go test wrote.
+          total="$(go tool cover -func=coverage.out | tail -1 | awk '{print $NF}')"
+          echo "total=$total" >> "$GITHUB_OUTPUT"
+
+      # Post the coverage headline onto the PR, so it is read without clicking
+      # into the run. MECHANICAL: the github-actions bot posts a sticky comment
+      # (updated in place each push), never an agent. Only on a pull request,
+      # where there is a conversation to comment on.
+      - name: comment coverage on the pull request
+        if: github.event_name == 'pull_request' && steps.probe.outputs.present == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- go-coverage-report -->';
+            const total = ${{ toJSON(steps.covtotal.outputs.total) }} || 'n/a';
+            const artUrl = ${{ toJSON(steps.coverage-artifact.outputs.artifact-url) }};
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const lines = [
+              marker,
+              '### Go coverage',
+              '',
+              `**Overall:** ${total}`,
+              '',
+              `- [Coverage on the run summary](${runUrl}) — per-package table and the functions below 100%`,
+              artUrl ? `- [Downloadable HTML report](${artUrl}) — line-level, opens locally (a zip)` : '- HTML report: see the run artifacts',
+              '',
+              '_Reported, not gated. The conformance suite is the gate; the per-package ratchet guards against coverage falling._',
+            ];
+            const body = lines.join('\n');
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number });
+            const existing = comments.find(c => c.user && c.user.type === 'Bot' && c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
 
   conformance:
     name: conformance
