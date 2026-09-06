@@ -36,17 +36,20 @@ func ListenerAlive(endpoint string) bool {
 	if syscall.Kill(pid, 0) != nil {
 		return false
 	}
-	return pidStart(pid) == lines[1]
+	return PidStart(pid) == lines[1]
 }
 
-// pidStart returns `ps -o lstart= -p <pid>` with leading whitespace stripped.
+// PidStart returns `ps -o lstart= -p <pid>` with leading whitespace stripped.
+// It is exported because the presence model asks the operating system the same
+// question about the pids it records, and one way of asking is one way of
+// being wrong.
 //
 // SHELLED OUT ON PURPOSE. The stored line is the exact string BSD ps prints,
 // and it is compared byte for byte against what the shell listener wrote.
 // Computing a start time natively — from the kernel, in some other format —
 // would produce a correct answer that never matches, so every send under
 // say-semantics would be refused.
-func pidStart(pid int) string {
+func PidStart(pid int) string {
 	out, err := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid)).Output()
 	if err != nil {
 		return ""

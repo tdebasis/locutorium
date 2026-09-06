@@ -40,7 +40,7 @@ func TestListenerAlive(t *testing.T) {
 		}
 	}
 
-	start := pidStart(pid)
+	start := PidStart(pid)
 	if start == "" {
 		t.Fatal("ps told us nothing about a process we just started")
 	}
