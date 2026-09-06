@@ -19,6 +19,24 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # IDENTICAL FILE against the new binary — the suite is the gate for both
 # implementations, so it must not name one of them.
 LOC_BIN_DIR="${LOC_BIN_DIR:-$ROOT/bin}"
+# WHICH IMPLEMENTATION is under test — a different question from which binary to
+# run, and the reason both are needed: the tree ships two, and the Go build has
+# no listener yet. `shell` (the default) changes nothing at all. `go` skips the
+# cases that are the shell tool's by nature, BY NAME and counted, because a
+# suite that quietly runs fewer cases against one implementation is not the same
+# suite and cannot be the definition of anything.
+LOC_IMPL="${LOC_IMPL:-shell}"
+case "$LOC_IMPL" in
+  shell|go) ;;
+  *) echo "conformance: LOC_IMPL must be 'shell' or 'go', not '$LOC_IMPL'" >&2; exit 2 ;;
+esac
+# The tool that LAYS the scratch house, as opposed to the one being questioned.
+# Setup is not a case: the streams have to exist before anything can be asked
+# about them, and `doctor --init` is one of the three verbs the Go build names
+# and does not implement. So under `go` the shell tool builds the house and the
+# binary under test answers every question asked of it.
+SETUP_LOC="loc"
+[[ "$LOC_IMPL" == go ]] && SETUP_LOC="$ROOT/bin/loc"
 PORT=$(( 20000 + RANDOM % 20000 ))
 # The monitor port moves with the client port: a scratch server must not
 # collide with the operator's own deployment on the default 8222.
@@ -30,11 +48,14 @@ REAL_LOC_HOME="${LOC_HOME:-$HOME/.locutorium}"
 export LOC_HOME="$(mktemp -d)/deployment"
 PATH="$LOC_BIN_DIR:$PATH"
 SERVER_PID=""
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIP=0
 
 say()  { printf '%s\n' "$*"; }
 ok()   { PASS=$((PASS+1)); say "  ✓ $1"; }
 bad()  { FAIL=$((FAIL+1)); say "  ✗ $1"; }
+# A skipped case is still a case: it prints its own description, so the run says
+# out loud which questions it did not ask and why they were not asked.
+skip() { SKIP=$((SKIP+1)); say "  ○ skipped (shell-only): $1"; }
 check() { # check <description> <command...>
   local desc="$1"; shift
   if "$@" >/dev/null 2>&1; then ok "$desc"; else bad "$desc"; fi
@@ -57,7 +78,7 @@ sed -i '' -e "s|127.0.0.1:4222|127.0.0.1:$PORT|" -e "s|127.0.0.1:8222|127.0.0.1:
 nats-server -c "$LOC_HOME/nats-server.conf" >"$LOC_HOME/server.log" 2>&1 &
 SERVER_PID=$!
 sleep 1
-LOC_IDENTITY=admin loc doctor --init >/dev/null || { bad "stream init"; exit 1; }
+LOC_IDENTITY=admin $SETUP_LOC doctor --init >/dev/null || { bad "stream init"; exit 1; }
 
 # Nudge hook stub: records invocations instead of ringing anything.
 cat > "$LOC_HOME/hooks/nudge" <<EOF
@@ -208,10 +229,21 @@ ln -s "$rel" "$L/loc-rel"
 check "a relative symlink to loc finds its house" env LOC_IDENTITY=alice "$L/loc-rel" topics
 ln -s "$LOC_BIN_DIR/loc" "$L/hop1"; ln -s hop1 "$L/hop2"
 check "a two-hop symlink to loc finds its house" env LOC_IDENTITY=alice "$L/hop2" topics
+# A copy is a refusal for the shell tool and an ORDINARY INVOCATION for the Go
+# build, and both are right. The shell tool is a script that must find lib/ and
+# a provider beside it, so a copy is a broken installation and saying so is the
+# service. The stamped binary carries its version and its provider inside it; a
+# copy of it is simply loc, and refusing would be refusing to work for no reason.
+# That is the one place the two implementations differ on purpose.
+if [[ "$LOC_IMPL" == go ]]; then
+skip "a copied loc refuses to run"
+skip "…and says why (copy, not a link)"
+else
 cp "$LOC_BIN_DIR/loc" "$L/loc-copy"
 check_not "a copied loc refuses to run" env LOC_IDENTITY=alice "$L/loc-copy" topics
 copy_out="$(env LOC_IDENTITY=alice "$L/loc-copy" topics 2>&1 || true)"
 if grep -q "copy, not a link" <<<"$copy_out"; then ok "…and says why (copy, not a link)"; else bad "…and says why (copy, not a link)"; fi
+fi
 
 say "— the installer links loc and leaves when told —"
 check "install.sh links loc into a prefix (no service)" \
@@ -237,6 +269,38 @@ n="$(env NATS_URL="$NURL" NATS_USER=admin NATS_PASSWORD="$(_creds admin)" \
   nats stream info WINDOWTEST --json 2>/dev/null | jq -r .state.messages)"
 if [[ "$n" == "0" ]]; then ok "messages expire at the window's edge (teardown-by-retention)"; else bad "messages expire at the window's edge (got $n)"; fi
 
+# ── the listener's cases ─────────────────────────────────────────────────────
+# Everything from here to the wake spool is ATTENDANCE: registration, wakes, the
+# breaker, orphans, the fifo, the spool. All of it is the shell tool's. The Go
+# build names `sub`, `unsub` and `doctor` and answers "not implemented in this
+# build", so there is no listener here for these cases to interrogate — and a
+# case cannot be run against a thing that does not exist without changing what
+# the case means. They are skipped by name, and the count is printed.
+if [[ "$LOC_IMPL" == go ]]; then
+say "— delivery: registration, wake, backlog, liveness —"
+skip "registration starts a live listener (verified pid, not file existence)"
+skip "registration invoked the channel-capture hook"
+skip "registry names an attending endpoint on a freshly bootstrapped deployment"
+skip "wake hook fired on arrival (first message wakes instantly)"
+skip "a wake never makes a message unreadable (read presents queue and spool)"
+skip "one message, one wake; the tap survives the event (no churn)"
+skip "unsub ends attendance (pidfile gone)"
+skip "wake-on-backlog: (re)registration wakes with the waiting count"
+skip "listener exits when the watched session dies (employment-tied)"
+skip "say-semantics: send to a known-absent endpoint is refused"
+skip "say-semantics: send to an attending endpoint succeeds"
+skip "breaker caps wakes and trips loud (1 wake for 3 sends at cap 1/min)"
+skip "suppressed wakes lose nothing (all three messages readable)"
+say "— rapid unsub/resub leaves no orphan listener —"
+skip "rapid unsub/resub leaves no orphan listener (no wake after final unsub)"
+say "— the pidfile is the listener's licence to live —"
+skip "listener exits within 5 s when its pidfile is removed"
+say "— attendance leaves nothing behind on disk —"
+skip "repeated sub/unsub leaves no stale fifo behind"
+say "— a stranded wake spool is recovered by the next read —"
+skip "stranded wake-spool bodies are presented by the next read"
+skip "a presented wake-spool body is forgotten, not re-presented"
+else
 say "— delivery: registration, wake, backlog, liveness —"
 # Wake hook stub: records wakes instead of waking anything.
 cat > "$LOC_HOME/hooks/wake" <<EOF
@@ -451,6 +515,8 @@ out="$(LOC_IDENTITY=alice loc read 2>/dev/null)"
 if ! grep -q "stranded-in-wake-spool" <<<"$out"; then
   ok "a presented wake-spool body is forgotten, not re-presented"
 else bad "a presented wake-spool body is forgotten, not re-presented"; fi
+fi
+# ── end of the listener's cases ──────────────────────────────────────────────
 
 say "— the front page shows what the tool prints —"
 # README's "Two agents, one conversation" block is captured, not typed. This case
@@ -463,7 +529,7 @@ sed -i '' -e "s|127.0.0.1:4222|127.0.0.1:$DEMO_PORT|" -e "s|127.0.0.1:8222|127.0
   "$DEMO_HOME/config" "$DEMO_HOME/nats-server.conf"
 nats-server -c "$DEMO_HOME/nats-server.conf" >"$DEMO_HOME/server.log" 2>&1 &
 DEMO_PID=$!; sleep 1
-LOC_HOME="$DEMO_HOME" LOC_IDENTITY=admin loc doctor --init >/dev/null 2>&1
+LOC_HOME="$DEMO_HOME" LOC_IDENTITY=admin $SETUP_LOC doctor --init >/dev/null 2>&1
 mask() { sed -E 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z/<ts>/g'; }
 expected="$(awk '/^```console$/{f=1;next} f&&/^```$/{exit} f' "$ROOT/README.md" | mask)"
 actual="$(
@@ -507,5 +573,8 @@ check_not "cleanliness check fails on a tree that carries a listed word" \
 rm -rf "$CLEAN_T"
 
 say ""
-say "conformance: $PASS passed, $FAIL failed"
+# The skipped count is printed on every run, zero included: "0 skipped" on the
+# default lane is the evidence that the switch is off, which is a fact worth
+# stating rather than assuming.
+say "conformance: $PASS passed, $FAIL failed, $SKIP skipped (shell-only)"
 [[ $FAIL -eq 0 ]]
