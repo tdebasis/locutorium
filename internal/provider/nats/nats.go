@@ -233,28 +233,30 @@ func (p *Provider) Status(w io.Writer) error {
 // unread is how many messages an endpoint has not taken, or "?" when the
 // number cannot be had.
 //
-// A NAMESPACED endpoint is read from its stream. The backing object is named
-// by substitution, because a subject may carry a dot where a durable object's
-// name may not, and nothing creates a consumer on it — so the stream's own
-// message count is the figure: work-queue retention drops a message when it is
-// taken, which makes a stored message exactly an untaken one. Asking such an
-// endpoint for a consumer is what made this report print "?" for every one of
-// them.
+// THE CURSOR FIRST, THE STREAM ONLY WHEN THERE IS NONE. A reader keeps a
+// durable consumer, and a message it has been handed and has not yet
+// acknowledged is STILL STORED while no longer WAITING — so once a cursor
+// exists, the stream's count reports mail as owed that has already been put in
+// front of somebody, and the consumer's pending count is the honest number.
 //
-// An UN-NAMESPACED endpoint keeps the durable-consumer reading. There a
-// consumer exists and holds messages it has been delivered but not yet
-// acknowledged; those are still stored, so a stream count would report taken
-// mail as waiting, and the consumer's pending count is the honest number.
+// With no cursor on it, the stream's own count is the figure and the identity
+// holds: work-queue retention drops a message when it is taken, which makes a
+// stored message exactly an untaken one. This is the case a namespaced
+// endpoint was in before this build could read, and it is why asking such an
+// endpoint for a consumer once printed "?" for every one of them.
+//
+// The backing object is named by substitution, because a subject may carry a
+// dot where a durable object's name may not; an un-namespaced identity keeps
+// the raw name the shell adapter used.
 func (p *Provider) unread(endpoint string) string {
 	stream := presence.StreamName(endpoint)
+	if ci, err := p.js.ConsumerInfo(stream, durableName(endpoint)); err == nil && ci != nil {
+		return fmt.Sprintf("%d", ci.NumPending)
+	}
 	if presence.ValidEndpoint(endpoint) == nil {
 		if si, err := p.js.StreamInfo(stream); err == nil && si != nil {
 			return fmt.Sprintf("%d", si.State.Msgs)
 		}
-		return "?"
-	}
-	if ci, err := p.js.ConsumerInfo(stream, endpoint); err == nil && ci != nil {
-		return fmt.Sprintf("%d", ci.NumPending)
 	}
 	return "?"
 }
