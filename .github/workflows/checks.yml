@@ -58,6 +58,8 @@ jobs:
         run: bash conformance/check-clean.sh
       - name: one version, agreed everywhere
         run: bash conformance/check-version.sh
+      - name: the suite speaks only to its own server
+        run: bash conformance/check-scratch-only.sh
       - name: new-lines script self-test
         # Exercised on every run, whether or not there is Go in the tree,
         # since it needs no Go toolchain or coverage profile to check itself.
