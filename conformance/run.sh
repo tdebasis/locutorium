@@ -356,6 +356,53 @@ n="$(env NATS_URL="$NURL" NATS_USER=admin NATS_PASSWORD="$(_creds admin)" \
   nats stream info WINDOWTEST --json 2>/dev/null | jq -r .state.messages)"
 if [[ "$n" == "0" ]]; then ok "messages expire at the window's edge (teardown-by-retention)"; else bad "messages expire at the window's edge (got $n)"; fi
 
+# THIS SUITE'S OWN LISTENERS, AND ONLY THOSE — identified by a file this run
+# wrote, never by which binary a process happens to be running. A machine
+# whose real deployment runs from the identical tree (the deployment's own
+# `bin/loc`, not a copy) has listeners with the exact same command line and
+# the exact same binary path as this suite's; a filter on the path cannot
+# tell them apart; a filter on `$LOC_HOME/run/*.listener.pid` — a directory
+# that exists ONLY under this scratch deployment — can.
+#
+# `pgrep -fl 'loc sub' | grep "$LOC_BIN_DIR/loc"` was that path filter, and on
+# such a machine it matched every live listener the machine actually serves.
+# The cleanup that followed it did not just fail to reap an orphan — it
+# killed every one of them.
+suite_listeners() { # → one pid per line: this suite's own listeners, plus
+  # each one's tap (its `nats subscribe` child, found by PARENT pid — never
+  # by matching the tap's own command line, which names no deployment at
+  # all). Under LOC_IMPL=go there is no listener in this build to have a
+  # pidfile, so this returns nothing; harmless, because the go lane skips
+  # every case that would call it.
+  [[ "$LOC_IMPL" == go ]] && return 0
+  local pf lpid
+  for pf in "$LOC_HOME"/run/*.listener.pid; do
+    [[ -e "$pf" ]] || continue
+    lpid="$(sed -n 1p "$pf" 2>/dev/null)"
+    [[ -n "$lpid" ]] || continue
+    kill -0 "$lpid" 2>/dev/null || continue   # a stale pidfile names nobody
+    printf '%s\n' "$lpid"
+    pgrep -P "$lpid" 2>/dev/null
+  done
+}
+reap_suite_listeners() { # [pid...] — TERM, then KILL after 2s for survivors.
+  # With no arguments the target is a fresh suite_listeners() census. A
+  # caller that needs to reap pids a LATER suite_listeners() call could not
+  # rediscover — the pidfile-removal case below deletes the very file this
+  # census reads, on purpose, as its own test — passes that earlier census
+  # in explicitly instead.
+  local pids=("$@")
+  if [[ "${#pids[@]}" -eq 0 ]]; then
+    local _l
+    while IFS= read -r _l; do [[ -n "$_l" ]] && pids+=("$_l"); done < <(suite_listeners)
+  fi
+  [[ "${#pids[@]}" -eq 0 ]] && return 0
+  local p
+  for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done
+  sleep 2
+  for p in "${pids[@]}"; do kill -0 "$p" 2>/dev/null && kill -9 "$p" 2>/dev/null; done
+}
+
 # ── the listener's cases ─────────────────────────────────────────────────────
 # Everything from here to the wake spool is ATTENDANCE: registration, wakes, the
 # breaker, orphans, the fifo, the spool. All of it is the shell tool's. The Go
@@ -387,6 +434,7 @@ skip "repeated sub/unsub leaves no stale fifo behind" "the listener is not in th
 say "— a stranded wake spool is recovered by the next read —"
 skip "stranded wake-spool bodies are presented by the next read" "the listener is not in this build: sub and unsub answer 'not implemented in this build', so there is no attendance here to interrogate"
 skip "a presented wake-spool body is forgotten, not re-presented" "the listener is not in this build: sub and unsub answer 'not implemented in this build', so there is no attendance here to interrogate"
+skip "cleanup reaps only this deployment's listeners (a same-path listener from another home survives)" "the listener is not in this build: sub and unsub answer 'not implemented in this build', so there is no attendance here to interrogate"
 else
 say "— delivery: registration, wake, backlog, liveness —"
 # Wake hook stub: records wakes instead of waking anything.
@@ -531,31 +579,30 @@ say "— the pidfile is the listener's licence to live —"
 # alone and prove nothing about the mandate.
 LOC_IDENTITY=$(ep alice) loc sub >/dev/null 2>&1
 sleep 1
+# The census has to be taken NOW, while the pidfile this case is about to
+# delete still exists — suite_listeners() reads exactly that file, and once
+# it is gone there is nothing left on disk naming a still-alive offender.
+# What survives is judged against THESE pids, not a re-scan taken later.
+census_before="$(suite_listeners)"
 rm -f "$LOC_HOME/run/$(ep alice).listener.pid"
 sleep 5
-# macOS pgrep has no -c. Count only listeners from THIS tree: the operator's own
-# deployment may be attending on the same machine and must not be counted, and
-# must certainly not be killed.
-survivors="$(pgrep -fl 'loc sub' 2>/dev/null | grep -c "$LOC_BIN_DIR/loc" || true)"
-survivors="${survivors:-0}"
+survivors=0
+for _p in $census_before; do kill -0 "$_p" 2>/dev/null && survivors=$((survivors+1)); done
 # Leaving is not enough: it must leave nothing behind. The fifo is named for the
 # generation that made it, so one left here is one left forever — nothing will
 # ever reuse that name. Counted by glob, not by ls|grep, so "no match" is simply
 # a path that does not exist.
 stale_fifos=0
 for f in "$LOC_HOME/run/$(ep alice)"*.listen.fifo; do [[ -e "$f" ]] && stale_fifos=$((stale_fifos+1)); done
-if [[ "$survivors" == "0" ]] && ! pgrep -f "nats subscribe queue.$(ep alice)" >/dev/null 2>&1 \
-   && [[ "$stale_fifos" == "0" ]]; then
+if [[ "$survivors" == "0" ]] && [[ "$stale_fifos" == "0" ]]; then
   ok "listener exits within 5 s when its pidfile is removed"
 else
-  bad "listener exits within 5 s when its pidfile is removed ($survivors listener(s) from this tree, tap $(pgrep -f "nats subscribe queue.$(ep alice)" >/dev/null && echo alive || echo dead), $stale_fifos stale fifo(s))"
+  bad "listener exits within 5 s when its pidfile is removed ($survivors listener(s)/tap(s) from this tree, $stale_fifos stale fifo(s))"
   rm -f "$LOC_HOME/run/$(ep alice)"*.listen.fifo
-  # Do not leave the orphan behind for the next run to trip over. Again: only
-  # processes whose command line names this tree. Its tap goes with it — the
-  # listener's TERM trap reaps its own children.
-  pgrep -fl 'loc sub' 2>/dev/null | grep "$LOC_BIN_DIR/loc" | while IFS= read -r _p; do
-    kill "${_p%% *}" 2>/dev/null
-  done
+  # Do not leave the orphan behind for the next run to trip over. Only the
+  # pids this case's own pre-deletion census named — never a scan of the
+  # process table by path.
+  reap_suite_listeners $census_before
 fi
 
 say "— attendance leaves nothing behind on disk —"
@@ -602,6 +649,34 @@ out="$(LOC_IDENTITY=$(ep alice) loc read 2>/dev/null)"
 if ! grep -q "stranded-in-wake-spool" <<<"$out"; then
   ok "a presented wake-spool body is forgotten, not re-presented"
 else bad "a presented wake-spool body is forgotten, not re-presented"; fi
+
+say "— cleanup reaps only this deployment's listeners (a same-path listener from another home survives) —"
+# The census this replaced was `pgrep -fl 'loc sub' | grep "$LOC_BIN_DIR/loc"`
+# — a filter on BINARY PATH. On a machine where the suite runs from the
+# deployment's own tree, the live seats attending right now run that exact
+# binary at that exact path; the filter cannot tell "this suite's listener"
+# from "the machine's real, live one", and the cleanup that followed it
+# killed every one of them.
+#
+# The plant stands in for that machine's live seat: a process whose command
+# line contains "$LOC_BIN_DIR/loc sub" (via `exec -a`, which sets argv[0] —
+# it is not the tool at all, and touches neither NATS nor $LOC_HOME), but
+# whose own LOC_HOME is a scratch dir that has nothing to do with the
+# suite's, and which registers no pidfile under the suite's $LOC_HOME/run.
+# reap_suite_listeners() with no arguments is exactly the cleanup this suite
+# runs on itself; the plant must be untouched by it.
+PLANT_HOME="$(mktemp -d)"
+LOC_HOME="$PLANT_HOME" bash -c "exec -a '$LOC_BIN_DIR/loc sub' sleep 300" &
+PLANT_PID=$!
+sleep 1
+reap_suite_listeners
+if kill -0 "$PLANT_PID" 2>/dev/null; then
+  ok "cleanup reaps only this deployment's listeners (a same-path listener from another home survives)"
+else
+  bad "cleanup reaps only this deployment's listeners (a same-path listener from another home survives)"
+fi
+kill "$PLANT_PID" 2>/dev/null
+rm -rf "$PLANT_HOME"
 fi
 # ── end of the listener's cases ──────────────────────────────────────────────
 
