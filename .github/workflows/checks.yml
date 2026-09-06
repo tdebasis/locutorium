@@ -180,16 +180,24 @@ jobs:
       - name: comment coverage on the pull request
         if: github.event_name == 'pull_request' && steps.probe.outputs.present == 'true'
         uses: actions/github-script@v7
+        env:
+          COVERAGE_TITLE: 'Go coverage'
+          COVERAGE_NOTE: 'Reported, not gated. The conformance suite is the gate; the per-package ratchet guards against coverage falling.'
+          COVERAGE_OVERALL: ${{ steps.total.outputs.overall }}
+          COVERAGE_NEW: ${{ steps.total.outputs.new }}
+          COVERAGE_ARTIFACT_URL: ${{ steps.coverage-artifact.outputs.artifact-url }}
         with:
           script: |
             const marker = '<!-- ci-coverage -->';
-            const overall = ${{ toJSON(steps.total.outputs.overall) }} || 'n/a';
-            const newpct = ${{ toJSON(steps.total.outputs.new) }} || 'n/a';
-            const artUrl = ${{ toJSON(steps.coverage-artifact.outputs.artifact-url) }};
+            const title = process.env.COVERAGE_TITLE || 'n/a';
+            const note = process.env.COVERAGE_NOTE || 'n/a';
+            const overall = process.env.COVERAGE_OVERALL || 'n/a';
+            const newpct = process.env.COVERAGE_NEW || 'n/a';
+            const artUrl = process.env.COVERAGE_ARTIFACT_URL;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const lines = [
               marker,
-              '### Go coverage',
+              `### ${title}`,
               '',
               `**Overall:** ${overall}`,
               `**New code:** ${newpct}`,
@@ -197,7 +205,7 @@ jobs:
               `- [Coverage on the run summary](${runUrl}) — per-package table and the functions below 100%`,
               artUrl ? `- [Downloadable HTML report](${artUrl}) — line-level, opens locally (a zip)` : '- HTML report: see the run artifacts',
               '',
-              '_Reported, not gated. The conformance suite is the gate; the per-package ratchet guards against coverage falling._',
+              `_${note}_`,
             ];
             const body = lines.join('\n');
             const { owner, repo } = context.repo;
