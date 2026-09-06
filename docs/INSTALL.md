@@ -34,7 +34,7 @@ The shell tool answers every verb. The Go build answers every verb except `sub`,
 Development only (the conformance suite): `jq`, `nats-server` on PATH, and BSD `sed` (`sed -i ''`);
 the suite is macOS-only for now. To run it against the Go build, `make build` first and then
 `LOC_BIN_DIR="$PWD/build/bin" LOC_IMPL=go bash conformance/run.sh` — the same file, the same cases,
-with the cases that are the shell tool's by nature skipped by name because that build has no listener.
+with the cases that are the shell tool's by nature skipped by name, each with its reason printed and counted.
 
 ## What `./install.sh` writes — the whole list
 
