@@ -72,6 +72,15 @@ deletes it. So if presenting fails part way — a dead terminal, a broken pipe �
 **re-presented next time, never dropped.** The failure direction is deliberate: duplicate rather
 than lose, and `id` is the key for spotting the duplicate (PROTOCOL.md §5).
 
+A message that has been **fetched but not yet acknowledged is invisible to a following read** for
+the length of the consumer's ack-wait — the server's default of **30 s**, which this tool sets
+nowhere today. `read` gives such a message back the moment it exits normally: on close it
+negatively acknowledges everything it was handed and did not take, so an interrupted read costs a
+duplicate and nothing else. A `read` **killed by a signal** (^C, `kill`) never reaches that step,
+so its in-flight message comes back only when the window expires — up to that half minute in which
+the mailbox reads emptier than it is. Catching the signal and closing through the same path is a
+follow-up; this build does not do it yet.
+
 A queue that is empty, or an endpoint that has never had a queue, reads as the two headings and a
 zero exit. A **medium that cannot be reached** is the opposite: nothing on standard out, the reason
 on standard error, exit 1. Silence and an unreachable broker are different facts and only one of
