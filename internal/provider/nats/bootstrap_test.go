@@ -14,6 +14,7 @@ package nats
 // nothing — it writes files and prints the steps an operator takes next.
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -41,6 +42,151 @@ var bootstrapNeeds = []string{"nats", "openssl"}
 // carries a dot, the backing object may not — and a grant written in the wrong
 // one refuses the reader its own mail in silence.
 func TestABootstrappedSeatReadsItsOwnFreshQueue(t *testing.T) {
+	const seat = "workshop.scribe"
+	home, _, anc, ajs := bootstrapHouse(t, seat)
+
+	if _, err := ajs.AddStream(&natsgo.StreamConfig{
+		Name:      presence.StreamName(seat),
+		Subjects:  []string{"queue." + seat},
+		Retention: natsgo.WorkQueuePolicy,
+		Storage:   natsgo.MemoryStorage,
+		Replicas:  1,
+	}); err != nil {
+		t.Fatalf("seed the seat's queue: %v", err)
+	}
+	const body = "bootstrapped-canary"
+	env := `{"id":"` + body + `","ts":"2026-01-14T09:00:00.000Z","from":"admin","to":"` + seat +
+		`","kind":"msg","body":"` + body + `"}`
+	if err := anc.Publish("queue."+seat, []byte(env)); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if err := anc.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+
+	t.Setenv("LOC_HOME", home)
+	t.Setenv("LOC_IDENTITY", seat)
+	p := &Provider{}
+	t.Cleanup(p.Close)
+
+	m, got, err := p.NextQueued(seat, 5*time.Second)
+	if err != nil {
+		t.Fatalf("the bootstrapped seat could not read its own queue: %v", err)
+	}
+	if !got {
+		t.Fatal("the bootstrapped seat read an empty mailbox; the message is in its stream")
+	}
+	if !strings.Contains(string(m.Data()), body) {
+		t.Errorf("got %q", string(m.Data()))
+	}
+	// The acknowledgement is a grant of its own — the ack subject carries the
+	// backing object's name, not the subject's — so the message must actually
+	// leave the stream.
+	if err := m.Ack(); err != nil {
+		t.Fatalf("ack: %v", err)
+	}
+	if err := waitForEmpty(t, ajs, presence.StreamName(seat)); err != nil {
+		t.Error(err)
+	}
+}
+
+// A BOOTSTRAPPED SEAT STANDS ITS OWN QUEUE UP AND TAKES IT DOWN AGAIN.
+//
+// This is the presence model's ordinary day, and it is exactly what the
+// conformance suite's Go lane now does at setup: `subscribe` creates the
+// endpoint's queue, mail arrives and is read, `unsubscribe` destroys it. What
+// makes that possible is three grants on the seat's OWN backing object and
+// nothing else — create, inspect, delete — which is what the presence suite's
+// access-control harness has always given a seat and what the shipped script
+// did not.
+//
+// Without them the create is REFUSED, and a refused JetStream request is
+// answered with silence: the call waits out its timeout and the seat is told
+// only that the medium did not reply. So a seat that cannot be granted this
+// does not fail loudly at subscribe — it hangs, then reports a timeout, and
+// the deployment looks broken rather than misconfigured.
+func TestABootstrappedSeatCreatesReadsAndDestroysItsOwnQueue(t *testing.T) {
+	const seat = "workshop.scribe"
+	home, _, anc, ajs := bootstrapHouse(t, seat)
+
+	t.Setenv("LOC_HOME", home)
+	t.Setenv("LOC_IDENTITY", seat)
+	p := &Provider{}
+	t.Cleanup(p.Close)
+
+	// NOBODY IS ATTENDING A FRESHLY BOOTSTRAPPED DEPLOYMENT. The script writes
+	// credentials and permissions; it creates no streams, so there is no
+	// mailbox for an agent that has not arrived.
+	attended, err := p.QueueExists(seat)
+	if err != nil {
+		t.Fatalf("the bootstrapped seat could not ask whether it is attended: %v", err)
+	}
+	if attended {
+		t.Fatal("a freshly bootstrapped deployment already holds a queue for the seat")
+	}
+
+	// SUBSCRIBE: the seat creates its own queue.
+	if err := p.CreateQueue(seat); err != nil {
+		t.Fatalf("the bootstrapped seat could not create its own queue: %v", err)
+	}
+	if attended, err := p.QueueExists(seat); err != nil {
+		t.Fatalf("the bootstrapped seat could not inspect the queue it just made: %v", err)
+	} else if !attended {
+		t.Fatal("the queue the seat created is not there")
+	}
+
+	// It is a real queue: mail put in it is read out of it. Seeded as the
+	// admin, so what is asserted is not asserted through the code under test.
+	const body = "subscribed-canary"
+	env := `{"id":"` + body + `","ts":"2026-01-14T09:00:00.000Z","from":"admin","to":"` + seat +
+		`","kind":"msg","body":"` + body + `"}`
+	if err := anc.Publish("queue."+seat, []byte(env)); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if err := anc.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	m, got, err := p.NextQueued(seat, 5*time.Second)
+	if err != nil {
+		t.Fatalf("the bootstrapped seat could not read the queue it made: %v", err)
+	}
+	if !got {
+		t.Fatal("the bootstrapped seat read an empty mailbox; the message is in its stream")
+	}
+	if !strings.Contains(string(m.Data()), body) {
+		t.Errorf("got %q", string(m.Data()))
+	}
+	if err := m.Ack(); err != nil {
+		t.Fatalf("ack: %v", err)
+	}
+
+	// UNSUBSCRIBE: the seat destroys it. Nothing accumulates for an agent that
+	// is not running, so leaving the stream behind would not be a tidiness
+	// failure — it would be a different model.
+	if err := p.DeleteQueue(seat); err != nil {
+		t.Fatalf("the bootstrapped seat could not destroy its own queue: %v", err)
+	}
+	if attended, err := p.QueueExists(seat); err != nil {
+		t.Fatalf("the bootstrapped seat could not confirm the queue is gone: %v", err)
+	} else if attended {
+		t.Error("the queue survived the seat's departure")
+	}
+	// Asked again through the admin, so the answer does not come from the
+	// build whose grants are the question.
+	if _, err := ajs.StreamInfo(presence.StreamName(seat)); !errors.Is(err, natsgo.ErrStreamNotFound) {
+		t.Errorf("the admin still finds %s: %v", presence.StreamName(seat), err)
+	}
+}
+
+// bootstrapHouse runs the SHIPPED script, boots the configuration it wrote,
+// and hands back the deployment plus an admin connection to it.
+//
+// Nothing here touches the operator's own deployment: LOC_HOME is a temp dir,
+// the fixed client and monitoring ports are overridden to a kernel-chosen one
+// and to none, and the script installs nothing — it writes files and prints
+// the steps an operator takes next.
+func bootstrapHouse(t *testing.T, seats ...string) (string, *natsserver.Server, *natsgo.Conn, natsgo.JetStreamContext) {
+	t.Helper()
 	for _, tool := range bootstrapNeeds {
 		if _, err := exec.LookPath(tool); err != nil {
 			// Skipped BY NAME, not silently: the case runs where the script's
@@ -49,15 +195,13 @@ func TestABootstrappedSeatReadsItsOwnFreshQueue(t *testing.T) {
 			t.Skipf("bootstrap.sh needs %s(1) on PATH; not here", tool)
 		}
 	}
-
-	const seat = "workshop.scribe"
 	home := t.TempDir()
 
 	script, err := filepath.Abs(filepath.Join("..", "..", "..", "providers", "nats", "bootstrap.sh"))
 	if err != nil {
 		t.Fatalf("locate bootstrap.sh: %v", err)
 	}
-	cmd := exec.Command("bash", script, seat)
+	cmd := exec.Command("bash", append([]string{script}, seats...)...)
 	cmd.Env = append(os.Environ(), "LOC_HOME="+home)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("bootstrap.sh: %v\n%s", err, out)
@@ -103,61 +247,20 @@ func TestABootstrappedSeatReadsItsOwnFreshQueue(t *testing.T) {
 		t.Fatalf("point the config at the scratch server: %v", err)
 	}
 
-	// Seeded as the admin the script generated, through its own credential
-	// file — so the assertion is not made through the code under test.
-	adminPass := credential(t, home, "admin")
-	anc, err := natsgo.Connect(srv.ClientURL(), natsgo.UserInfo("admin", adminPass), natsgo.Timeout(10*time.Second))
+	// Connected as the admin the script generated, through its own credential
+	// file — so a seeding write and a final check are made outside the code
+	// under test.
+	anc, err := natsgo.Connect(srv.ClientURL(), natsgo.UserInfo("admin", credential(t, home, "admin")),
+		natsgo.Timeout(10*time.Second))
 	if err != nil {
 		t.Fatalf("connect as the generated admin: %v", err)
 	}
-	defer anc.Close()
+	t.Cleanup(anc.Close)
 	ajs, err := anc.JetStream()
 	if err != nil {
 		t.Fatalf("admin jetstream: %v", err)
 	}
-	if _, err := ajs.AddStream(&natsgo.StreamConfig{
-		Name:      presence.StreamName(seat),
-		Subjects:  []string{"queue." + seat},
-		Retention: natsgo.WorkQueuePolicy,
-		Storage:   natsgo.MemoryStorage,
-		Replicas:  1,
-	}); err != nil {
-		t.Fatalf("seed the seat's queue: %v", err)
-	}
-	const body = "bootstrapped-canary"
-	env := `{"id":"` + body + `","ts":"2026-01-14T09:00:00.000Z","from":"admin","to":"` + seat +
-		`","kind":"msg","body":"` + body + `"}`
-	if err := anc.Publish("queue."+seat, []byte(env)); err != nil {
-		t.Fatalf("publish: %v", err)
-	}
-	if err := anc.Flush(); err != nil {
-		t.Fatalf("flush: %v", err)
-	}
-
-	t.Setenv("LOC_HOME", home)
-	t.Setenv("LOC_IDENTITY", seat)
-	p := &Provider{}
-	t.Cleanup(p.Close)
-
-	m, got, err := p.NextQueued(seat, 5*time.Second)
-	if err != nil {
-		t.Fatalf("the bootstrapped seat could not read its own queue: %v", err)
-	}
-	if !got {
-		t.Fatal("the bootstrapped seat read an empty mailbox; the message is in its stream")
-	}
-	if !strings.Contains(string(m.Data()), body) {
-		t.Errorf("got %q", string(m.Data()))
-	}
-	// The acknowledgement is a grant of its own — the ack subject carries the
-	// backing object's name, not the subject's — so the message must actually
-	// leave the stream.
-	if err := m.Ack(); err != nil {
-		t.Fatalf("ack: %v", err)
-	}
-	if err := waitForEmpty(t, ajs, presence.StreamName(seat)); err != nil {
-		t.Error(err)
-	}
+	return home, srv, anc, ajs
 }
 
 // credential reads one generated credential file. Its CONTENT never reaches an

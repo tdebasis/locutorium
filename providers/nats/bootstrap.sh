@@ -75,13 +75,29 @@ for name in "${ENDPOINTS[@]}" admin watch; do
       # own queue reads as empty while it is holding mail. Both spellings are
       # granted because which one the client asks on depends on the server it
       # is talking to.
+      #
+      # AND A SEAT MAKES ITS OWN QUEUE. Under the presence model a queue exists
+      # exactly while an agent is subscribed: `subscribe` creates the stream,
+      # `unsubscribe` destroys it, and nothing accumulates for an agent that is
+      # not running. So the three verbs a seat needs on its OWN backing object
+      # — create, inspect, delete — are granted here, on QUEUE_$s and on
+      # nothing else. INFO is already reachable through the wildcard above and
+      # is named again anyway, because a grant that is only implied is a grant
+      # the next edit can remove without noticing.
+      #
+      # registry.> is the question, not the answer: a seat ASKS who is
+      # attending an instance and the supervisor replies on the seat's inbox.
+      # Answering is a different job with a different grant, and this is not it.
       users_block+="      { user: $name, password: \"$hash\", permissions: {
           publish: { allow: [
-            \"queue.*\", \"queue.*.*\", \"topic.>\",
+            \"queue.*\", \"queue.*.*\", \"topic.>\", \"registry.>\",
             \"\$JS.ACK.QUEUE_$s.>\", \"\$JS.ACK.TOPICS.$s.>\",
             \"\$JS.API.INFO\",
             \"\$JS.API.STREAM.INFO.*\", \"\$JS.API.STREAM.NAMES\", \"\$JS.API.STREAM.LIST\",
             \"\$JS.API.STREAM.SUBJECTS.TOPICS\",
+            \"\$JS.API.STREAM.CREATE.QUEUE_$s\",
+            \"\$JS.API.STREAM.INFO.QUEUE_$s\",
+            \"\$JS.API.STREAM.DELETE.QUEUE_$s\",
             \"\$JS.API.CONSUMER.INFO.>\",
             \"\$JS.API.CONSUMER.MSG.NEXT.QUEUE_$s.$s\",
             \"\$JS.API.CONSUMER.MSG.NEXT.TOPICS.$s\",
