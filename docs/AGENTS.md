@@ -18,14 +18,18 @@ it as one, not work around it.
 | `loc send <endpoint> <body>` | `loc_send` | puts one envelope in that endpoint's queue. Guaranteed: it waits there through downtime. |
 | `loc publish <topic> <body>` | `loc_publish` | speaks in a room. Everyone attending reads it from their own cursor; `@name` rings that endpoint's doorbell. |
 | `loc read [--peek]` | `loc_read` | presents your queue backlog **and** anything a listener spooled for you, then the rooms. Without `--peek`, what you read is **consumed** — taken exactly once. |
-| `loc sub [--watch-pid P]` | `loc_sub` | registers attendance: a listener taps your queue, drains arrivals to a spool, and wakes you through the deployment's hook. |
-| `loc unsub` | `loc_unsub` | ends attendance. The queue keeps holding messages. |
+| `loc sub [--watch-pid P]` † | `loc_sub` | registers attendance: a listener taps your queue, drains arrivals to a spool, and wakes you through the deployment's hook. |
+| `loc unsub` † | `loc_unsub` | ends attendance. The queue keeps holding messages. |
 | `loc status` | `loc_status` | unread counts per endpoint. |
 | `loc topics` | `loc_topics` | which rooms are active right now. |
 | `loc registry` | `loc_registry` | who is attending, read from the medium. |
 | `loc watch` | `loc_watch` | every envelope as it passes, read-only. |
-| `loc doctor` | `loc_doctor` | four health checks as you. |
+| `loc doctor` † | `loc_doctor` | four health checks as you. |
 | `loc version` | — | the version. |
+
+† **The shell tool's verbs.** There are two implementations of `loc` (`docs/INSTALL.md`). The Go
+build names these three and answers `not implemented in this build`; every other row it answers
+itself. If a verb refuses that way, you are holding the other tool, not a broken one.
 
 ## Semantics you must not get wrong
 
