@@ -265,10 +265,33 @@ jobs:
             printf '%s\n' "$offenders"
             exit 1
           fi
-      - name: the medium
+      - name: the medium (hosted image only)
+        if: runner.environment == 'github-hosted'
+        # A hosted image starts empty, so it installs its own tooling. A
+        # self-hosted machine is somebody's computer: a job never installs,
+        # upgrades or cleans anything there (2026-09-06: this very step
+        # upgraded the operator's live server and ran a cleanup).
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
+          HOMEBREW_NO_INSTALL_UPGRADE: '1'
         run: |
           brew install nats-server
           brew install nats-io/nats-tools/nats
+      - name: the medium is present
+        # On every runner: the suite needs both binaries on PATH. Missing on a
+        # self-hosted machine is a setup fault to fix by hand, reported loudly,
+        # never repaired by the job.
+        run: |
+          set -euo pipefail
+          for tool in nats-server nats python3; do
+            if ! command -v "$tool" >/dev/null 2>&1; then
+              echo "::error::$tool is not on PATH on this runner (${{ runner.environment }}); install it by hand, the job will not"
+              exit 1
+            fi
+          done
+          nats-server --version
+          nats --version
       - name: the suite is the specification
         # It boots its own server on a random port in its own temp LOC_HOME and
         # tears both down, so nothing here needs a service or a fixture.
