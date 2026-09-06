@@ -46,6 +46,14 @@ printf '%s\n' "${ENDPOINTS[@]}" > "$LOC_HOME/endpoints"
 # --- users -------------------------------------------------------------------
 users_block=""
 for name in "${ENDPOINTS[@]}" admin watch; do
+  # THE TWO SPELLINGS OF ONE ENDPOINT. A subject may carry a dot; a JetStream
+  # object's name may not. So a namespaced endpoint <instance>.<agent> is a
+  # subject as written and a stream, consumer and ack subject with the dot
+  # substituted — QUEUE_workshop_scribe, not QUEUE_workshop.scribe. Every
+  # grant below that names a JetStream object uses $s, and only the subject
+  # grants use $name. An un-namespaced name has no dot, so $s is $name and an
+  # existing deployment's grants are unchanged.
+  s="${name//./_}"
   pw="$(pw_for)"
   printf '%s' "$pw" > "$LOC_HOME/creds/$name"
   chmod 600 "$LOC_HOME/creds/$name"
@@ -58,18 +66,29 @@ for name in "${ENDPOINTS[@]}" admin watch; do
           subscribe: { allow: [\"queue.>\", \"topic.>\"] },
           publish:   { deny:  [\">\"] } } }"$'\n' ;;
     *)
+      # A SEAT MAKES ITS OWN CURSOR. The reader's durable consumer on its own
+      # queue is created by the reader, not by the admin: `doctor --init`
+      # pre-creates one only for the endpoints in the registry at the time it
+      # runs, and a seat that stands its queue up when it arrives has none.
+      # Without CONSUMER.CREATE and CONSUMER.DURABLE.CREATE on QUEUE_$s the
+      # create is refused, a refusal is answered with SILENCE, and the seat's
+      # own queue reads as empty while it is holding mail. Both spellings are
+      # granted because which one the client asks on depends on the server it
+      # is talking to.
       users_block+="      { user: $name, password: \"$hash\", permissions: {
           publish: { allow: [
-            \"queue.*\", \"topic.>\",
-            \"\$JS.ACK.QUEUE_$name.>\", \"\$JS.ACK.TOPICS.$name.>\",
+            \"queue.*\", \"queue.*.*\", \"topic.>\",
+            \"\$JS.ACK.QUEUE_$s.>\", \"\$JS.ACK.TOPICS.$s.>\",
             \"\$JS.API.INFO\",
             \"\$JS.API.STREAM.INFO.*\", \"\$JS.API.STREAM.NAMES\", \"\$JS.API.STREAM.LIST\",
             \"\$JS.API.STREAM.SUBJECTS.TOPICS\",
             \"\$JS.API.CONSUMER.INFO.>\",
-            \"\$JS.API.CONSUMER.MSG.NEXT.QUEUE_$name.$name\",
-            \"\$JS.API.CONSUMER.MSG.NEXT.TOPICS.$name\",
-            \"\$JS.API.CONSUMER.DURABLE.CREATE.TOPICS.$name\",
-            \"\$JS.API.CONSUMER.CREATE.TOPICS.$name\", \"\$JS.API.CONSUMER.CREATE.TOPICS.$name.>\" ] },
+            \"\$JS.API.CONSUMER.MSG.NEXT.QUEUE_$s.$s\",
+            \"\$JS.API.CONSUMER.MSG.NEXT.TOPICS.$s\",
+            \"\$JS.API.CONSUMER.CREATE.QUEUE_$s.$s\",
+            \"\$JS.API.CONSUMER.DURABLE.CREATE.QUEUE_$s.$s\",
+            \"\$JS.API.CONSUMER.DURABLE.CREATE.TOPICS.$s\",
+            \"\$JS.API.CONSUMER.CREATE.TOPICS.$s\", \"\$JS.API.CONSUMER.CREATE.TOPICS.$s.>\" ] },
           subscribe: { allow: [\"queue.$name\", \"topic.>\", \"_INBOX.>\"] } } }"$'\n' ;;
   esac
 done
