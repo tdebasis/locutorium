@@ -156,9 +156,12 @@ func dispatch(args []string, w io.Writer) error {
 	case "watch":
 		return watchVerb(w, rest)
 
-	// The read path and the listener are not in this binary yet. They are
+	case "read":
+		return readVerb(w, rest)
+
+	// The listener and the health checks are not in this binary yet. They are
 	// named here rather than falling through to usage.
-	case "read", "sub", "unsub", "doctor":
+	case "sub", "unsub", "doctor":
 		return errNotImplemented
 
 	default:
