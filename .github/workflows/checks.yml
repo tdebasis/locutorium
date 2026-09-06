@@ -84,6 +84,17 @@ jobs:
         with:
           go-version: '1.27'
           cache: true
+      - name: the nats CLI (hosted image only)
+        # The bootstrap proof shells out to `nats server passwd` for its bcrypt
+        # hashes. A hosted image starts empty, so it installs the CLI at a pinned
+        # version; a self-hosted machine is somebody's computer and a job never
+        # installs there — the guard below is the same rule the conformance job
+        # keeps. GOPATH/bin is added to PATH for the steps that follow.
+        if: steps.probe.outputs.present == 'true' && runner.environment == 'github-hosted'
+        run: |
+          go install github.com/nats-io/natscli/nats@v0.4.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          "$(go env GOPATH)/bin/nats" --version
       - name: build
         if: steps.probe.outputs.present == 'true'
         run: go build ./...
@@ -93,6 +104,18 @@ jobs:
       - name: test
         if: steps.probe.outputs.present == 'true'
         run: go test -cover -coverprofile=coverage.out ./... | tee /tmp/cov.txt
+
+      - name: the shipped bootstrap reads its own queue
+        # The proof that providers/nats/bootstrap.sh generates a configuration
+        # under which a namespaced seat can read a fresh queue. It skips by name
+        # where the nats CLI is absent, so this step exists to show it RAN here:
+        # a skip is a failure of this step, not a pass.
+        if: steps.probe.outputs.present == 'true'
+        run: |
+          set -o pipefail
+          go test -count=1 -v -run 'TestABootstrappedSeatReadsItsOwnFreshQueue' ./internal/provider/nats/ | tee /tmp/bootstrap-proof.txt
+          grep -q -- '--- PASS: TestABootstrappedSeatReadsItsOwnFreshQueue' /tmp/bootstrap-proof.txt
+          if grep -q -- '--- SKIP' /tmp/bootstrap-proof.txt; then echo "::error::the bootstrap proof was skipped, not run"; exit 1; fi
 
       # Reported, deliberately not gated. A coverage threshold gets satisfied by
       # writing tests that move a number; the gate here is the conformance suite,
