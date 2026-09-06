@@ -484,6 +484,7 @@ if "$ROOT/conformance/check-version.sh" >/dev/null 2>&1; then
 else bad "VERSION, loc version, docs and tag agree (run conformance/check-version.sh)"; fi
 
 say "— repo cleanliness (future-public discipline) —"
+say "  (cleanliness list read from: $REAL_LOC_HOME/forbidden)"
 if LOC_FORBIDDEN_FILE="$REAL_LOC_HOME/forbidden" "$ROOT/conformance/check-clean.sh" >/dev/null 2>&1; then
   ok "repo carries no deployment/internal vocabulary"
 else bad "repo carries no deployment/internal vocabulary (run conformance/check-clean.sh)"; fi
