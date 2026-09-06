@@ -259,7 +259,14 @@ jobs:
           # ACTIONS_* is GitHub's own runtime, present on hosted runners too —
           # it is not the operator's, so it is filtered out before matching.
           filtered="$(printf '%s\n' "$names" | grep -v '^ACTIONS_' || true)"
-          offenders="$(printf '%s\n' "$filtered" | grep -E '^(ANTHROPIC_|SUPABASE_|OPENAI_|AWS_|GOOGLE_|NATS_CREDS|HOMEBREW_GITHUB_API_TOKEN$|GH_TOKEN$|GITHUB_TOKEN$)|SECRET|PASSWORD|API_KEY|PRIVATE_KEY' || true)"
+          # The built-in pattern: vendor prefixes and the generic credential words.
+          # Deployment-specific prefixes are DEPLOYMENT DATA, not source (the same
+          # rule as the cleanliness list): a self-hosted runner supplies its own in
+          # LOC_AUDIT_EXTRA (an extended regex) from the runner's .env, and it is
+          # appended here. The audit's own variable is excluded from the audit.
+          pattern='^(ANTHROPIC_|SUPABASE_|OPENAI_|AWS_|GOOGLE_|ALPACA_|SLACK_|NATS_CREDS|HOMEBREW_GITHUB_API_TOKEN$|GH_TOKEN$|GITHUB_TOKEN$|NPM_TOKEN$)|SECRET|PASSWORD|PASSWD|TOKEN|CRED|API_KEY|PRIVATE_KEY|_KEY(_|$)'
+          if [ -n "${LOC_AUDIT_EXTRA:-}" ]; then pattern="${pattern}|${LOC_AUDIT_EXTRA}"; fi
+          offenders="$(printf '%s\n' "$filtered" | grep -v '^LOC_AUDIT_EXTRA$' | grep -E "$pattern" || true)"
           if [ -n "$offenders" ]; then
             echo "::error::operator credentials found in environment:"
             printf '%s\n' "$offenders"
