@@ -192,7 +192,7 @@ say "— reading must not destroy what it failed to show —"
 # a `fetch | render` pipeline, so a broken pipe or a renderer error consumed the
 # message and showed nobody anything.
 if [[ "$LOC_IMPL" == go ]]; then
-skip "a read that fails mid-render re-presents the message instead of losing it" "the case pipes read into head -c 1 with a 12-byte body, which the Go build writes into the pipe buffer before head has exited, so the write succeeds and the message is rightly taken; the shell tool passes only because it spawns its renderer after writing the heading, by which time head is gone; the property — a mid-render failure never loses a message — is proven for this build by cmd/loc/read_pipe_test.go with a body larger than the pipe buffer"
+skip "a read that fails mid-render re-presents the message instead of losing it" "the case pipes read into head -c 1 with a 12-byte body, which the Go build writes into the pipe buffer before head has exited, so the write succeeds and the message is rightly taken; the shell tool passes only because it spawns its renderer after writing the heading, by which time head is gone; the property — a mid-render failure never loses a message — is proven for this build by cmd/loc/read_pipe_test.go, TestMessagePlane_ReadUnderAClosedPipeHandsTheMessageBack, which pads the body past the pipe buffer so the closed reader lands on the write that carries the message"
 else
 env LOC_IDENTITY=$(ep alice) loc send $(ep bob) "loss-canary" >/dev/null 2>&1
 # Reader dies after one byte; every later write gets SIGPIPE mid-render.
