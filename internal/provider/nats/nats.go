@@ -27,6 +27,7 @@ import (
 
 	"github.com/tdebasis/locutorium/internal/config"
 	"github.com/tdebasis/locutorium/internal/loc"
+	"github.com/tdebasis/locutorium/internal/presence"
 	"github.com/tdebasis/locutorium/internal/provider"
 )
 
@@ -207,15 +208,42 @@ func (p *Provider) Status(w io.Writer) error {
 	for _, e := range loc.Endpoints() {
 		pending := "?"
 		if connected == nil {
-			if ci, err := p.js.ConsumerInfo("QUEUE_"+e, e); err == nil && ci != nil {
-				pending = fmt.Sprintf("%d", ci.NumPending)
-			}
+			pending = p.unread(e)
 		}
 		if _, err := io.WriteString(w, formatStatus(e, pending)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// unread is how many messages an endpoint has not taken, or "?" when the
+// number cannot be had.
+//
+// A NAMESPACED endpoint is read from its stream. The backing object is named
+// by substitution, because a subject may carry a dot where a durable object's
+// name may not, and nothing creates a consumer on it — so the stream's own
+// message count is the figure: work-queue retention drops a message when it is
+// taken, which makes a stored message exactly an untaken one. Asking such an
+// endpoint for a consumer is what made this report print "?" for every one of
+// them.
+//
+// An UN-NAMESPACED endpoint keeps the durable-consumer reading. There a
+// consumer exists and holds messages it has been delivered but not yet
+// acknowledged; those are still stored, so a stream count would report taken
+// mail as waiting, and the consumer's pending count is the honest number.
+func (p *Provider) unread(endpoint string) string {
+	stream := presence.StreamName(endpoint)
+	if presence.ValidEndpoint(endpoint) == nil {
+		if si, err := p.js.StreamInfo(stream); err == nil && si != nil {
+			return fmt.Sprintf("%d", si.State.Msgs)
+		}
+		return "?"
+	}
+	if ci, err := p.js.ConsumerInfo(stream, endpoint); err == nil && ci != nil {
+		return fmt.Sprintf("%d", ci.NumPending)
+	}
+	return "?"
 }
 
 // formatTopic and formatStatus are the two lines these verbs print. They are
