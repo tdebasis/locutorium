@@ -12,12 +12,20 @@ Errors print `loc: <message>` on stderr and exit **1**. Everything else exits **
 | `loc read [--peek]` | take your messages |
 | `loc sub [--watch-pid <pid>]` | start your listener, so you get woken |
 | `loc unsub` | stop your listener |
+| `loc subscribe <endpoint> ...` | register an agent instance and create its queue |
+| `loc unsubscribe <endpoint> [--force]` | free the endpoint and destroy its queue |
+| `loc sweep [<instance>]` | unsubscribe registrations whose process is gone |
+| `loc emit <kind> <endpoint> ...` | publish one lifecycle or activity event |
 | `loc status` | unread count per endpoint |
+| `loc status <endpoint>` | one agent's three facts, each with its reason |
 | `loc topics` | topics with traffic in the window |
-| `loc registry` | who is currently connected |
-| `loc watch` | follow all traffic, read-only |
+| `loc registry [<instance>] [--json]` | who is registered in an instance, asked of that instance's host; fails when no host answers |
+| `loc watch [<instance>]` | follow an instance's event stream, read-only |
 | `loc doctor [--init]` | health checks; `--init` creates the streams |
 | `loc version` | version string |
+
+`read`, `sub`, `unsub` and `doctor` are the shell tool's verbs. The Go build names them and answers
+`not implemented in this build`; every other row it answers itself.
 
 ---
 
@@ -89,14 +97,109 @@ endpoint is gone.
 
 A wake never makes a message unreadable; `read` presents spools as well as the queue.
 
+## subscribe
+
+```
+loc subscribe <endpoint> --pid <n> --type <t> --version <v>
+              [--display <name>] [--role <role>] [--cwd <dir>]
+```
+
+Registers one agent instance, creates its queue, and publishes `agent.subscribe` — the one heavy
+event, carrying the whole registration so that nothing later has to repeat it.
+
+The endpoint is fully qualified, `<instance>.<agent>`, each segment `[a-z0-9-]+`; the underscore is
+barred, because the backing object's name is the endpoint with its dots substituted for underscores
+and the substitution has to stay injective (PRESENCE.md §Subjects, endpoints and queues). `--pid` is
+the process id of the agent that was launched, and `--type` and `--version` say what program it is.
+`--display` and `--role` are what a person or a display should call it and what it is there to do;
+both are optional, and a role that was not given is absent from the event rather than empty. `--cwd`
+records where it is working.
+
+An endpoint holds **one instance at a time, and a held one is refused** (non-zero), naming the
+incumbent's process — displacing it is a deliberate act by whoever knows the old process is
+finished, not a side effect of somebody else subscribing (PRESENCE.md §One agent per endpoint).
+
+A pid that is already gone is registered anyway, with no start time. The caller is reporting what it
+launched; noticing that it did not survive is `sweep`'s job.
+
+## unsubscribe
+
+```
+loc unsubscribe <endpoint> [--reason clean|expiry] [--force]
+```
+
+Removes the registration, destroys the queue, and publishes `agent.unsubscribe`. Leaving cleanly and
+leaving by expiry are the same occurrence with different causes, so they are one event with a
+reason rather than two kinds; `--reason` is `clean` by default and takes nothing else.
+
+Plain `unsubscribe` is safe reconciliation: an empty endpoint is a no-op that announces nothing, a
+dead incumbent is cleared, and a **live one is refused** (non-zero, naming its process). That is
+what makes an unconditional unsubscribe-then-subscribe restart safe — a crashed predecessor is
+cleared, a working agent is never displaced by accident. `--force` is the deliberate displacement,
+and it is a separate word because it is a separate decision (PRESENCE.md §How an agent leaves).
+
+## sweep
+
+```
+loc sweep [<instance>]
+```
+
+Checks every registration in the namespace against its recorded process and unsubscribes the ones
+whose process is gone, with reason `expiry`. An agent that crashes cannot announce its own
+departure, so something has to do it on the agent's behalf.
+
+**It must run on the machine holding the processes** — a process id means nothing anywhere else.
+With `<instance>` omitted it means the caller's own, taken from its identity; an identity that is
+not of the form `<instance>.<agent>` is refused, because there is nothing to take one from. A sweep
+with nothing to reap publishes nothing, and that silence is what makes it safe to run on a timer.
+
+## emit
+
+```
+loc emit <kind> <endpoint> [--ts <t>] [--tool <name>] [--refs <id,id>]
+```
+
+Publishes one lifecycle or activity event. `<kind>` is one of the taxonomy's kinds (PRESENCE.md
+§Events → Taxonomy); anything else is a usage error rather than an event nobody understands.
+
+`--ts` is the moment the thing happened, carried verbatim — an adapter should always pass it, since
+the publish time is only correct for something reporting itself immediately. `--refs` is a
+comma-separated list of event ids.
+
+**This is the one verb that does not report an unreachable medium.** It runs inside the agent's own
+lifecycle hook, so anything it waits on the agent waits on: the event is dropped and the exit is
+clean. The local activity record is updated either way, because an event that could not be published
+still happened, and a reader asking later deserves the truth about it.
+
 ## status
 
 ```
 loc status
+loc status <endpoint>
 ```
 
-Unread count per endpoint. If the medium is unreachable this prints `?` rather than failing, so a
-`?` means "could not ask", not "zero".
+Bare, it is the message plane's report: the unread count for each endpoint in `$LOC_HOME/endpoints`.
+If the medium is unreachable this prints `?` rather than failing, so a `?` means "could not ask",
+not "zero". A namespaced endpoint's queue has no consumer on it, so the number is what that queue is
+holding — under work-queue retention a stored message is an untaken one.
+
+With an endpoint it is the presence report: three facts, **each with the reason for it**. *Away*
+because there is no process and *idle* because no event arrived inside the window are different
+situations, and a report that printed only the conclusion would hide which one it is looking at
+(PRESENCE.md §Command-line operations).
+
+```
+workshop.scribe
+  registered: no
+  process:    unknown (no registration)
+  activity:   unknown (no registration)
+```
+
+It touches no medium — every answer it gives is held locally, which is what lets it answer at all
+when the broker is the thing that is wrong. An unregistered endpoint is a truthful answer to a fair
+question rather than a failure, so it exits **0**; a name that is not of the form
+`<instance>.<agent>`, or an `idle_window` this deployment cannot parse, exits **1**. An event counts
+as current for `idle_window` after it arrived.
 
 ## topics
 
@@ -110,24 +213,34 @@ none — note that an unreachable medium looks the same as an empty one here.
 ## registry
 
 ```
-loc registry
+loc registry [<instance>] [--json]
 ```
 
-Who is connected right now, read from the medium itself rather than from a file, so it cannot go
-stale.
+Who is registered in an instance, asked of that instance's host. Events describe changes and the bus
+keeps no history, so a consumer that started after an agent joined has missed the only event that
+carried its details; this asks for the current picture instead of replaying a history that does not
+exist (PRESENCE.md §Who is here right now).
 
-> **Requires `monitor_url` in `$LOC_HOME/config`, and a medium actually configured to expose that
-> port.** `providers/nats/bootstrap.sh` does not currently write either, so on a freshly bootstrapped
-> deployment this command cannot work until both are added by hand.
+The request goes out on `registry.<instance>` and the host answers, because the host holds the
+registrations — it created them. **Nobody answering is a failure, not an empty roster**: the command
+exits non-zero and names the subject that went unanswered. A host that answers with an empty roster
+prints `(no agents registered)` and exits **0**; the two are different, and telling them apart is
+the point.
+
+With `<instance>` omitted it means the caller's own, taken from its identity. `--json` hands back
+what the host said, unreshaped — a consumer wants the reply, and a reply this tool had rewritten
+would be a second format to learn. The wait for an answer is a fixed two seconds.
 
 ## watch
 
 ```
-loc watch
+loc watch [<instance>]
 ```
 
-Every message as it passes, both queues and topics. Read-only — the credential it uses is denied
-publish by the server, not merely discouraged. `^C` to stop.
+Follows one instance's event stream, writing each event out as a raw line as it arrives, until the
+connection ends. Read-only — the credential it uses is denied publish by the server, not merely
+discouraged. `^C` to stop. With `<instance>` omitted it means the caller's own, taken from its
+identity. A follow that simply ends is not an error; a follow that ends badly is reported.
 
 ## doctor
 
@@ -159,14 +272,18 @@ docs and the git tag all agree.
 
 | key | default | effect |
 |---|---|---|
-| `nats_url` | `nats://127.0.0.1:4222` | where the medium is |
 | `provider` | none | which provider backs this house |
-| `monitor_url` | none | required by `registry` |
-| `topic_window` | `7d` | how long topic messages live |
-| `wake_window_seconds` | `5` | wakes are coalesced across this window |
-| `wake_breaker_per_minute` | `6` | cap on wakes per minute |
-| `wake_breaker_per_hour` | `60` | cap on wakes per hour |
+| `nats_url` | `nats://127.0.0.1:4222` | where the medium is |
+| `idle_window` | `10m` | how long after an event `status <endpoint>` still reads *active* |
 | `send_requires_attendance` | `no` | refuse sends to endpoints with no listener |
+| `monitor_url` | none | read by the shell tool's own `registry`, and written by its bootstrap; no Go verb reads it |
+| `topic_window` | `7d` | how long topic messages live (the shell tool) |
+| `wake_window_seconds` | `5` | wakes are coalesced across this window (the shell tool) |
+| `wake_breaker_per_minute` | `6` | cap on wakes per minute (the shell tool) |
+| `wake_breaker_per_hour` | `60` | cap on wakes per hour (the shell tool) |
+
+The first four are every key the Go build reads; the rest belong to the shell tool. `registry`'s
+wait for a host is fixed in the code, not a key.
 
 When a breaker trips it says so in `run/<endpoint>.delivery.log` and **suppresses only the wake**.
 No message is lost; the next read still finds everything.
