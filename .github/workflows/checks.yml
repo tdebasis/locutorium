@@ -58,6 +58,10 @@ jobs:
         run: bash conformance/check-clean.sh
       - name: one version, agreed everywhere
         run: bash conformance/check-version.sh
+      - name: new-lines script self-test
+        # Exercised on every run, whether or not there is Go in the tree,
+        # since it needs no Go toolchain or coverage profile to check itself.
+        run: python3 .github/scripts/new-lines-coverage.py --self-test
 
   go:
     name: go
@@ -167,11 +171,20 @@ jobs:
       - name: coverage total
         id: total
         if: steps.probe.outputs.present == 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           # The single project-wide figure, from the profile go test wrote.
           overall="$(go tool cover -func=coverage.out | tail -1 | awk '{print $NF}')"
           echo "overall=$overall" >> "$GITHUB_OUTPUT"
-          # new-lines percentage is populated when diff-cover lands; left unset here, so the shared comment step prints n/a
+          # new-lines percentage: only means anything on a pull request, where
+          # there is a base commit to diff against. BASE_SHA travels through
+          # env, never inline in the diff command, so a ref name can never
+          # become a command.
+          if [ -n "${BASE_SHA:-}" ]; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+            git diff -U0 "$BASE_SHA" HEAD -- '*.go' ':!*_test.go' | python3 .github/scripts/new-lines-coverage.py coverage.out >> "$GITHUB_OUTPUT"
+          fi
 
       # Post the coverage headline onto the PR, so it is read without clicking
       # into the run. MECHANICAL: the github-actions bot posts a sticky comment
