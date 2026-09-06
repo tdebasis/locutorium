@@ -1,33 +1,41 @@
 #!/usr/bin/env bash
 # install.sh — put loc on your PATH and the medium under launchd.
 #
-# It writes exactly two things and nothing else:
-#   1. $PREFIX/loc — a symlink to this tree's bin/loc
-#   2. $HOME/Library/LaunchAgents/com.locutorium.nats-server.plist — the server agent
+# It writes these things and nothing else:
+#   1. $PREFIX/loc — a symlink to this tree's bin/loc, the shell tool
+#   2. $PREFIX/loc-go — a symlink to this tree's build/bin/loc, the Go build (--go only)
+#   3. $HOME/Library/LaunchAgents/com.locutorium.nats-server.plist — the server agent
 # It never writes under $LOC_HOME (your deployment: creds, config, endpoints, store),
 # never runs bootstrap for you, and never restarts a running agent unless asked.
 #
 # Usage:
-#   ./install.sh [--prefix DIR] [--dry-run] [--no-service] [--restart-service]
+#   ./install.sh [--prefix DIR] [--go] [--dry-run] [--no-service] [--restart-service]
 #   ./install.sh --uninstall [--prefix DIR] [--dry-run]
+#
+# --go is ADDITIVE. It runs `make build` and links the stamped binary beside the
+# shell tool as loc-go; the loc link is untouched, and both keep answering. The
+# two are named apart on purpose: one PATH, two implementations, no ambiguity
+# about which one answered.
 #
 # Exit: 0 done (or nothing to do) · 2 usage · 3 missing dependency · 4 refusal · 5 launchctl failed
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 TARGET="$ROOT/bin/loc"
+GO_TARGET="$ROOT/build/bin/loc"
 LOC_HOME="${LOC_HOME:-$HOME/.locutorium}"
-PREFIX="" DRY=no UNINSTALL=no NO_SERVICE=no RESTART=no
+PREFIX="" DRY=no UNINSTALL=no NO_SERVICE=no RESTART=no GO_BUILD=no
 
-usage() { sed -n '2,13p' "${BASH_SOURCE[0]}"; exit 2; }
+usage() { sed -n '2,18p' "${BASH_SOURCE[0]}"; exit 2; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --prefix) PREFIX="${2:-}"; [[ -n "$PREFIX" ]] || usage; shift 2 ;;
+    --go) GO_BUILD=yes; shift ;;
     --dry-run) DRY=yes; shift ;;
     --uninstall) UNINSTALL=yes; shift ;;
     --no-service) NO_SERVICE=yes; shift ;;
     --restart-service) RESTART=yes; shift ;;
-    -h|--help) sed -n '2,13p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help) sed -n '2,18p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "install: unknown argument: $1" >&2; usage ;;
   esac
 done
@@ -38,7 +46,13 @@ if ! (( BASH_VERSINFO[0] > 3 || (BASH_VERSINFO[0] == 3 && BASH_VERSINFO[1] >= 2)
   missing+=("bash >= 3.2 (found $BASH_VERSION)")
 fi
 command -v nats    >/dev/null 2>&1 || missing+=("nats — brew install nats-io/nats-tools/nats")
-command -v python3 >/dev/null 2>&1 || missing+=("python3 — xcode-select --install, or brew install python")
+command -v python3 >/dev/null 2>&1 || missing+=("python3 — the shell tool needs it for envelope JSON and character counting; xcode-select --install, or brew install python")
+# Only --go needs a toolchain, and it needs one on the machine: this script never
+# installs anything, so an absent `go` is a named missing dependency like the rest.
+if [[ "$GO_BUILD" == yes ]]; then
+  command -v go   >/dev/null 2>&1 || missing+=("go — the Go build needs it (--go); brew install go, or drop --go to install the shell tool alone")
+  command -v make >/dev/null 2>&1 || missing+=("make — the Go build is made by the Makefile (--go); xcode-select --install")
+fi
 if [[ "$NO_SERVICE" == no ]] && ! command -v nats-server >/dev/null 2>&1; then
   missing+=("nats-server — brew install nats-server (or pass --no-service to talk to a server elsewhere)")
 fi
@@ -60,21 +74,56 @@ if [[ -z "$PREFIX" ]]; then
   else PREFIX="$HOME/.local/bin"; fi
 fi
 LINK="$PREFIX/loc"
+GO_LINK="$PREFIX/loc-go"
 changed=0
+
+# ── one link, made or reported ───────────────────────────────────────────────
+# Both binaries are the same artifact shape — a symlink from the prefix into this
+# clone — so they are made by one function and refuse in one voice. A second copy
+# of this logic is a second place for the refusals to drift apart.
+link_artifact() { # link_artifact <link> <target>
+  local link="$1" target="$2" cur
+  if [[ -L "$link" ]]; then
+    cur="$(readlink "$link")"
+    if [[ "$cur" == "$target" ]]; then echo "UNCHANGED  $link -> $target"; return 0; fi
+    echo "CHANGED    $link: $cur -> $target"; changed=$((changed+1))
+    [[ "$DRY" == yes ]] || ln -sfn "$target" "$link"
+  elif [[ -e "$link" ]]; then
+    echo "install: $link is a real file, not a link; I will not delete something I did not create — move it aside and re-run" >&2
+    exit 4
+  else
+    echo "NEW        $link -> $target"; changed=$((changed+1))
+    if [[ "$DRY" == no ]]; then
+      [[ -d "$PREFIX" ]] || mkdir -p "$PREFIX"
+      ln -s "$target" "$link"
+    fi
+  fi
+}
+
+# OWNERSHIP IS THE WHOLE TEST. A link is removed only when it points at the
+# artifact THIS clone would have made; anything else belongs to somebody, and
+# an installer that deletes what it did not create is not an installer.
+unlink_artifact() { # unlink_artifact <link> <target>
+  local link="$1" target="$2"
+  if [[ -L "$link" ]]; then
+    if [[ "$(readlink "$link")" == "$target" ]]; then
+      echo "REMOVE     $link"; [[ "$DRY" == yes ]] || rm -f "$link"; changed=$((changed+1))
+    else
+      echo "install: $link points at $(readlink "$link"), not at this tree; leaving it alone" >&2; exit 4
+    fi
+  elif [[ -e "$link" ]]; then
+    echo "install: $link is a real file, not a link I made; leaving it alone" >&2; exit 4
+  else
+    echo "UNCHANGED  $link (absent)"
+  fi
+}
 
 # ── uninstall ────────────────────────────────────────────────────────────────
 if [[ "$UNINSTALL" == yes ]]; then
-  if [[ -L "$LINK" ]]; then
-    if [[ "$(readlink "$LINK")" == "$TARGET" ]]; then
-      echo "REMOVE     $LINK"; [[ "$DRY" == yes ]] || rm -f "$LINK"; changed=$((changed+1))
-    else
-      echo "install: $LINK points at $(readlink "$LINK"), not at this tree; leaving it alone" >&2; exit 4
-    fi
-  elif [[ -e "$LINK" ]]; then
-    echo "install: $LINK is a real file, not a link I made; leaving it alone" >&2; exit 4
-  else
-    echo "UNCHANGED  $LINK (absent)"
-  fi
+  unlink_artifact "$LINK" "$TARGET"
+  # Not gated on --go: uninstall removes everything this clone made, and the
+  # ownership test is what keeps that safe. An absent loc-go is simply absent.
+  unlink_artifact "$GO_LINK" "$GO_TARGET"
   if [[ "$NO_SERVICE" == no ]]; then
     # shellcheck source=providers/nats/service.sh
     source "$ROOT/providers/nats/service.sh"
@@ -85,23 +134,19 @@ if [[ "$UNINSTALL" == yes ]]; then
   exit 0
 fi
 
-# ── symlink ──────────────────────────────────────────────────────────────────
-if [[ -L "$LINK" ]]; then
-  cur="$(readlink "$LINK")"
-  if [[ "$cur" == "$TARGET" ]]; then echo "UNCHANGED  $LINK -> $TARGET"
+# ── symlinks ─────────────────────────────────────────────────────────────────
+link_artifact "$LINK" "$TARGET"
+
+# The Go build, when asked for. Built first: a link to a binary that was never
+# made points at nothing, and the failure would surface as a puzzle at the next
+# invocation rather than here, where the person is watching.
+if [[ "$GO_BUILD" == yes ]]; then
+  if [[ "$DRY" == yes ]]; then
+    echo "           --dry-run: 'make build' not run; $GO_LINK would point at the binary it makes"
   else
-    echo "CHANGED    $LINK: $cur -> $TARGET"; changed=$((changed+1))
-    [[ "$DRY" == yes ]] || ln -sfn "$TARGET" "$LINK"
+    (cd "$ROOT" && make build) || { echo "install: 'make build' failed; $GO_LINK not linked" >&2; exit 3; }
   fi
-elif [[ -e "$LINK" ]]; then
-  echo "install: $LINK is a real file, not a link; I will not delete something I did not create — move it aside and re-run" >&2
-  exit 4
-else
-  echo "NEW        $LINK -> $TARGET"; changed=$((changed+1))
-  if [[ "$DRY" == no ]]; then
-    [[ -d "$PREFIX" ]] || mkdir -p "$PREFIX"
-    ln -s "$TARGET" "$LINK"
-  fi
+  link_artifact "$GO_LINK" "$GO_TARGET"
 fi
 case ":$PATH:" in *":$PREFIX:"*) ;; *) echo "           $PREFIX is not on your PATH; add:  export PATH=\"$PREFIX:\$PATH\"" ;; esac
 
