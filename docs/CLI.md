@@ -83,6 +83,8 @@ follow-up; this build does not do it yet. A **reader that closes early** — a p
 went away, a dead terminal — is not one of those deaths: for this build it is an ordinary **write
 error**, so `read` stops without acknowledging and the unshown message is handed back on exit.
 
+Presence events published on the instance's topic are **not mail**: `read` passes over them — its room cursor advances past each one — and shows only conversation, and separating the two at the subject level is tracked.
+
 A queue that is empty, or an endpoint that has never had a queue, reads as the two headings and a
 zero exit. A **medium that cannot be reached** is the opposite: nothing on standard out, the reason
 on standard error, exit 1. Silence and an unreachable broker are different facts and only one of

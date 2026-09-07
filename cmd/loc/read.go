@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"time"
 
 	"github.com/tdebasis/locutorium/internal/config"
 	"github.com/tdebasis/locutorium/internal/loc"
+	model "github.com/tdebasis/locutorium/internal/presence"
 	"github.com/tdebasis/locutorium/internal/provider"
 )
 
@@ -98,9 +100,10 @@ func read(p provider.Provider, w io.Writer, peek bool) error {
 		return err
 	}
 
+	// A queue is never filtered: it carries only mail.
 	if err := drain(w, m, got, func() (provider.Message, bool, error) {
 		return r.NextQueued(me, fetchWait)
-	}); err != nil {
+	}, nil); err != nil {
 		return err
 	}
 
@@ -113,18 +116,54 @@ func read(p provider.Provider, w io.Writer, peek bool) error {
 	}
 	return drain(w, m, got, func() (provider.Message, bool, error) {
 		return r.NextTopic(me, fetchWait)
-	})
+	}, isPresenceEvent)
+}
+
+// isPresenceEvent reports whether a topic payload is a presence event rather
+// than something somebody said.
+//
+// THE INSTANCE'S TOPIC CARRIES TWO DIFFERENT THINGS. Conversation goes to
+// topic.<room>; the presence model publishes its events to topic.<instance>;
+// and the message plane's TOPICS stream captures topic.>, so a reader's room
+// cursor is handed both. The subject-level separation is tracked separately —
+// this is the read side of it.
+//
+// A payload is an event IFF it is a JSON OBJECT WHOSE `kind` IS ONE OF THE SIX
+// PRESENCE KINDS, and the taxonomy is asked for rather than restated, so a
+// seventh kind is filtered the day it is added. Unmarshalling into a struct is
+// what makes "object" part of the test: a JSON string, number or array is a
+// type error and is therefore mail. The predicate is deliberately narrow —
+// everything it does not recognise is mail, which fails towards showing a
+// reader something they did not need rather than hiding something they did.
+func isPresenceEvent(raw []byte) bool {
+	var probe struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return false
+	}
+	return model.ValidKind(probe.Kind)
 }
 
 // drain shows and then forgets, in that order, until there is nothing left.
-func drain(w io.Writer, m provider.Message, got bool, next func() (provider.Message, bool, error)) error {
+//
+// skip, when non-nil, names the payloads this medium hands over that are NOT
+// mail. One of those is PASSED OVER: nothing is rendered and the loop goes on
+// past it. The acknowledgement still happens, and on a room that is a cursor
+// move for this reader alone — TOPICS is limits-retention, so no other
+// reader's copy is touched — not a deletion. Leaving it unacknowledged would
+// hand the same event to this reader on every read for as long as the room
+// keeps it.
+func drain(w io.Writer, m provider.Message, got bool, next func() (provider.Message, bool, error), skip func([]byte) bool) error {
 	var err error
 	for got {
 		// The write, then the ack that deletes what it carried — and a write
 		// that failed returns here at once, with nothing acknowledged, so the
 		// message it never showed is still owed to this reader.
-		if err = present(w, m.Data()); err != nil {
-			return err
+		if skip == nil || !skip(m.Data()) {
+			if err = present(w, m.Data()); err != nil {
+				return err
+			}
 		}
 		if err = m.Ack(); err != nil {
 			return err
