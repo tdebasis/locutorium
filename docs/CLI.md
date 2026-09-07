@@ -332,7 +332,10 @@ the initialize handshake, the agent token as the display name and the working di
 runtime lets go (stdin reaches EOF, or a signal arrives) it unsubscribes and exits 0. A seat held by
 a registration whose process is DEAD is displaced, and the dead pid is written to the delivery log.
 A seat held by a LIVE process that did not launch this server is refused, with the pid named, and the
-server exits 1 — the runtime shows it as failed, which is the truth.
+server exits 1 — the runtime shows it as failed, which is the truth. **The pid registered is whoever
+launched this process**, so a shell, a version manager or any other shim placed between the runtime
+and the binary becomes that pid and the seat then names a process that is not the agent: a
+deployment's config invokes the binary directly, never through a wrapper.
 
 **If the server dies.** The runtime starts this server with the session and does not start it again
 if it crashes. A crashed server leaves its registration behind, and the pid that registration
@@ -360,11 +363,14 @@ A signal that IS delivered (`TERM`, `INT`, `HUP`) is forwarded down and waited o
 still names the RUNTIME'S pid, not the launched process's and not the server's; which process is
 actually serving is recorded separately in `run/<endpoint>.mcp.pid`, written once the listener is up
 — a sender reads this file to decide it need not ring, so it must not exist before there is a bell —
-and removed when the seat is given up. **That file is two lines — the pid, then that process's start time
+and removed at departure. **That file is two lines — the pid, then that process's start time
 in the presence model's stamp** — because the pid alone starts naming a stranger the moment the
 kernel reuses the number, and a reader asking "is this seat's server running" would then get a
 confident yes about somebody else. Both lines are compared, by the same liveness the presence model
-uses on the pids it records.
+uses on the pids it records. **A server ended by SIGKILL leaves the file behind**, since removing it
+is part of departing and a kill runs nothing: `send` then reads the two lines, asks the presence
+model whether that pid started at that time is alive, finds it is not, and treats the file as stale
+— so it rings the pane itself rather than staying quiet for a server that is gone.
 
 **It is also the listener.** It holds a core subscription on this endpoint's own queue subject, which
 sees every arrival and consumes nothing, and asks how much is waiting at start and after every
@@ -403,7 +409,10 @@ Nothing below has been shown to anyone yet; the bell only rang. Print it on scre
 ```
 
 Every `read` appends `read <endpoint> handed=<n>` to the delivery log, so a message that was read and
-never shown can still be found.
+never shown can still be found. **The acknowledgement is made while the result is being rendered,
+and the result is returned afterwards** — so a client that drops between the two loses those
+messages: they are gone from the queue and they never reached the agent, and the `handed=<n>` line
+is all that is left of them. Acknowledging only after delivery is tracked separately, as issue #42.
 
 **Configuring a runtime.** The server needs two things: to be launched, and to be told which endpoint
 it is. For Claude Code, `.mcp.json`:
