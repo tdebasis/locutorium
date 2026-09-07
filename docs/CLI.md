@@ -44,6 +44,11 @@ refused before anything is sent.
 - **Body limit is 4000 characters, not bytes.** Counted in codepoints, so emoji cost one each. An
   over-long body is refused *before* it reaches the medium — nothing is partially sent.
 - Prints `sent → queue.<endpoint>`.
+- **The doorbell rings only for a seat without a live server.** A seat that holds a live
+  registration runs its own server, which is watching that queue and will ring for the same arrival
+  — coalesced and breaker-capped — so `send` stays quiet rather than putting two lines in one pane
+  for one message; where it does ring, the line is `[LOC] 1 new → loc read` and names the CLI verb,
+  because a seat with no server is a seat that reads with the command line.
 - If the house sets `send_requires_attendance = yes`, a send to an endpoint with no listener is
   **refused**. Off by default.
 
@@ -265,6 +270,10 @@ With `<instance>` omitted it means the caller's own, taken from its identity. `-
 what the host said, unreshaped — a consumer wants the reply, and a reply this tool had rewritten
 would be a second format to learn. The wait for an answer is a fixed two seconds.
 
+**Under per-seat servers there is no host process to answer this**, so the question goes unanswered
+and the command fails with `no host is answering registry.<instance>`; `status <endpoint>` is the
+per-seat reading, and a ledger-backed fallback is tracked separately.
+
 ## watch
 
 ```
@@ -329,6 +338,23 @@ reconnects the server where it can do that. The new server displaces the stale r
 starts, and writes the displaced pid to the delivery log when that process is gone. `sweep` is the
 other route — it clears registrations whose runtime pid is gone, with no restart. Nothing else ever
 starts a second server for a seat, and a second server for a live seat is refused by name.
+
+**It runs one generation removed from the runtime.** A runtime may end its MCP child with a HARD
+KILL: SIGKILL delivers nothing, runs no handler and closes nothing. A server that was itself the
+process the runtime launched has no goodbye to make then, so its registration outlives the session —
+the seat reads as `registered: yes` with a process that is gone — until the next server displaces the
+dead pid or a sweep removes it. **The periodic sweep is the backstop, and its interval is the bound
+on how long a dead seat reads as registered.** What the server can do is not BE the process the
+runtime kills. The launched process re-executes this binary with the same stdin, stdout and stderr
+and the runtime's pid passed down explicitly, then only waits for it and exits with its status; the
+child is the server. Killing the launched process is then not an ending at all: the child still holds
+the runtime's descriptors, keeps the seat and keeps ringing, and departs when the pipe finally
+closes. **The pipe closing is the goodbye a kill cannot take away**, so in the common case — the
+runtime exits and its descriptors close — the seat is given up within the two-second departure bound.
+A signal that IS delivered (`TERM`, `INT`, `HUP`) is forwarded down and waited on. The registration
+still names the RUNTIME'S pid, not the launched process's and not the server's; which process is
+actually serving is recorded separately in `run/<endpoint>.mcp.pid`, written when the seat is taken
+and removed when it is given up.
 
 **It is also the listener.** It holds a core subscription on this endpoint's own queue subject, which
 sees every arrival and consumes nothing, and asks how much is waiting at start and after every

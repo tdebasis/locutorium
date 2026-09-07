@@ -135,6 +135,7 @@ func Serve(ctx context.Context, d Deps, t mcp.Transport) error {
 		return err
 	}
 
+	s.claimPIDFile()
 	stopBell := s.startBell()
 	s.wait(ss)
 	stopBell()
@@ -264,7 +265,34 @@ func (s *server) depart() {
 	case <-done:
 	case <-time.After(departureWait):
 	}
+	s.releasePIDFile()
 }
+
+// THE SERVING PROCESS NAMES ITSELF, because nothing else in the deployment
+// can. The registration carries the RUNTIME's pid — that is the whole point of
+// it, and it is the right answer to "who is at this seat" — which leaves "and
+// which process is actually serving it" unanswerable, the more so because the
+// server deliberately runs one generation removed from the process the runtime
+// launched (cmd/loc/mcp.go). One file, written when the seat is taken and
+// removed when it is given up, is what lets an operator find the server, and a
+// stale one is worse than none: it would send the next reader to a stranger,
+// so its removal is part of departing.
+func (s *server) pidFile() string {
+	return filepath.Join(config.Home(), "run", s.d.Endpoint+".mcp.pid")
+}
+
+// claimPIDFile records this process. A failure is not fatal: the file is an
+// aid to whoever is looking, not a lock, and a seat that could not write it is
+// still a seat being served.
+func (s *server) claimPIDFile() {
+	if err := os.MkdirAll(filepath.Join(config.Home(), "run"), 0o700); err != nil {
+		return
+	}
+	_ = os.WriteFile(s.pidFile(), []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600)
+}
+
+// releasePIDFile removes it on the way out.
+func (s *server) releasePIDFile() { _ = os.Remove(s.pidFile()) }
 
 // log appends one line to the seat's delivery log, in the shell listener's
 // format and its own file, so a deployment has ONE place to look for what was

@@ -81,6 +81,14 @@ process whose death ends the session, and is still recorded by whoever received 
 is the only launcher: nothing else starts a server for that seat, which is what keeps one seat to
 one listener and one registration.
 
+**A hard kill leaves no goodbye.** A runtime is free to end the server it launched with SIGKILL,
+which delivers nothing and runs nothing, so that seat's registration outlives its session — it reads
+as registered, naming a pid that is gone — until the next server displaces the dead pid or the
+periodic sweep removes it, and the sweep's interval is the bound on how long that lasts. The server
+answers this by not being the process the runtime kills: it runs one generation below it, holding the
+same descriptors, so the runtime's own exit closing those descriptors is a goodbye the kill cannot
+take away, and in the common case the seat is freed within the departure bound.
+
 **If the agent fails to start, the host says so.** The host is the only party that expected a
 registration, so it is the only one that can notice its absence — and absence is not an event.
 A failure to launch is announced, not inferred from silence.
