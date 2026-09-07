@@ -276,8 +276,10 @@ func TestServe_RegistersTheRuntimesPidAndTheRuntimesName(t *testing.T) {
 	if len(f.unsubscribed) != 1 || !strings.Contains(strings.Join(f.unsubscribed[0], " "), "--reason clean") {
 		t.Errorf("the seat was not freed cleanly on the way out: %v", f.unsubscribed)
 	}
-	if delivery(t, dir) != "" {
-		t.Errorf("an ordinary start wrote to the delivery log: %q", delivery(t, dir))
+	// An ordinary session should log goodbye and left lines, with no other entries.
+	log := delivery(t, dir)
+	if !strings.Contains(log, "goodbye "+seat+": eof") || !strings.Contains(log, "left "+seat) {
+		t.Errorf("an ordinary session should log goodbye and left; got: %q", log)
 	}
 }
 
