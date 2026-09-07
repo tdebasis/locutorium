@@ -7,3 +7,12 @@
 
 # Dependencies come from the module proxy, verified against go.sum.
 /vendor/
+
+# Editor and IDE state. It belongs to a person's machine and carries that
+# machine's absolute paths, which is the one thing check-clean.sh exists to
+# keep out of a tree written for strangers. Ignored so it cannot be swept in
+# by `git add -A`; check-clean.sh reads the working tree rather than the
+# index, so a directory that is present is still reported by a hand run.
+.idea/
+.vscode/
+*.swp
