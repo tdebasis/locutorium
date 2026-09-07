@@ -32,10 +32,18 @@ HEAD equals it.
    ```
    git switch main
    git pull --ff-only
-   conformance/check-version.sh
+   conformance/check-version.sh          # the merged tree
    git tag -a vX.Y.Z -m vX.Y.Z
+   conformance/check-version.sh          # again — THIS is the run that sees the tag
    git push origin vX.Y.Z
    ```
+
+   **It is run twice on purpose.** The tag comparison inside `check-version.sh` lives in a branch
+   that executes only when HEAD is already tagged — `git describe --exact-match` fails otherwise
+   and the whole comparison is skipped. Run before the tag exists, the script checks `VERSION`,
+   both tools and the documents, says everything agrees, and never looks at the one thing this
+   step is here to get right. The second run is where a mistyped tag is caught, and it catches it
+   before the push rather than after.
 
    The tag is pushed ALONE, by name. `--follow-tags` would carry the branch in the same push, the
    branch half is refused by the protection and the tag half is not, and what a server does with a
