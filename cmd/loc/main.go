@@ -84,13 +84,38 @@ func main() {
 	// Only main gains this. run stays a plain function with no process-wide
 	// state of its own, so it remains drivable by a test.
 	signal.Ignore(syscall.SIGPIPE)
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+
+	// A LAUNCHED `loc mcp` BECOMES ITS OWN SUPERVISOR.
+	//
+	// The server deliberately runs one generation below the process an agent
+	// runtime launches, so that a runtime which ends its child with SIGKILL
+	// cannot take the seat's goodbye with it (cmd/loc/mcp.go, mcpParent).
+	// Re-executing is something only a real process invocation can do, and
+	// this is the only place that knows an invocation is one: run is also
+	// called in-process by tests, where "re-execute this binary" would mean
+	// re-running the test binary. So the launch is asked for HERE, by name,
+	// and everywhere else `mcp` is the server itself.
+	args := os.Args[1:]
+	if len(args) == 1 && args[0] == "mcp" {
+		args = []string{"mcp", launchFlag}
+	}
+	os.Exit(run(args, os.Stdout, os.Stderr))
 }
 
 // errUsage means "you typed it wrong". It is the one failure that prints the
 // verb list on STDOUT rather than a `loc:` line on stderr: someone who has not
 // got the invocation right yet is reading, not scripting.
 var errUsage = errors.New("usage")
+
+// exitStatus is a CHILD'S exit code carried back to run, which returns it
+// unchanged and prints nothing of its own. The `mcp` verb re-executes this
+// binary and waits on the result (cmd/loc/mcp.go); the child writes to the
+// very stderr this process was handed, so anything it had to say is already
+// there in this tool's one error shape. A `loc:` line here would be the tool
+// speaking twice about one failure.
+type exitStatus int
+
+func (e exitStatus) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
 
 // errNotImplemented is a verb this build knows the name of and cannot do. It
 // is an ordinary error, so it prints in the ordinary shape: naming it here is
@@ -105,12 +130,15 @@ var errNotImplemented = errors.New("not implemented in this build")
 // error shape the conformance suite diffs cannot drift one verb at a time.
 func run(args []string, stdout, stderr io.Writer) int {
 	err := dispatch(args, stdout)
+	var status exitStatus
 	switch {
 	case err == nil:
 		return 0
 	case errors.Is(err, errUsage):
 		fmt.Fprint(stdout, usage)
 		return 1
+	case errors.As(err, &status):
+		return int(status)
 	default:
 		fmt.Fprintf(stderr, "loc: %v\n", err)
 		return 1

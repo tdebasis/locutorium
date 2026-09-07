@@ -136,8 +136,12 @@ func TestMCPTools_EachToolIsTheVerbItIsNamedFor(t *testing.T) {
 		}
 	})
 
+	// THE EVENTS PLANE, NOT THE TOPIC PLANE. Events are published on
+	// `presence.<instance>` (internal/provider/nats, eventSubjectPrefix); a
+	// witness left on `topic.<instance>` hears an empty room and reports it as
+	// a server that emitted nothing.
 	t.Run("tool.pre and tool.post bracket the call", func(t *testing.T) {
-		w := p.witness(t, "topic."+strings.SplitN(e1, ".", 2)[0])
+		w := p.witness(t, "presence."+strings.SplitN(e1, ".", 2)[0])
 		_ = s.text(t, "topics", nil)
 		var pre, post bool
 		for _, ev := range collect(w, 2*time.Second) {

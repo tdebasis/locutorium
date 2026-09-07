@@ -22,6 +22,7 @@ import (
 	"os"
 	osexec "os/exec"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -47,7 +48,7 @@ func TestMCP_ASignalEndsTheSeatsAttendance(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			p := newPresence(t)
 
-			cmd, wait := startSeat(t, bin, p.home, e1)
+			cmd, wait, _ := startSeat(t, bin, p.home, e1)
 
 			// Registered as the runtime's seat, read through the same verb an
 			// operator would use to ask.
@@ -94,7 +95,12 @@ func TestMCP_ASignalEndsTheSeatsAttendance(t *testing.T) {
 // this function ever waits on the command — which is what lets a case make a
 // claim about the exit status at all. The returned channel carries the result
 // of that one wait.
-func startSeat(t *testing.T, bin, home, endpoint string) (*osexec.Cmd, <-chan error) {
+//
+// The third return is LETTING GO: closing this test's ends of both pipes, the
+// way a runtime's exit closes its descriptors. It is separate from the cleanup
+// so that a case can make the closing an event it observes rather than
+// something that happens after it has stopped looking.
+func startSeat(t *testing.T, bin, home, endpoint string) (*osexec.Cmd, <-chan error, func()) {
 	t.Helper()
 
 	// The child's stdout, which the client reads.
@@ -125,12 +131,14 @@ func startSeat(t *testing.T, bin, home, endpoint string) (*osexec.Cmd, <-chan er
 	wait := make(chan error, 1)
 	go func() { wait <- cmd.Wait() }()
 
+	var once sync.Once
+	letGo := func() { once.Do(func() { _ = outR.Close(); _ = inW.Close() }) }
+
 	t.Cleanup(func() {
 		// Only ever this child, and only by its own handle. A case that
 		// already saw it exit finds nothing to kill.
 		_ = cmd.Process.Kill()
-		_ = outR.Close()
-		_ = inW.Close()
+		letGo()
 	})
 
 	client := mcp.NewClient(&mcp.Implementation{Name: testClientName, Version: testClientVersion}, nil)
@@ -138,7 +146,7 @@ func startSeat(t *testing.T, bin, home, endpoint string) (*osexec.Cmd, <-chan er
 		&mcp.IOTransport{Reader: outR, Writer: inW}, nil); err != nil {
 		t.Fatalf("connect to the seat's server: %v", err)
 	}
-	return cmd, wait
+	return cmd, wait, letGo
 }
 
 // statusOf is what `loc status <endpoint>` prints, run in this process.
