@@ -55,7 +55,7 @@ TEMP="${RUNNER_TEMP:?leftovers: RUNNER_TEMP is unset — this runs on a runner, 
 # command line is everything after the two numeric columns; `ps` is asked for
 # exactly those two so that reassembling the rest is unambiguous.
 census() { # → "pid  command", one per line
-  ps -o pid=,ppid=,command= -ax 2>/dev/null | awk -v self="$$" -v ws="$WORKSPACE" -v tmp="$TEMP" '
+  ps -A -o pid=,ppid=,command= 2>/dev/null | awk -v self="$$" -v ws="$WORKSPACE" -v tmp="$TEMP" '
     { pid=$1; par[pid]=$2; $1=""; $2=""; sub(/^[[:space:]]+/, ""); cmd[pid]=$0; order[++n]=pid }
     END {
       # MINE: this shell, everything it started, and everything that started

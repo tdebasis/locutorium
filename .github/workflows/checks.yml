@@ -137,6 +137,18 @@ jobs:
         if: steps.probe.outputs.present == 'true'
         run: go test -cover -coverprofile=coverage.out ./... | tee /tmp/cov.txt
 
+      - name: the suite's own machinery
+        # The teardown and the pre-run cleanup are tests OF the suite, not the
+        # suite: they plant sleeping processes and boot no server, so they run
+        # here on the hosted lane, and their counts are read from this log.
+        if: steps.probe.outputs.present == 'true'
+        run: |
+          set -o pipefail
+          bash conformance/teardown_test.sh | tee /tmp/teardown.txt
+          grep -q 'teardown: 12 passed, 0 failed' /tmp/teardown.txt
+          bash conformance/leftovers_test.sh | tee /tmp/leftovers.txt
+          grep -q 'leftovers: 14 passed, 0 failed' /tmp/leftovers.txt
+
       - name: the shipped bootstrap reads its own queue
         # The proof that providers/nats/bootstrap.sh generates a configuration
         # under which a namespaced seat can read a fresh queue. It skips by name
