@@ -76,6 +76,30 @@ type Presence interface {
 	Watch(instance string, w io.Writer) error
 }
 
+// Listener is the EXTENSION a medium implements when an endpoint can be TOLD
+// that mail has arrived without taking any of it, and can be asked how much is
+// waiting.
+//
+// It is separate from Reader for the reason Presence is separate from
+// Provider: a medium may hand a reader its messages without being able to say
+// anything the moment one lands. The two methods go together because they
+// answer the same question at the two moments it can be asked — as mail
+// arrives, and about mail that arrived while nobody was listening.
+type Listener interface {
+	// WatchQueue calls arrived once for every message that reaches endpoint's
+	// queue, and reconnected once for every time the connection to the medium
+	// has been re-established — the moment at which arrivals were missed. It
+	// CONSUMES NOTHING: watching must never compete with reading for the mail.
+	// The returned function stops the watch and releases whatever it holds.
+	WatchQueue(endpoint string, arrived, reconnected func()) (stop func(), err error)
+
+	// Unread is how many messages endpoint has not yet taken. Unlike Status,
+	// which prints "?" rather than fail a whole report over one number, this
+	// is an ERROR when the figure cannot be had: a caller deciding whether to
+	// ring a bell needs "none" and "cannot say" to be different answers.
+	Unread(endpoint string) (int, error)
+}
+
 // Factory builds a provider. Registration happens in an init function in the
 // provider's own package, so selecting one is a matter of importing it.
 type Factory func() (Provider, error)
