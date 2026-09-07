@@ -126,7 +126,11 @@ not tell two agents of the same name apart.
 | Purpose | Subject |
 |---|---|
 | Messages **to** an agent | `queue.<instance>.<agent>` |
-| Lifecycle and activity **events** | `topic.<instance>` |
+| Lifecycle and activity **events** | `presence.<instance>` |
+
+**Events are not mail.** They have their own subject family, beside the queue and the room rather
+than inside either, so they never enter the message plane's streams and are **not retained**: a
+consumer that needs the past asks the registry rather than replaying a history that does not exist.
 
 **Events go to one subject per instance**, not one per agent. A consumer watching an instance sees
 every agent in it with a single subscription, and sees nothing from any other instance.

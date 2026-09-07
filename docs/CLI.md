@@ -83,7 +83,7 @@ follow-up; this build does not do it yet. A **reader that closes early** — a p
 went away, a dead terminal — is not one of those deaths: for this build it is an ordinary **write
 error**, so `read` stops without acknowledging and the unshown message is handed back on exit.
 
-Presence events published on the instance's topic are **not mail**: `read` passes over them — its room cursor advances past each one — and shows only conversation, and separating the two at the subject level is tracked.
+Presence events live on their own subject, `presence.<instance>`, so no room stream carries them and a reader is never handed one. `read` still passes over any event it meets — its room cursor advances past each one — because a deployment whose rooms were filled before the split still holds them.
 
 A queue that is empty, or an endpoint that has never had a queue, reads as the two headings and a
 zero exit. A **medium that cannot be reached** is the opposite: nothing on standard out, the reason
@@ -187,8 +187,9 @@ with nothing to reap publishes nothing, and that silence is what makes it safe t
 loc emit <kind> <endpoint> [--ts <t>] [--tool <name>] [--refs <id,id>]
 ```
 
-Publishes one lifecycle or activity event. `<kind>` is one of the taxonomy's kinds (PRESENCE.md
-§Events → Taxonomy); anything else is a usage error rather than an event nobody understands.
+Publishes one lifecycle or activity event on the endpoint's instance subject, `presence.<instance>`.
+`<kind>` is one of the taxonomy's kinds (PRESENCE.md §Events → Taxonomy); anything else is a usage
+error rather than an event nobody understands.
 
 `--ts` is the moment the thing happened, carried verbatim — an adapter should always pass it, since
 the publish time is only correct for something reporting itself immediately. `--refs` is a
@@ -267,8 +268,9 @@ would be a second format to learn. The wait for an answer is a fixed two seconds
 loc watch [<instance>]
 ```
 
-Follows one instance's event stream, writing each event out as a raw line as it arrives, until the
-connection ends. Read-only — the credential it uses is denied publish by the server, not merely
+Follows one instance's event stream — the subject `presence.<instance>` — writing each event out as a
+raw line as it arrives, until the connection ends. The stream is live and historyless: a follow shows
+what is said from the moment it starts, and nothing that was said before it. Read-only — the credential it uses is denied publish by the server, not merely
 discouraged. `^C` to stop. With `<instance>` omitted it means the caller's own, taken from its
 identity. A follow that simply ends is not an error; a follow that ends badly is reported.
 
