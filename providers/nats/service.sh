@@ -66,9 +66,19 @@ svc_render() {
 svc_assert_pinned() { # stdin: a rendered plist → stdout unchanged, or refuse
   local rendered prog
   rendered="$(cat)"
-  prog="$(printf '%s\n' "$rendered" | sed -n 's|.*<string>\(/[^<]*nats-server[^<]*\)</string>.*|\1|p' | head -1)"
+  # STRUCTURALLY, from ProgramArguments[0] — never by searching for a substring.
+  #
+  # This first matched the first <string> containing "nats-server", which is a
+  # FALSE PASS waiting to happen: the CONFIG path contains that substring too
+  # (nats-server.conf). Let a string carrying the config ever precede the
+  # program — an EnvironmentVariables block, a hoisted -c, a reordered
+  # ProgramArguments — and the check would inspect the CONF path, which is a
+  # real file, not a symlink and not under a package prefix, and PASS, while the
+  # program path floated free. A check that validates the wrong string is worse
+  # than no check: it reports on something nobody asked about.
+  prog="$(printf '%s\n' "$rendered" | plutil -extract ProgramArguments.0 raw -o - - 2>/dev/null)"
   if [[ -z "$prog" ]]; then
-    echo "service: the rendered plist names no nats-server program path" >&2; return 4
+    echo "service: could not read ProgramArguments[0] from the rendered plist" >&2; return 4
   fi
   case "$prog" in
     */Cellar/*|*/opt/*|*/bin/nats-server)
