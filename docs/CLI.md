@@ -320,6 +320,16 @@ a registration whose process is DEAD is displaced, and the dead pid is written t
 A seat held by a LIVE process that did not launch this server is refused, with the pid named, and the
 server exits 1 — the runtime shows it as failed, which is the truth.
 
+**If the server dies.** The runtime starts this server with the session and does not start it again
+if it crashes. A crashed server leaves its registration behind, and the pid that registration
+carries is the RUNTIME'S, which is still alive — so the seat reads as present while its bell is
+silent and its tools are gone. The failure shows in the runtime's own MCP status, which reports the
+server as failed. Recovery is a fresh server: the person restarts the session, or the runtime
+reconnects the server where it can do that. The new server displaces the stale registration as it
+starts, and writes the displaced pid to the delivery log when that process is gone. `sweep` is the
+other route — it clears registrations whose runtime pid is gone, with no restart. Nothing else ever
+starts a second server for a seat, and a second server for a live seat is refused by name.
+
 **It is also the listener.** It holds a core subscription on this endpoint's own queue subject, which
 sees every arrival and consumes nothing, and asks how much is waiting at start and after every
 reconnect. Arrivals are coalesced across `wake_window_seconds` and capped by
