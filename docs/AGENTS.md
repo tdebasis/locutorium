@@ -20,12 +20,16 @@ it as one, not work around it.
 | `loc read [--peek]` | `loc_read` | presents your queue backlog **and** anything a listener spooled for you, then the rooms. Without `--peek`, what you read is **consumed** — taken exactly once. |
 | `loc sub [--watch-pid P]` † | `loc_sub` | registers attendance: a listener taps your queue, drains arrivals to a spool, and wakes you through the deployment's hook. |
 | `loc unsub` † | `loc_unsub` | ends attendance. The queue keeps holding messages. |
+| `loc mcp` ‡ | — | serves this seat to the agent runtime that launched it, over stdio: it registers you with that runtime's pid, rings your bell when mail lands, and hands the mail over through a `read` tool. |
 | `loc status` | `loc_status` | unread counts per endpoint. |
 | `loc topics` | `loc_topics` | which rooms are active right now. |
 | `loc registry` | `loc_registry` | who is attending, read from the medium. |
 | `loc watch` | `loc_watch` | every envelope as it passes, read-only. |
 | `loc doctor` † | `loc_doctor` | four health checks as you. |
 | `loc version` | — | the version. |
+
+‡ **The Go build's verb.** It is that build's answer to `sub`: one process the runtime launches,
+doing register-listen-wake instead of a background listener. `docs/CLI.md` §mcp has the config line.
 
 † **The shell tool's verbs.** There are two implementations of `loc` (`docs/INSTALL.md`). The Go
 build names these three and answers `not implemented in this build`; every other row it answers
