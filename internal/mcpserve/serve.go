@@ -119,6 +119,7 @@ func Serve(ctx context.Context, d Deps, t mcp.Transport) error {
 
 	s := &server{d: d}
 	srv := mcp.NewServer(&mcp.Implementation{Name: "loc", Version: d.Version}, nil)
+	s.addTools(srv)
 
 	ss, err := srv.Connect(ctx, t, nil)
 	if err != nil {
