@@ -70,9 +70,16 @@ func aclShippedSeat(name string) *natsserver.User {
 // substitutes the dot, and the seat may create the cursor on its own queue.
 func aclGrantedSeat(name string) *natsserver.User {
 	s := strings.ReplaceAll(name, ".", "_")
+	// The events plane, mirrored from the script: a seat publishes its own
+	// instance's events when its name carries an instance, and follows the
+	// plane as any endpoint may.
+	events := "presence.>"
+	if i := strings.IndexByte(name, '.'); i >= 0 {
+		events = "presence." + name[:i]
+	}
 	return &natsserver.User{Username: name, Password: aclPassword, Permissions: &natsserver.Permissions{
 		Publish: &natsserver.SubjectPermission{Allow: []string{
-			"queue.*", "queue.*.*", "topic.>",
+			"queue.*", "queue.*.*", "topic.>", events,
 			"$JS.ACK.QUEUE_" + s + ".>", "$JS.ACK.TOPICS." + s + ".>",
 			"$JS.API.INFO",
 			"$JS.API.STREAM.INFO.*", "$JS.API.STREAM.NAMES", "$JS.API.STREAM.LIST",
@@ -85,7 +92,7 @@ func aclGrantedSeat(name string) *natsserver.User {
 			"$JS.API.CONSUMER.DURABLE.CREATE.TOPICS." + s,
 			"$JS.API.CONSUMER.CREATE.TOPICS." + s, "$JS.API.CONSUMER.CREATE.TOPICS." + s + ".>",
 		}},
-		Subscribe: &natsserver.SubjectPermission{Allow: []string{"queue." + name, "topic.>", "_INBOX.>"}},
+		Subscribe: &natsserver.SubjectPermission{Allow: []string{"queue." + name, "topic.>", "presence.>", "_INBOX.>"}},
 	}}
 }
 

@@ -25,7 +25,7 @@ package main
 // nothing there".
 //
 // Effects are asserted through an INDEPENDENT admin observer (stream existence
-// and message counts via JetStream; events via a live core `topic.>` witness),
+// and message counts via JetStream; events via a live core `presence.>` witness),
 // never through the code under test. Events are historyless — the bus stores
 // nothing — so they are caught as they fly, exactly as a real consumer would.
 //
@@ -68,6 +68,12 @@ const (
 	q2 = "QUEUE_workshop_clerk"
 	e3 = "atelier.scribe" // instance: atelier — same agent, other instance
 	q3 = "QUEUE_atelier_scribe"
+	// A SEAT WHOSE GRANTS PREDATE THE EVENTS PLANE. Same instance as e1/e2,
+	// but its access control is the one a live deployment generated before
+	// events moved off `topic.>` — so the server refuses its join event and
+	// the suite can hold what a refused event does to the verb that emitted it.
+	eOld = "workshop.legacy"
+	qOld = "QUEUE_workshop_legacy"
 
 	presencePassword = "presence-scratch"
 )
@@ -101,23 +107,31 @@ func presenceUsers() []*natsserver.User {
 		// sends on their behalf. Broad rights, because it is trusted
 		// (PRESENCE.md §Trust, in the inner parlor).
 		{Username: "host", Password: presencePassword, Permissions: &natsserver.Permissions{
-			Publish:   &natsserver.SubjectPermission{Allow: []string{"queue.>", "topic.>", "registry.>", "$JS.>"}},
-			Subscribe: &natsserver.SubjectPermission{Allow: []string{"queue.>", "topic.>", "registry.>", "_INBOX.>"}},
+			Publish:   &natsserver.SubjectPermission{Allow: []string{"queue.>", "topic.>", "presence.>", "registry.>", "$JS.>"}},
+			Subscribe: &natsserver.SubjectPermission{Allow: []string{"queue.>", "topic.>", "presence.>", "registry.>", "_INBOX.>"}},
 		}},
 		// watch: read-only. It may follow every queue and event stream and may
 		// publish nothing at all (PRESENCE.md §Command-line operations → watch,
 		// §Trust — the watch role publishes nothing).
 		{Username: "watch", Password: presencePassword, Permissions: &natsserver.Permissions{
-			Subscribe: &natsserver.SubjectPermission{Allow: []string{"queue.>", "topic.>", "registry.>", "_INBOX.>"}},
+			Subscribe: &natsserver.SubjectPermission{Allow: []string{"queue.>", "topic.>", "presence.>", "registry.>", "_INBOX.>"}},
 			Publish:   &natsserver.SubjectPermission{Deny: []string{">"}},
 		}},
 	}
-	for _, e := range []string{e1, e2, e3} {
+	for _, e := range []string{e1, e2, e3, eOld} {
 		s := strings.ReplaceAll(e, ".", "_") // workshop.scribe -> workshop_scribe
 		inst := strings.SplitN(e, ".", 2)[0] // workshop.scribe -> workshop
+		// THE EVENTS PLANE, AND ONE SEAT THAT NEVER GOT IT. A seat emits its
+		// own events, so bootstrap.sh grants it its instance's events subject.
+		// eOld is left with the pre-split grant alone, which is what makes the
+		// refused-publish case a real refusal rather than a mock.
+		events := "presence." + inst
+		if e == eOld {
+			events = "topic." + inst
+		}
 		users = append(users, &natsserver.User{Username: e, Password: presencePassword, Permissions: &natsserver.Permissions{
 			Publish: &natsserver.SubjectPermission{Allow: []string{
-				"queue.>", "topic.>", "registry.>",
+				"queue.>", "topic.>", "registry.>", events,
 				"$JS.API.INFO",
 				"$JS.API.STREAM.CREATE.QUEUE_" + s, "$JS.API.STREAM.DELETE.QUEUE_" + s,
 				"$JS.API.STREAM.INFO.QUEUE_" + s, "$JS.API.STREAM.NAMES", "$JS.API.STREAM.LIST",
@@ -127,7 +141,7 @@ func presenceUsers() []*natsserver.User {
 				"$JS.API.CONSUMER.MSG.NEXT.QUEUE_" + s + "." + s,
 				"$JS.ACK.QUEUE_" + s + ".>",
 			}},
-			Subscribe: &natsserver.SubjectPermission{Allow: []string{"queue." + e, "topic." + inst, "registry." + inst, "_INBOX.>"}},
+			Subscribe: &natsserver.SubjectPermission{Allow: []string{"queue." + e, "topic." + inst, events, "registry." + inst, "_INBOX.>"}},
 		}})
 	}
 	return users
@@ -439,7 +453,7 @@ func TestPresence_Subscribe_PublishesFullyQualifiedJoinEvent(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
 	pid := livePid(t)
-	sub := p.witness(t, "topic.workshop")
+	sub := p.witness(t, "presence.workshop")
 
 	exec("subscribe", e2, "--pid", pidStr(pid), "--type", "acme-cli", "--version", "3.2.0",
 		"--display", "The Clerk", "--cwd", "/workspaces/clerk")
@@ -447,7 +461,7 @@ func TestPresence_Subscribe_PublishesFullyQualifiedJoinEvent(t *testing.T) {
 	events := collect(sub, 2*time.Second)
 	m, ok := findEvent(t, events, "agent.subscribe")
 	if !ok {
-		t.Fatalf("subscribe published no agent.subscribe event on topic.workshop; saw %v", events)
+		t.Fatalf("subscribe published no agent.subscribe event on presence.workshop; saw %v", events)
 	}
 	if m["endpoint"] != e2 {
 		t.Errorf("join event endpoint = %v, want the fully-qualified %q", m["endpoint"], e2)
@@ -504,7 +518,7 @@ func TestPresence_Unsubscribe_DestroysQueueAndEmitsClean(t *testing.T) {
 	// Stand the queue up first, so "destroyed" measures the verb's effect and
 	// not the accident that it was never there.
 	p.seedQueue(t, q2, "queue."+e2)
-	sub := p.witness(t, "topic.workshop")
+	sub := p.witness(t, "presence.workshop")
 
 	code, _, errOut := exec("unsubscribe", e2, "--force")
 	if code != 0 {
@@ -537,7 +551,7 @@ func TestPresence_Sweep_UnsubscribesDeadPidWithExpiry(t *testing.T) {
 	p.as(t, "host")
 	// A registration whose process is already gone is what sweep exists to reap.
 	exec("subscribe", e2, "--pid", pidStr(deadPid(t)), "--type", "acme-cli", "--version", "3.2.0")
-	sub := p.witness(t, "topic.workshop")
+	sub := p.witness(t, "presence.workshop")
 
 	code, _, errOut := exec("sweep", "workshop")
 	if code != 0 {
@@ -564,7 +578,7 @@ func TestPresence_Sweep_SecondSweepEmitsNoUnsubscribe(t *testing.T) {
 	exec("subscribe", e2, "--pid", pidStr(deadPid(t)), "--type", "acme-cli", "--version", "3.2.0")
 	exec("sweep", "workshop") // first sweep reaps the dead pid
 
-	sub := p.witness(t, "topic.workshop")
+	sub := p.witness(t, "presence.workshop")
 	code, _, errOut := exec("sweep", "workshop") // second sweep: nothing dead left
 	if code != 0 {
 		t.Errorf("second sweep exited %d (stderr %q), want a clean no-op 0", code, errOut)
@@ -628,7 +642,7 @@ func TestPresence_Emit_StampsCallerSuppliedTs(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
 	const stamp = "2026-01-14T09:31:20.114Z"
-	sub := p.witness(t, "topic.workshop")
+	sub := p.witness(t, "presence.workshop")
 
 	exec("emit", "activity.start", e1, "--ts", stamp)
 
@@ -649,7 +663,7 @@ func TestPresence_Emit_StampsCallerSuppliedTs(t *testing.T) {
 func TestPresence_Emit_ToolPostRefsToolPreInRefsArray(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
-	sub := p.witness(t, "topic.workshop")
+	sub := p.witness(t, "presence.workshop")
 
 	exec("emit", "tool.pre", e1, "--tool", "shell")
 	pre, ok := findEvent(t, collect(sub, 2*time.Second), "tool.pre")
@@ -664,7 +678,7 @@ func TestPresence_Emit_ToolPostRefsToolPreInRefsArray(t *testing.T) {
 		t.Errorf("tool.pre endpoint = %v, want the fully-qualified %q", pre["endpoint"], e1)
 	}
 
-	sub2 := p.witness(t, "topic.workshop")
+	sub2 := p.witness(t, "presence.workshop")
 	exec("emit", "tool.post", e1, "--tool", "shell", "--refs", preID)
 	post, ok := findEvent(t, collect(sub2, 2*time.Second), "tool.post")
 	if !ok {
@@ -776,7 +790,7 @@ func TestPresence_Watch_FollowsEventStream(t *testing.T) {
 	go func() { _ = run([]string{"watch", "workshop"}, &out, io.Discard) }()
 	time.Sleep(300 * time.Millisecond) // let a real watch subscribe first
 
-	if err := p.admin.Publish("topic.workshop",
+	if err := p.admin.Publish("presence.workshop",
 		[]byte(`{"id":"ev_watchme","ts":"2026-01-14T10:05:00.000Z","kind":"activity.end","endpoint":"workshop.scribe"}`)); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
@@ -798,7 +812,7 @@ func TestPresence_Watch_ToleratesUnknownField(t *testing.T) {
 	go func() { _ = run([]string{"watch", "workshop"}, &out, io.Discard) }()
 	time.Sleep(300 * time.Millisecond)
 
-	if err := p.admin.Publish("topic.workshop",
+	if err := p.admin.Publish("presence.workshop",
 		[]byte(`{"id":"ev_unknownfield","ts":"2026-01-14T10:00:00.000Z","kind":"activity.start","endpoint":"workshop.scribe","future_field":"a consumer must not choke on this"}`)); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
@@ -877,7 +891,7 @@ func TestPresence_Unsubscribe_ClearsDeadIncumbent(t *testing.T) {
 	// Stand the queue up so "cleared" measures the verb's effect, not a queue that
 	// was never created; witness the departure event, as the clean/force cases do.
 	p.seedQueue(t, q2, "queue."+e2)
-	sub := p.witness(t, "topic.workshop")
+	sub := p.witness(t, "presence.workshop")
 
 	code, _, errOut := exec("unsubscribe", e2)
 	if code != 0 {
@@ -931,7 +945,7 @@ func TestPresence_RegistryFailure_SpeaksOnStderrOnly(t *testing.T) {
 
 func TestBootstrap_WatchCredentialIsDeniedPublish(t *testing.T) {
 	p := newPresence(t)
-	sub := p.witness(t, "topic.workshop")
+	sub := p.witness(t, "presence.workshop")
 
 	violations := make(chan error, 4)
 	nc, err := natsgo.Connect(p.url,
@@ -948,10 +962,10 @@ func TestBootstrap_WatchCredentialIsDeniedPublish(t *testing.T) {
 	}
 	defer nc.Close()
 
-	_ = nc.Publish("topic.workshop", []byte("forbidden"))
+	_ = nc.Publish("presence.workshop", []byte("forbidden"))
 	_ = nc.Flush()
 	// A control publish from admin proves the witness path works.
-	_ = p.admin.Publish("topic.workshop", []byte(`{"id":"ev_control"}`))
+	_ = p.admin.Publish("presence.workshop", []byte(`{"id":"ev_control"}`))
 	_ = p.admin.Flush()
 
 	seen := collect(sub, 1*time.Second)

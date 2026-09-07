@@ -190,7 +190,7 @@ func TestEmitReachesTheInstanceSubject(t *testing.T) {
 	nc, _ := h.admin(t)
 	defer nc.Close()
 
-	sub, err := nc.SubscribeSync("topic.workshop")
+	sub, err := nc.SubscribeSync("presence.workshop")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,12 +313,12 @@ func TestWatchPresentsRawPayloadsAndEndsWithTheConnection(t *testing.T) {
 	time.Sleep(watchPoll + 300*time.Millisecond)
 
 	const unknown = `{"id":"ev_unknownfield","kind":"activity.start","future_field":"a consumer must not choke on this"}`
-	if err := nc.Publish("topic.workshop", []byte(unknown)); err != nil {
+	if err := nc.Publish("presence.workshop", []byte(unknown)); err != nil {
 		t.Fatal(err)
 	}
 	// An event from another instance must not appear: one subscription sees
 	// every agent in ITS instance and nothing from any other.
-	if err := nc.Publish("topic.atelier", []byte(`{"id":"ev_elsewhere"}`)); err != nil {
+	if err := nc.Publish("presence.atelier", []byte(`{"id":"ev_elsewhere"}`)); err != nil {
 		t.Fatal(err)
 	}
 	if err := nc.Flush(); err != nil {
@@ -358,7 +358,7 @@ func TestWatchStopsWhenTheReaderGoesAway(t *testing.T) {
 	go func() { done <- p.Watch("workshop", &failingWriter{after: 0}) }()
 	time.Sleep(300 * time.Millisecond)
 
-	if err := nc.Publish("topic.workshop", []byte(`{"id":"ev_1"}`)); err != nil {
+	if err := nc.Publish("presence.workshop", []byte(`{"id":"ev_1"}`)); err != nil {
 		t.Fatal(err)
 	}
 	if err := nc.Flush(); err != nil {

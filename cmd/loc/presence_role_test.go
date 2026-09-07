@@ -24,7 +24,7 @@ import (
 func TestPresence_Subscribe_JoinEventCarriesTheDisplayRole(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
-	sub := p.witness(t, "topic.workshop")
+	sub := p.witness(t, "presence.workshop")
 
 	exec("subscribe", e2, "--pid", pidStr(livePid(t)), "--type", "acme-cli", "--version", "3.2.0",
 		"--display", "The Clerk", "--role", "Records")
@@ -32,7 +32,7 @@ func TestPresence_Subscribe_JoinEventCarriesTheDisplayRole(t *testing.T) {
 	events := collect(sub, 2*time.Second)
 	m, ok := findEvent(t, events, "agent.subscribe")
 	if !ok {
-		t.Fatalf("subscribe published no agent.subscribe event on topic.workshop; saw %v", events)
+		t.Fatalf("subscribe published no agent.subscribe event on presence.workshop; saw %v", events)
 	}
 	display, _ := m["display"].(map[string]any)
 	if display == nil {
@@ -51,7 +51,7 @@ func TestPresence_Subscribe_JoinEventCarriesTheDisplayRole(t *testing.T) {
 func TestPresence_Subscribe_WithoutARoleOmitsTheKey(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
-	sub := p.witness(t, "topic.workshop")
+	sub := p.witness(t, "presence.workshop")
 
 	exec("subscribe", e2, "--pid", pidStr(livePid(t)), "--type", "acme-cli", "--version", "3.2.0",
 		"--display", "The Clerk")
@@ -59,7 +59,7 @@ func TestPresence_Subscribe_WithoutARoleOmitsTheKey(t *testing.T) {
 	events := collect(sub, 2*time.Second)
 	m, ok := findEvent(t, events, "agent.subscribe")
 	if !ok {
-		t.Fatalf("subscribe published no agent.subscribe event on topic.workshop; saw %v", events)
+		t.Fatalf("subscribe published no agent.subscribe event on presence.workshop; saw %v", events)
 	}
 	display, _ := m["display"].(map[string]any)
 	if display == nil {
