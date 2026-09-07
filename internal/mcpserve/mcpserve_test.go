@@ -629,7 +629,22 @@ func arrivalsDuringWatch(watch func(string, func(), func()) (func(), error), n i
 func TestBell_TheBreakerCapsWakesAndTripsOnce(t *testing.T) {
 	dir := home(t, "provider = none\nwake_window_seconds = 1\nwake_breaker_per_minute = 1\n")
 	f := &fake{}
-	sess, done := serve(t, f.deps())
+	d := f.deps()
+
+	// Inject a clock pinned to the start of a minute so the test outcome does not
+	// depend on where a minute boundary happens to fall. The case is about the
+	// breaker's cap, not about calendar timing: a wall clock spanning 7.5s could
+	// cross a minute boundary and reset the counter, making the test decision
+	// non-deterministic. Base time is truncated to the start of its minute; Now
+	// returns base + elapsed time since the case started, so 7.5s of test time
+	// stays within one calendar minute by construction.
+	startCaseTime := time.Now()
+	base := startCaseTime.Truncate(time.Minute)
+	d.Now = func() time.Time {
+		return base.Add(time.Since(startCaseTime))
+	}
+
+	sess, done := serve(t, d)
 	defer stop(t, sess, done)
 
 	f.ready(t)
