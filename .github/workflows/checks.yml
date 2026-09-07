@@ -354,6 +354,20 @@ jobs:
           done
           nats-server --version
           nats --version
+      - name: leftovers from an earlier job
+        # `cancel-in-progress` kills the step's shell, not what the suite
+        # detached: the seats' listener loops and the scratch server. On a
+        # hosted image they go with the machine, so there is nothing here to
+        # reap and this is skipped on the same test the never-install step
+        # uses. On a machine that stays they survive into this job, where the
+        # listener census counts them and the registry and wake cases see a
+        # second, stale attendance. The census is printed whatever it finds,
+        # so the reason for a failure is where the log is already being read,
+        # and the step fails if anything it named is still standing — a
+        # poisoned job never runs.
+        if: runner.environment == 'self-hosted'
+        run: bash conformance/leftovers.sh reap
+
       - name: the suite is the specification
         # It boots its own server on a random port in its own temp LOC_HOME and
         # tears both down, so nothing here needs a service or a fixture.

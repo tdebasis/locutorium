@@ -22,12 +22,14 @@ build:
 
 # The Go unit tests, and the shell tests that stand beside them. The
 # conformance suite itself is the gate for both implementations and is run by
-# conformance/run.sh, not from here — but the file below is a test OF that
-# suite's own machinery, its teardown, and it neither boots a server nor lays a
-# deployment, so it belongs where `make test` will actually run it.
+# conformance/run.sh, not from here — but the two files below are tests OF that
+# suite's own machinery (its teardown, and the pre-run cleanup CI does on a
+# persistent runner), and they neither boot a server nor lay a deployment, so
+# they belong where `make test` will actually run them.
 test:
 	$(GO) test -count=1 ./...
 	bash conformance/teardown_test.sh
+	bash conformance/leftovers_test.sh
 
 clean:
 	rm -rf build
