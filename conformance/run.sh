@@ -84,6 +84,39 @@ scratch_dir() { mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/loc-conformance.XXXXX
 export LOC_HOME="$(scratch_dir)/deployment"
 PATH="$LOC_BIN_DIR:$PATH"
 _creds() { cat "$LOC_HOME/creds/$1"; }
+# THE RUN'S OWN RECORD OF WHAT IT STARTED — the spawn ledger read by
+# conformance/teardown.sh, and the reason it exists is written there.
+#
+# ONE HELPER, NOT EIGHT EDITED CALL SITES. `loc` is a shell function, so every
+# `loc ...` line in this file already goes through it unchanged: the same verb,
+# the same arguments, the same LOC_IDENTITY in the same environment, the same
+# exit status, stderr untouched. For every verb but `sub` it is `command loc`
+# and literally nothing else happens. Not a single case below is edited, which
+# is the point — a capture that required touching each site would be a change
+# to the cases, and the cases are the specification.
+#
+# For `sub` it reads the pid out of the one line the tool prints — `attending →
+# queue.X (listener N)` — appends it to the ledger, and hands the same bytes
+# on. It has to be read HERE: every site redirects that line to /dev/null, so
+# this is the only point at which the pid the run just started is visible.
+#
+# `already attending` prints the same shape and also names a listener this run
+# started, so it is recorded too. A pid appearing twice costs one extra kill(2)
+# on a pid already being killed.
+#
+# The `bash -c "... loc ..."` cases run a child shell, which does not inherit
+# this function and does not need to: none of them subscribe.
+loc() {
+  if [[ "${1:-}" != sub ]]; then command loc "$@"; return; fi
+  local out rc spawned
+  out="$(command loc "$@")"; rc=$?
+  [[ -n "$out" ]] && printf '%s\n' "$out"
+  spawned="$(printf '%s\n' "$out" | sed -n 's/.*(listener \([0-9][0-9]*\)).*/\1/p')"
+  if [[ -n "$spawned" && -d "$LOC_HOME/run" ]]; then
+    printf '%s\n' "$spawned" >> "$LOC_HOME/run/suite.spawned"
+  fi
+  return $rc
+}
 SERVER_PID=""
 PASS=0; FAIL=0; SKIP=0
 
