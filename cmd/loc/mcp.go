@@ -91,11 +91,13 @@ func mcpVerb(args []string) error {
 // registration must carry is read here, where it is still the truth, and
 // passed as an argument.
 func mcpParent() error {
-	self, err := os.Executable()
+	cmd, err := selfCommand(os.Getppid())
 	if err != nil {
 		return err
 	}
-	cmd := osexec.Command(self, "mcp", serveFlag, pidFlag, strconv.Itoa(os.Getppid()))
+	// THE SAME THREE DESCRIPTORS, HANDED STRAIGHT DOWN. Nothing is copied and
+	// nothing is proxied: the child speaks to the runtime itself, which is
+	// what makes the runtime's exit close ITS pipe and not ours.
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Start(); err != nil {
 		return err
@@ -118,6 +120,24 @@ func mcpParent() error {
 			return childStatus(err)
 		}
 	}
+}
+
+// selfCommand builds the re-execution: this same binary, told to serve, with
+// the runtime's pid written into its arguments.
+//
+// A SEAM, because supervision is the part worth testing and re-executing is
+// the part that cannot be. What mcpParent does — start, forward, wait, report
+// the status — is ordinary logic with ordinary mistakes in it; the one thing
+// that resists a test is `os.Executable`, which inside a test binary names the
+// test binary, and a test binary re-executing itself is a fork bomb. Replacing
+// this one function lets a case drive the supervision against a stand-in child
+// whose ending it chooses.
+var selfCommand = func(runtimePID int) (*osexec.Cmd, error) {
+	self, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	return osexec.Command(self, "mcp", serveFlag, pidFlag, strconv.Itoa(runtimePID)), nil
 }
 
 // childStatus turns the child's ending into this process's exit code.
