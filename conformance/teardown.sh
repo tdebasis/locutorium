@@ -8,7 +8,7 @@
 # to be able to do.
 #
 # Sourced, never executed: it defines the functions and installs the traps in
-# the caller's shell, and reads the caller's LOC_IMPL, LOC_HOME, LOC_BIN_DIR,
+# the caller's shell, and reads the caller's LOC_HOME, LOC_BIN_DIR,
 # SERVER_PID and DEMO_PID at the moment a trap fires.
 
 # THIS SUITE'S OWN LISTENERS, AND ONLY THOSE — identified by a file this run
@@ -26,10 +26,12 @@
 suite_listeners() { # → one pid per line: this suite's own listeners, plus
   # each one's tap (its `nats subscribe` child, found by PARENT pid — never
   # by matching the tap's own command line, which names no deployment at
-  # all). Under LOC_IMPL=go there is no listener in this build to have a
-  # pidfile, so this returns nothing; harmless, because the go lane skips
-  # every case that would call it.
-  [[ "$LOC_IMPL" == go ]] && return 0
+  # NOTHING SPAWNS A LISTENER ANY MORE — the shell tool that had one is gone
+  # and `loc mcp` is launched by an agent runtime, not by this suite. The walk
+  # below therefore finds no pidfiles and reaps nothing. It is kept rather than
+  # deleted because it is also what would catch a listener left by an OLDER
+  # checkout still running on this machine, which on a persistent runner is a
+  # real thing to find.
   local pf lpid
   for pf in "$LOC_HOME"/run/*.listener.pid; do
     [[ -e "$pf" ]] || continue
@@ -132,7 +134,7 @@ cleanup() {
   # --force because the registration names THIS script's pid, which is by
   # definition still alive: plain unsubscribe refuses a live incumbent on
   # purpose, and refusing here would leave the streams behind.
-  if [[ "$LOC_IMPL" == go && -n "$SERVER_PID" ]]; then
+  if [[ -n "$SERVER_PID" ]]; then
     for _s in $(ep alice) $(ep bob) $(ep carol); do
       LOC_IDENTITY=$_s "$LOC_BIN_DIR/loc" unsubscribe "$_s" --force >/dev/null 2>&1
     done

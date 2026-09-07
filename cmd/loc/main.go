@@ -59,9 +59,6 @@ presence — called by a person, or by a consumer
 
 other
   mcp                       serve this seat to an agent runtime over stdio
-  sub [--watch-pid <pid>]   register attendance: start your wake listener
-  unsub                     end attendance (the queue keeps holding messages)
-  doctor [--init]           health checks; --init creates streams (admin)
   version                   which loc this is
 `
 
@@ -122,11 +119,6 @@ var errUsage = errors.New("usage")
 type exitStatus int
 
 func (e exitStatus) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
-
-// errNotImplemented is a verb this build knows the name of and cannot do. It
-// is an ordinary error, so it prints in the ordinary shape: naming it here is
-// what keeps "this build cannot" from being mistaken for "you typed it wrong".
-var errNotImplemented = errors.New("not implemented in this build")
 
 // run dispatches one invocation and returns the process's exit code.
 //
@@ -215,13 +207,8 @@ func dispatch(args []string, w io.Writer) error {
 	case "read":
 		return readVerb(w, rest)
 
-	// The listener and the health checks are not in this binary yet. They are
-	// named here rather than falling through to usage.
 	case "mcp":
 		return mcpVerb(rest)
-
-	case "sub", "unsub", "doctor":
-		return errNotImplemented
 
 	default:
 		return errUsage

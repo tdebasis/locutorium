@@ -18,7 +18,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # run is unchanged. The Go port points this at its build output and runs THIS
 # IDENTICAL FILE against the new binary — the suite is the gate for both
 # implementations, so it must not name one of them.
-LOC_BIN_DIR="${LOC_BIN_DIR:-$ROOT/bin}"
+LOC_BIN_DIR="${LOC_BIN_DIR:-$ROOT/build/bin}"
 # WHICH IMPLEMENTATION is under test — a different question from which binary to
 # run, and the reason both are needed: the tree ships two, and their listeners
 # are different things (the shell tool's background listener; the Go build's
@@ -26,11 +26,6 @@ LOC_BIN_DIR="${LOC_BIN_DIR:-$ROOT/bin}"
 # cases that are the shell tool's by nature, BY NAME and counted, because a
 # suite that quietly runs fewer cases against one implementation is not the same
 # suite and cannot be the definition of anything.
-LOC_IMPL="${LOC_IMPL:-shell}"
-case "$LOC_IMPL" in
-  shell|go) ;;
-  *) echo "conformance: LOC_IMPL must be 'shell' or 'go', not '$LOC_IMPL'" >&2; exit 2 ;;
-esac
 # THE DEPLOYMENT THE SUITE LAYS IS NAMESPACED UNDER `go`, AND ONLY UNDER `go`.
 #
 # The presence model rules that an endpoint is always <instance>.<agent>: a
@@ -46,7 +41,8 @@ esac
 # `ep` never prints an empty string and never prints a space, so its expansion
 # is used unquoted throughout — including inside the double-quoted `bash -c`
 # strings, where an inner quote would end the argument.
-ep() { if [[ "$LOC_IMPL" == go ]]; then printf 'house.%s' "$1"; else printf '%s' "$1"; fi; }
+# Every endpoint is namespaced: the presence model bars a bare name.
+ep() { printf 'house.%s' "$1"; }
 # THE SAME ENDPOINT'S OTHER SPELLING. A subject may carry a dot; a JetStream
 # object's name may not. So the stream, consumer and ack names substitute the
 # dot, exactly as the bootstrap's grants and the tool's own naming do — and
@@ -58,7 +54,6 @@ obj() { ep "$1" | tr . _; }
 # see the setup below, where the binary under test stands up its own seats —
 # so this is what it always was on the default lane, and it is still named
 # because the README demo further down lays a second house with it.
-SETUP_LOC="loc"
 PORT=$(( 20000 + RANDOM % 20000 ))
 # The scratch server's address, named on EVERY nats(1) call in this file: with
 # no target the tool goes to the operator's own live deployment on 4222.
@@ -152,8 +147,7 @@ sed -i '' -e "s|127.0.0.1:4222|127.0.0.1:$PORT|" -e "s|127.0.0.1:8222|127.0.0.1:
 nats-server -c "$LOC_HOME/nats-server.conf" >"$LOC_HOME/server.log" 2>&1 &
 SERVER_PID=$!
 sleep 1
-if [[ "$LOC_IMPL" == go ]]; then
-  # THE GO LANE DOES NOT BORROW `doctor --init`. That verb reads the registry
+  # THE HOUSE IS LAID THE WAY THE PRESENCE MODEL SAYS IT IS LAID `doctor --init`. That verb reads the registry
   # and creates one stream per name in it, spelled with the RAW name — for a
   # namespaced deployment that is QUEUE_house.alice, which is not a legal
   # JetStream object name. It would fail, and a setup that fails is not a
@@ -186,9 +180,6 @@ if [[ "$LOC_IMPL" == go ]]; then
       --pid $$ --type conformance --version 0 >/dev/null \
       || { bad "stream init (subscribe $_s)"; exit 1; }
   done
-else
-  LOC_IDENTITY=admin $SETUP_LOC doctor --init >/dev/null || { bad "stream init"; exit 1; }
-fi
 
 # Nudge hook stub: records invocations instead of ringing anything.
 cat > "$LOC_HOME/hooks/nudge" <<EOF
@@ -197,7 +188,6 @@ echo "\$1 \$2" >> "$LOC_HOME/nudges.log"
 EOF
 chmod +x "$LOC_HOME/hooks/nudge"
 
-if [[ "$LOC_IMPL" == go ]]; then
   say "— registration events are not room history —"
   # The three seats above registered through the verb under test, into a room
   # stream that already existed. Each registration announced itself. An event
@@ -218,7 +208,6 @@ if [[ "$LOC_IMPL" == go ]]; then
   if grep -q '"topic\.house"' <<<"$_tsub"; then
     bad "the room stream holds no topic.house subject"
   else ok "the room stream holds no topic.house subject"; fi
-fi
 
 say "— identity —"
 check_not "unattributable send is refused" \
@@ -249,17 +238,7 @@ say "— reading must not destroy what it failed to show —"
 # cover for a defect that destroyed five real messages: the ack happened inside
 # a `fetch | render` pipeline, so a broken pipe or a renderer error consumed the
 # message and showed nobody anything.
-if [[ "$LOC_IMPL" == go ]]; then
 skip "a read that fails mid-render re-presents the message instead of losing it" "the case pipes read into head -c 1 with a 12-byte body, which the Go build writes into the pipe buffer before head has exited, so the write succeeds and the message is rightly taken; the shell tool passes only because it spawns its renderer after writing the heading, by which time head is gone; the property — a mid-render failure never loses a message — is proven for this build by cmd/loc/read_pipe_test.go, TestMessagePlane_ReadUnderAClosedPipeHandsTheMessageBack, which pads the body past the pipe buffer so the closed reader lands on the write that carries the message"
-else
-env LOC_IDENTITY=$(ep alice) loc send $(ep bob) "loss-canary" >/dev/null 2>&1
-# Reader dies after one byte; every later write gets SIGPIPE mid-render.
-LOC_IDENTITY=$(ep bob) loc read 2>/dev/null | head -c 1 >/dev/null 2>&1
-out3="$(LOC_IDENTITY=$(ep bob) loc read 2>/dev/null)"
-if grep -q "loss-canary" <<<"$out3"; then
-  ok "a read that fails mid-render re-presents the message instead of losing it"
-else bad "a read that fails mid-render re-presents the message instead of losing it"; fi
-fi
 
 # --peek is the non-destructive read. It previously drained TOPICS with --ack,
 # so peeking silently destroyed topic messages.
@@ -360,12 +339,6 @@ say "— cwd-independence —"
 # case, skipped by name, and the shared verbs keep theirs.
 check "every verb works from an unrelated cwd" \
   bash -c "cd / && LOC_IDENTITY=$(ep alice) loc version >/dev/null && LOC_IDENTITY=$(ep alice) loc send $(ep bob) from-root >/dev/null && LOC_IDENTITY=$(ep alice) loc publish cwdcheck from-root >/dev/null && LOC_IDENTITY=$(ep alice) loc topics >/dev/null && LOC_IDENTITY=$(ep alice) loc status >/dev/null && LOC_IDENTITY=$(ep alice) loc read >/dev/null"
-if [[ "$LOC_IMPL" == go ]]; then
-skip "doctor works from an unrelated cwd" "doctor is not in this build: the binary names the verb and answers 'not implemented in this build', so there is no health check here to ask from anywhere"
-else
-check "doctor works from an unrelated cwd" \
-  bash -c "cd / && LOC_IDENTITY=$(ep alice) loc doctor >/dev/null"
-fi
 
 say "— the CLI finds its own house —"
 # loc is reached through a link on PATH. Whatever shape that link takes, loc
@@ -383,16 +356,9 @@ check "a two-hop symlink to loc finds its house" env LOC_IDENTITY=$(ep alice) "$
 # a provider beside it, so a copy is a broken installation and saying so is the
 # service. The stamped binary carries its version and its provider inside it; a
 # copy of it is simply loc, and refusing would be refusing to work for no reason.
-# That is the one place the two implementations differ on purpose.
-if [[ "$LOC_IMPL" == go ]]; then
-skip "a copied loc refuses to run" "a copy of the stamped binary is an ordinary loc and refusing would be refusing to work: the shell tool must find lib/ and a provider beside it, the binary carries both inside it"
-skip "…and says why (copy, not a link)" "a copy of the stamped binary is an ordinary loc and refusing would be refusing to work: the shell tool must find lib/ and a provider beside it, the binary carries both inside it"
-else
-cp "$LOC_BIN_DIR/loc" "$L/loc-copy"
-check_not "a copied loc refuses to run" env LOC_IDENTITY=$(ep alice) "$L/loc-copy" topics
-copy_out="$(env LOC_IDENTITY=$(ep alice) "$L/loc-copy" topics 2>&1 || true)"
-if grep -q "copy, not a link" <<<"$copy_out"; then ok "…and says why (copy, not a link)"; else bad "…and says why (copy, not a link)"; fi
-fi
+# A COPY OF THE BINARY IS AN ORDINARY loc. The shell tool had to find lib/ and a
+# provider beside it, so a copy of it was broken and refused on purpose; the
+# binary carries both inside itself, so there is nothing here to refuse.
 
 say "— the installer links loc and leaves when told —"
 check "install.sh links loc into a prefix (no service)" \
@@ -430,7 +396,6 @@ if [[ "$n" == "0" ]]; then ok "messages expire at the window's edge (teardown-by
 # The suite also speaks no MCP, and it is not going to learn: these cases are
 # skipped by name, with their reason and where the same property IS proven for
 # this build, and the count is printed.
-if [[ "$LOC_IMPL" == go ]]; then
 say "— delivery: registration, wake, backlog, liveness —"
 skip "registration starts a live listener (verified pid, not file existence)" "this build's listener is not sub/unsub: it is the `mcp` verb, a stdio MCP server the agent runtime launches, which registers the seat with the runtime's pid and rings the pane's bell — so there is no pidfile, fifo or spool here for these cases to interrogate, and the suite speaks no MCP to drive one; the same properties are pinned for this build in cmd/loc/mcp_test.go (registration, the pid, the bell, EOF frees the seat, a live seat is not taken), cmd/loc/mcp_bell_test.go (one wake per window, coalescing, wake-on-backlog) and internal/mcpserve (the breaker, the delivery log, the tools)"
 skip "registration invoked the channel-capture hook" "this build's listener is not sub/unsub: it is the `mcp` verb, a stdio MCP server the agent runtime launches, which registers the seat with the runtime's pid and rings the pane's bell — so there is no pidfile, fifo or spool here for these cases to interrogate, and the suite speaks no MCP to drive one; the same properties are pinned for this build in cmd/loc/mcp_test.go (registration, the pid, the bell, EOF frees the seat, a live seat is not taken), cmd/loc/mcp_bell_test.go (one wake per window, coalescing, wake-on-backlog) and internal/mcpserve (the breaker, the delivery log, the tools)"
@@ -455,249 +420,6 @@ say "— a stranded wake spool is recovered by the next read —"
 skip "stranded wake-spool bodies are presented by the next read" "this build's listener is not sub/unsub: it is the `mcp` verb, a stdio MCP server the agent runtime launches, which registers the seat with the runtime's pid and rings the pane's bell — so there is no pidfile, fifo or spool here for these cases to interrogate, and the suite speaks no MCP to drive one; the same properties are pinned for this build in cmd/loc/mcp_test.go (registration, the pid, the bell, EOF frees the seat, a live seat is not taken), cmd/loc/mcp_bell_test.go (one wake per window, coalescing, wake-on-backlog) and internal/mcpserve (the breaker, the delivery log, the tools)"
 skip "a presented wake-spool body is forgotten, not re-presented" "this build's listener is not sub/unsub: it is the `mcp` verb, a stdio MCP server the agent runtime launches, which registers the seat with the runtime's pid and rings the pane's bell — so there is no pidfile, fifo or spool here for these cases to interrogate, and the suite speaks no MCP to drive one; the same properties are pinned for this build in cmd/loc/mcp_test.go (registration, the pid, the bell, EOF frees the seat, a live seat is not taken), cmd/loc/mcp_bell_test.go (one wake per window, coalescing, wake-on-backlog) and internal/mcpserve (the breaker, the delivery log, the tools)"
 skip "cleanup reaps only this deployment's listeners (a same-path listener from another home survives)" "this build's listener is not sub/unsub: it is the `mcp` verb, a stdio MCP server the agent runtime launches, which registers the seat with the runtime's pid and rings the pane's bell — so there is no pidfile, fifo or spool here for these cases to interrogate, and the suite speaks no MCP to drive one; the same properties are pinned for this build in cmd/loc/mcp_test.go (registration, the pid, the bell, EOF frees the seat, a live seat is not taken), cmd/loc/mcp_bell_test.go (one wake per window, coalescing, wake-on-backlog) and internal/mcpserve (the breaker, the delivery log, the tools)"
-else
-say "— delivery: registration, wake, backlog, liveness —"
-# Wake hook stub: records wakes instead of waking anything.
-cat > "$LOC_HOME/hooks/wake" <<EOF
-#!/bin/sh
-echo "\$1 \$2" >> "$LOC_HOME/wakes.log"
-EOF
-chmod +x "$LOC_HOME/hooks/wake"
-# Register hook stub: records that channel capture was asked for.
-cat > "$LOC_HOME/hooks/register" <<EOF
-#!/bin/sh
-echo "\$1" >> "$LOC_HOME/registers.log"
-EOF
-chmod +x "$LOC_HOME/hooks/register"
-
-LOC_IDENTITY=$(ep alice) loc sub >/dev/null 2>&1
-sleep 1
-check "registration starts a live listener (verified pid, not file existence)" \
-  test -f "$LOC_HOME/run/$(ep alice).listener.pid"
-check "registration invoked the channel-capture hook" \
-  grep -qx "$(ep alice)" "$LOC_HOME/registers.log"
-# The verb is documented in four places and, until the deployment gained a
-# monitor port, could not work on anything bootstrap.sh produced — it worked
-# only where somebody had hand-edited the server config. Nothing tested it, so
-# nothing said so. Alice is attending by now, so registry must name her.
-reg_out="$(env LOC_IDENTITY=$(ep alice) loc registry 2>&1 || true)"
-if grep -q "$(ep alice)" <<<"$reg_out"; then
-  ok "registry names an attending endpoint on a freshly bootstrapped deployment"
-else
-  bad "registry names an attending endpoint on a freshly bootstrapped deployment"
-  say "    registry said: $reg_out"
-fi
-env LOC_IDENTITY=$(ep bob) loc send $(ep alice) "wake-me" >/dev/null 2>&1
-sleep 2
-check "wake hook fired on arrival (first message wakes instantly)" \
-  grep -q "^$(ep alice) 1" "$LOC_HOME/wakes.log"
-# A wake must never make a message unreadable. The listener drains the queue
-# into a spool for the deployment hook to present (consuming first is what
-# stops the hook racing a reader), and `loc read` presents that spool too —
-# so wherever the body sits at this instant (queue, raw spool, rendered
-# spool), the read must show it. This replaced "listener observes without
-# consuming", which asserted the pre-drain design.
-out="$(LOC_IDENTITY=$(ep alice) loc read 2>/dev/null)"
-if grep -q "wake-me" <<<"$out"; then
-  ok "a wake never makes a message unreadable (read presents queue and spool)"
-else bad "a wake never makes a message unreadable (read presents queue and spool)"; fi
-# Stability: one message means ONE wake, and the tap outlives the event.
-# (A churning listener re-wakes on every reconnect cycle and still passed
-# every grep -q above — this case is why that can never happen again.)
-sleep 8
-wakes_now="$(grep -c "^$(ep alice)" "$LOC_HOME/wakes.log" 2>/dev/null || true)"; wakes_now="${wakes_now:-0}"
-if [[ "$wakes_now" == "1" ]] && pgrep -f "nats subscribe queue.$(ep alice)" >/dev/null; then
-  ok "one message, one wake; the tap survives the event (no churn)"
-else bad "one message, one wake; the tap survives the event (got $wakes_now wakes, tap $(pgrep -f "nats subscribe queue.$(ep alice)" >/dev/null && echo alive || echo dead))"; fi
-LOC_IDENTITY=$(ep alice) loc unsub >/dev/null 2>&1
-check_not "unsub ends attendance (pidfile gone)" test -f "$LOC_HOME/run/$(ep alice).listener.pid"
-# Wake-on-backlog: messages sent while unattended wake once, with the count.
-env LOC_IDENTITY=$(ep bob) loc send $(ep alice) "backlog-1" >/dev/null 2>&1
-env LOC_IDENTITY=$(ep bob) loc send $(ep alice) "backlog-2" >/dev/null 2>&1
-: > "$LOC_HOME/wakes.log"
-LOC_IDENTITY=$(ep alice) loc sub >/dev/null 2>&1
-sleep 2
-check "wake-on-backlog: (re)registration wakes with the waiting count" \
-  grep -q "^$(ep alice) 2" "$LOC_HOME/wakes.log"
-LOC_IDENTITY=$(ep alice) loc read >/dev/null 2>&1
-LOC_IDENTITY=$(ep alice) loc unsub >/dev/null 2>&1
-# Liveness: a listener watching a pid exits when that pid dies.
-sleep 300 & WATCHED=$!
-LOC_IDENTITY=$(ep carol) loc sub --watch-pid "$WATCHED" >/dev/null 2>&1
-sleep 1
-kill "$WATCHED" 2>/dev/null
-sleep 4
-lpid="$(sed -n 1p "$LOC_HOME/run/$(ep carol).listener.pid" 2>/dev/null || true)"
-if [[ -z "$lpid" ]] || ! kill -0 "$lpid" 2>/dev/null; then
-  ok "listener exits when the watched session dies (employment-tied)"
-else bad "listener exits when the watched session dies (employment-tied)"; kill "$lpid" 2>/dev/null; fi
-# Say-semantics (config-gated): a send to a known-absent endpoint is refused;
-# an attending endpoint still receives.
-echo "send_requires_attendance = yes" >> "$LOC_HOME/config"
-check_not "say-semantics: send to a known-absent endpoint is refused" \
-  env LOC_IDENTITY=$(ep bob) loc send $(ep carol) "into the void"
-LOC_IDENTITY=$(ep carol) loc sub >/dev/null 2>&1
-sleep 1
-check "say-semantics: send to an attending endpoint succeeds" \
-  env LOC_IDENTITY=$(ep bob) loc send $(ep carol) "present company"
-LOC_IDENTITY=$(ep carol) loc read >/dev/null 2>&1
-LOC_IDENTITY=$(ep carol) loc unsub >/dev/null 2>&1
-sed -i '' '/send_requires_attendance/d' "$LOC_HOME/config"
-
-# Breaker: with a 1/minute cap and a 1s window, three spaced sends must
-# produce exactly one wake and a loud trip line — and the queue must still
-# hold all three messages (suppressed wakes never lose anything).
-printf 'wake_breaker_per_minute = 1\nwake_window_seconds = 1\n' >> "$LOC_HOME/config"
-: > "$LOC_HOME/wakes.log"
-# The breaker's window is calendar-aligned; keep all three sends inside one
-# minute or a boundary reset legally allows a second wake (phase flake).
-while [ "$(date +%S | sed 's/^0//')" -gt 40 ]; do sleep 2; done
-LOC_IDENTITY=$(ep alice) loc sub >/dev/null 2>&1
-sleep 1
-env LOC_IDENTITY=$(ep bob) loc send $(ep alice) "b1" >/dev/null 2>&1; sleep 2
-env LOC_IDENTITY=$(ep bob) loc send $(ep alice) "b2" >/dev/null 2>&1; sleep 2
-env LOC_IDENTITY=$(ep bob) loc send $(ep alice) "b3" >/dev/null 2>&1; sleep 2
-wakes="$(grep -c "^$(ep alice)" "$LOC_HOME/wakes.log" 2>/dev/null || true)"; wakes="${wakes:-0}"
-if [[ "$wakes" == "1" ]] && grep -q "BREAKER TRIPPED" "$LOC_HOME/run/$(ep alice).delivery.log"; then
-  ok "breaker caps wakes and trips loud (1 wake for 3 sends at cap 1/min)"
-else bad "breaker caps wakes and trips loud (got $wakes wakes)"; fi
-out="$(LOC_IDENTITY=$(ep alice) loc read 2>/dev/null)"
-if grep -q "b1" <<<"$out" && grep -q "b3" <<<"$out"; then
-  ok "suppressed wakes lose nothing (all three messages readable)"
-else bad "suppressed wakes lose nothing (all three messages readable)"; fi
-LOC_IDENTITY=$(ep alice) loc unsub >/dev/null 2>&1
-sed -i '' '/wake_breaker_per_minute/d;/wake_window_seconds/d' "$LOC_HOME/config"
-
-say "— rapid unsub/resub leaves no orphan listener —"
-# A dying listener's cleanup runs up to a read-tick (~2s) after the kill. If a
-# successor registers inside that window, cleanup must not remove the
-# successor's pidfile — an orphaned listener is invisible to the liveness
-# check, unkillable by unsub, and wakes forever beside the next registration.
-LOC_IDENTITY=$(ep alice) loc sub >/dev/null 2>&1
-LOC_IDENTITY=$(ep alice) loc unsub >/dev/null 2>&1
-LOC_IDENTITY=$(ep alice) loc sub >/dev/null 2>&1   # registers inside the death window
-sleep 3                                       # let the first listener finish dying
-LOC_IDENTITY=$(ep alice) loc unsub >/dev/null 2>&1  # must actually kill the successor
-: > "$LOC_HOME/wakes.log"
-env LOC_IDENTITY=$(ep bob) loc send $(ep alice) "orphan-bait" >/dev/null 2>&1
-sleep 8
-if ! grep -q "^$(ep alice)" "$LOC_HOME/wakes.log"; then
-  ok "rapid unsub/resub leaves no orphan listener (no wake after final unsub)"
-else bad "rapid unsub/resub leaves no orphan listener (no wake after final unsub)"; fi
-LOC_IDENTITY=$(ep alice) loc read >/dev/null 2>&1   # drain the bait
-
-say "— the pidfile is the listener's licence to live —"
-# The pidfile is not a RECORD of the listener, it is its MANDATE: remove the
-# entry and the listener must go, with no signal sent to it at all. That is the
-# property `unsub` needs, because its kill can miss — the listener may be
-# seconds deep in a drain, or a generation the pidfile never named — and before
-# this, the rm that followed simply deleted the last handle to it. The captured
-# survivor (docs/NOTES-orphan-listener.md) held an unlinked fifo, a tap whose
-# server was dead, and no file on disk naming it: nothing could reach it again.
-#
-# No signal is sent here on purpose. A case that unsubs would pass on the kill
-# alone and prove nothing about the mandate.
-LOC_IDENTITY=$(ep alice) loc sub >/dev/null 2>&1
-sleep 1
-# The census has to be taken NOW, while the pidfile this case is about to
-# delete still exists — suite_listeners() reads exactly that file, and once
-# it is gone there is nothing left on disk naming a still-alive offender.
-# What survives is judged against THESE pids, not a re-scan taken later.
-census_before="$(suite_listeners)"
-rm -f "$LOC_HOME/run/$(ep alice).listener.pid"
-sleep 5
-survivors=0
-for _p in $census_before; do kill -0 "$_p" 2>/dev/null && survivors=$((survivors+1)); done
-# Leaving is not enough: it must leave nothing behind. The fifo is named for the
-# generation that made it, so one left here is one left forever — nothing will
-# ever reuse that name. Counted by glob, not by ls|grep, so "no match" is simply
-# a path that does not exist.
-stale_fifos=0
-for f in "$LOC_HOME/run/$(ep alice)"*.listen.fifo; do [[ -e "$f" ]] && stale_fifos=$((stale_fifos+1)); done
-if [[ "$survivors" == "0" ]] && [[ "$stale_fifos" == "0" ]]; then
-  ok "listener exits within 5 s when its pidfile is removed"
-else
-  bad "listener exits within 5 s when its pidfile is removed ($survivors listener(s)/tap(s) from this tree, $stale_fifos stale fifo(s))"
-  rm -f "$LOC_HOME/run/$(ep alice)"*.listen.fifo
-  # Do not leave the orphan behind for the next run to trip over. Only the
-  # pids this case's own pre-deletion census named — never a scan of the
-  # process table by path.
-  reap_suite_listeners $census_before
-fi
-
-say "— attendance leaves nothing behind on disk —"
-# The case above covers the eviction path. This one covers the path the machine
-# actually walks a dozen times a day: plain sub, plain unsub. Both end in the
-# same cleanup, but they reach it differently, and a future change could easily
-# tidy the fifo on one path only — so the everyday path gets its own case.
-#
-# THREE CYCLES, because one proves nothing here. A single stale fifo is a
-# harmless leftover that the next generation would once have reclaimed; what
-# makes it a defect is that per-generation names never repeat, so the count
-# GROWS. Guarded, this counted 1, then 2, then 3.
-#
-# The sub count is asserted too: with no listeners ever started there would be
-# no fifos to leak, and this case would pass by doing nothing.
-subs_ok=0
-for _n in 1 2 3; do
-  LOC_IDENTITY=$(ep alice) loc sub >/dev/null 2>&1 && subs_ok=$((subs_ok+1))
-  sleep 2
-  LOC_IDENTITY=$(ep alice) loc unsub >/dev/null 2>&1
-  sleep 3
-done
-stale_fifos=0
-for f in "$LOC_HOME/run/$(ep alice)"*.listen.fifo; do [[ -e "$f" ]] && stale_fifos=$((stale_fifos+1)); done
-if [[ "$stale_fifos" == "0" ]] && [[ "$subs_ok" == "3" ]]; then
-  ok "repeated sub/unsub leaves no stale fifo behind"
-else
-  bad "repeated sub/unsub leaves no stale fifo behind ($stale_fifos after 3 cycles, $subs_ok/3 subs registered)"
-  rm -f "$LOC_HOME/run/$(ep alice)"*.listen.fifo
-fi
-
-say "— a stranded wake spool is recovered by the next read —"
-# A listener that died between fetching (acked = deleted from the queue) and
-# rendering leaves raw envelopes in its wake spool. Those bodies exist nowhere
-# else; the next read must present them rather than show an empty mailbox.
-printf '%s\n' "{\"id\":\"x\",\"ts\":\"2026-08-19T00:00:00Z\",\"from\":\"$(ep bob)\",\"to\":\"$(ep alice)\",\"kind\":\"msg\",\"body\":\"stranded-in-wake-spool\"}" \
-  >> "$LOC_HOME/run/$(ep alice).wake.spool.raw"
-out="$(LOC_IDENTITY=$(ep alice) loc read 2>/dev/null)"
-if grep -q "stranded-in-wake-spool" <<<"$out"; then
-  ok "stranded wake-spool bodies are presented by the next read"
-else bad "stranded wake-spool bodies are presented by the next read"; fi
-# And presenting forgot it: claimed and removed, so a second read is clean.
-out="$(LOC_IDENTITY=$(ep alice) loc read 2>/dev/null)"
-if ! grep -q "stranded-in-wake-spool" <<<"$out"; then
-  ok "a presented wake-spool body is forgotten, not re-presented"
-else bad "a presented wake-spool body is forgotten, not re-presented"; fi
-
-say "— cleanup reaps only this deployment's listeners (a same-path listener from another home survives) —"
-# The census this replaced was `pgrep -fl 'loc sub' | grep "$LOC_BIN_DIR/loc"`
-# — a filter on BINARY PATH. On a machine where the suite runs from the
-# deployment's own tree, the live seats attending right now run that exact
-# binary at that exact path; the filter cannot tell "this suite's listener"
-# from "the machine's real, live one", and the cleanup that followed it
-# killed every one of them.
-#
-# The plant stands in for that machine's live seat: a process whose command
-# line contains "$LOC_BIN_DIR/loc sub" (via `exec -a`, which sets argv[0] —
-# it is not the tool at all, and touches neither NATS nor $LOC_HOME), but
-# whose own LOC_HOME is a scratch dir that has nothing to do with the
-# suite's, and which registers no pidfile under the suite's $LOC_HOME/run.
-# reap_suite_listeners() with no arguments is exactly the cleanup this suite
-# runs on itself; the plant must be untouched by it.
-PLANT_HOME="$(mktemp -d)"
-LOC_HOME="$PLANT_HOME" bash -c "exec -a '$LOC_BIN_DIR/loc sub' sleep 300" &
-PLANT_PID=$!
-sleep 1
-reap_suite_listeners
-if kill -0 "$PLANT_PID" 2>/dev/null; then
-  ok "cleanup reaps only this deployment's listeners (a same-path listener from another home survives)"
-else
-  bad "cleanup reaps only this deployment's listeners (a same-path listener from another home survives)"
-fi
-kill "$PLANT_PID" 2>/dev/null
-rm -rf "$PLANT_HOME"
-fi
 # ── end of the listener's cases ──────────────────────────────────────────────
 
 say "— the front page shows what the tool prints —"
@@ -705,30 +427,7 @@ say "— the front page shows what the tool prints —"
 # replays its five commands in a fresh house (ada/bob/carol, own port, own server)
 # and diffs the output against the block with timestamps masked. If the tool's
 # output ever moves, the page moves with it or this fails.
-if [[ "$LOC_IMPL" == go ]]; then
 skip "README transcript equals a fresh run (timestamps masked)" "the captured transcript addresses bare endpoints, which the presence model bars — a bare name is never an endpoint — so replaying it against this build would be replaying a deployment it cannot have; the Go build's render contract is internal/loc/render_test.go, which diffs this same README block directly"
-else
-DEMO_HOME="$(scratch_dir)/house"; DEMO_PORT=$(( 20000 + RANDOM % 20000 )); DEMO_MPORT=$(( DEMO_PORT + 1 ))
-LOC_HOME="$DEMO_HOME" "$ROOT/providers/nats/bootstrap.sh" ada bob carol >/dev/null
-sed -i '' -e "s|127.0.0.1:4222|127.0.0.1:$DEMO_PORT|" -e "s|127.0.0.1:8222|127.0.0.1:$DEMO_MPORT|" \
-  "$DEMO_HOME/config" "$DEMO_HOME/nats-server.conf"
-nats-server -c "$DEMO_HOME/nats-server.conf" >"$DEMO_HOME/server.log" 2>&1 &
-DEMO_PID=$!; sleep 1
-LOC_HOME="$DEMO_HOME" LOC_IDENTITY=admin $SETUP_LOC doctor --init >/dev/null 2>&1
-mask() { sed -E 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z/<ts>/g'; }
-expected="$(awk '/^```console$/{f=1;next} f&&/^```$/{exit} f' "$ROOT/README.md" | mask)"
-actual="$(
-  while IFS= read -r c; do
-    printf '$ %s\n' "$c"; LOC_HOME="$DEMO_HOME" bash -c "$c" 2>&1
-  done <<<"$(awk '/^```console$/{f=1;next} f&&/^```$/{exit} f&&/^\$ /{sub(/^\$ /,"");print}' "$ROOT/README.md")" | mask)"
-if [[ -n "$expected" && "$expected" == "$actual" ]]; then
-  ok "README transcript equals a fresh run (timestamps masked)"
-else
-  bad "README transcript equals a fresh run (timestamps masked)"
-  diff <(printf '%s\n' "$expected") <(printf '%s\n' "$actual") | head -20 | sed 's/^/      /'
-fi
-kill "$DEMO_PID" 2>/dev/null; rm -rf "$(dirname "$DEMO_HOME")"
-fi
 
 say "— one version, stated once —"
 if "$ROOT/conformance/check-version.sh" >/dev/null 2>&1; then

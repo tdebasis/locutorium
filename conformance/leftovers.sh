@@ -19,7 +19,7 @@
 # WHERE EACH ONE IS CAUGHT (verified 2026-09-06 against this runner):
 #
 #   the listeners — a listener is a forked subshell of `loc`, so its command
-#   line is the interpreter and the script's full path: `bash <tree>/bin/loc
+#   line is the interpreter and the script's full path: `<tree>/build/bin/loc
 #   sub`. The tree is the checkout, which lives under the work tree. Caught by
 #   the work-tree filter.
 #

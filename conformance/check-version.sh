@@ -8,18 +8,15 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 v="$(tr -d '[:space:]' < VERSION)"
 [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "check-version: VERSION '$v' is not X.Y.Z" >&2; exit 1; }
-got="$(bin/loc version)"
-[[ "$got" == "loc $v" ]] || { echo "check-version: the shell tool printed '$got', VERSION says $v" >&2; exit 1; }
-# The Go build, when it has been made. It is asked SEPARATELY because it answers
-# differently: its number is stamped in at link time from this same file, so a
-# binary built before a bump keeps claiming the old number and nothing else in
-# the tree would notice. Absent is not a failure — `make build` is not a
-# precondition for checking the version of a tree.
+# The built binary, when it has been made. Its number is stamped in at link time
+# from this same file, so a binary built before a bump keeps claiming the old
+# number and nothing else in the tree would notice. Absent is not a failure —
+# `make build` is not a precondition for checking the version of a tree.
 if [[ -x build/bin/loc ]]; then
-  got_go="$(build/bin/loc version)"
-  [[ "$got_go" == "loc $v" ]] || {
-    echo "check-version: the Go build printed '$got_go', VERSION says $v (stale binary? run 'make build')" >&2; exit 1; }
-  echo "check-version: both tools say $v"
+  got="$(build/bin/loc version)"
+  [[ "$got" == "loc $v" ]] || {
+    echo "check-version: the binary printed '$got', VERSION says $v (stale binary? run 'make build')" >&2; exit 1; }
+  echo "check-version: the binary says $v"
 fi
 bad="$(grep -rhoE 'v[0-9]+\.[0-9]+\.[0-9]+' README.md RELEASE.md docs/*.md 2>/dev/null | sort -u | grep -v "^v$v$" || true)"
 [[ -z "$bad" ]] || { echo "check-version: docs mention other versions: $(echo "$bad" | tr '\n' ' ')" >&2; exit 1; }
