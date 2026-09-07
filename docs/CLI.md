@@ -25,9 +25,8 @@ Errors print `loc: <message>` on stderr and exit **1**. Everything else exits **
 | `loc doctor [--init]` | health checks; `--init` creates the streams |
 | `loc version` | version string |
 
-`sub`, `unsub` and `doctor` are the shell tool's verbs. The Go build names them and answers
-`not implemented in this build`; every other row it answers itself. `mcp` is the other way round:
-it is the Go build's, and it is that build's answer to `sub` — the same three jobs (register, listen,
+`mcp` is how a seat attends: it is this tool's answer to what a background listener used to do — the
+same three jobs (register, listen,
 wake) done by one process the agent runtime launches instead of by a background listener.
 
 ---
@@ -445,10 +444,10 @@ the bell; something else must then run `subscribe` and `unsubscribe` around the 
 | `provider` | none | which provider backs this house |
 | `nats_url` | `nats://127.0.0.1:4222` | where the medium is |
 | `idle_window` | `10m` | how long after an event `status <endpoint>` still reads *active* |
-| `send_requires_attendance` | `no` | refuse sends to endpoints that are not attending. On the Go build with the NATS provider the key is satisfied by the live queue: a subscribed peer attends, and an unsubscribed one has no queue, so its send is refused for absence — no pidfile is read. The listener-pidfile form of the same key applies to the shell tool. |
-| `monitor_url` | none | read by the shell tool's own `registry`, and written by its bootstrap; no Go verb reads it |
-| `topic_window` | `7d` | how long topic messages live (the shell tool) |
-| `wake_window_seconds` | `5` | wakes are coalesced across this window (both listeners: the shell tool's, and `loc mcp`) |
+| `send_requires_attendance` | `no` | refuse sends to endpoints that are not attending. With the NATS provider the key is satisfied by the live queue: a subscribed peer attends, and an unsubscribed one has no queue, so its send is refused for absence. |
+| `monitor_url` | none | written by `bootstrap.sh`; no verb reads it — `registry` asks the instance's host over the bus |
+| `topic_window` | `7d` | how long topic messages live |
+| `wake_window_seconds` | `5` | wakes are coalesced across this window (`loc mcp`) |
 | `wake_breaker_per_minute` | `6` | cap on wakes per minute (both listeners) |
 | `wake_breaker_per_hour` | `60` | cap on wakes per hour (both listeners) |
 

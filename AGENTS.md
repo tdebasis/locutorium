@@ -1,23 +1,23 @@
 # AGENTS.md — for coding agents working in this repository
 
-This is the Locutorium: a message bus for agents on one machine, in **two implementations** of the
-same command reference. The shell tool is `bin/loc` with one provider (`lib/providers/nats.sh`);
-the Go build is `cmd/loc` with `internal/`, made by `make build`. Both are gated by the same
-conformance suite. To **use** the bus as an endpoint, read `docs/AGENTS.md`. To **deploy** it, read
+This is the Locutorium: a message bus for agents on one machine. `loc` is `cmd/loc` with
+`internal/`, made by `make build`, and it is gated by the conformance suite. A bash implementation
+lived beside it until 2026-09-07 and was deleted: two implementations meant a layer between them,
+and that layer is where the defects were. To **use** the bus as an endpoint, read `docs/AGENTS.md`.
+To **deploy** it, read
 `docs/OPERATORS.md`. This file is for changing the code.
 
 ## Hard rules
 
 1. **bash 3.2.** Every script must run on the bash that ships with macOS. No associative arrays,
-   no `mapfile`, no `${var,,}`. This binds the shell tool, the installer and the suite; the Go tree
-   is bound by `go.mod` instead.
-2. **The suite is the definition.** `conformance/run.sh` must be green after every change to `bin/`,
-   `lib/`, `cmd/` or `internal/`; a provider is a Locutorium provider iff the suite passes against
-   it (`CONTRACT.md`). It is ONE file run against both implementations: `LOC_BIN_DIR` says which
-   `loc` to drive, `LOC_IMPL` (`shell` by default, `go`) says which implementation is being driven.
-   Under `go` the listener's cases — everything reached through `sub`, `unsub` and `doctor`, which
-   that build names and does not implement — are skipped **by name** and counted in the tally: that
-   build's listener is the `mcp` verb, whose properties are proven in `cmd/loc/mcp_test.go`,
+   no `mapfile`, no `${var,,}`. This binds the installer, the suite and the provider scripts; the Go
+   tree is bound by `go.mod` instead.
+2. **The suite is the definition.** `conformance/run.sh` must be green after every change to `cmd/`
+   or `internal/`; a provider is a Locutorium provider iff the suite passes against it
+   (`CONTRACT.md`). `LOC_BIN_DIR` says which `loc` to drive, defaulting to `build/bin`. A seat's
+   listener is the `mcp` verb — a stdio MCP server the runtime launches — which the suite does not
+   speak; those cases are skipped **by name**, counted in the tally, and each names where the same
+   property IS proven: `cmd/loc/mcp_test.go`,
    `cmd/loc/mcp_bell_test.go` and `internal/mcpserve` instead, because the suite speaks no MCP. A
    case that is skipped without appearing in the output is a case nobody knows was not run, so
    A case may be skipped only where the two implementations differ on purpose, and then only by name, with its reason printed, and counted.
@@ -32,17 +32,14 @@ conformance suite. To **use** the bus as an endpoint, read `docs/AGENTS.md`. To 
 
 ## Files
 
-**The shell tool.** `bin/loc` entry point · `lib/core.sh` the verbs and the delivery machinery ·
-`lib/providers/nats.sh` the NATS provider (`provider_*`).
-
-**The Go build.** `cmd/loc` the verbs and the dispatch · `internal/loc`, `internal/config`,
+**The tool.** `cmd/loc` the verbs and the dispatch · `internal/loc`, `internal/config`,
 `internal/presence` the model · `internal/provider` + `internal/provider/nats` the adapter ·
 `internal/mcpserve` the `mcp` verb — this build's listener, which is a stdio MCP server the agent
 runtime launches rather than a background process (`docs/CLI.md` §mcp) ·
 `Makefile` the one command that builds it, stamping `VERSION` in at link time · `build/` its
 output, gitignored, because a binary is an artifact and not source.
 
-**Both.** `providers/nats/bootstrap.sh` first deployment · `providers/nats/make-contexts.sh` CLI
-contexts · `providers/nats/service.sh` + `launchd/` the LaunchAgent · `install.sh` (`--go` links the
-binary beside the shell tool) · `conformance/run.sh` the suite · `conformance/check-clean.sh` ·
-`conformance/check-version.sh` (asks both tools their version) · `VERSION` · `docs/` · `RELEASE.md`.
+**Around it.** `providers/nats/bootstrap.sh` first deployment · `providers/nats/make-contexts.sh` CLI
+contexts · `providers/nats/service.sh` + `launchd/` the LaunchAgent · `install.sh` (copies the stamped
+binary and links `loc` at it) · `conformance/run.sh` the suite · `conformance/check-clean.sh` ·
+`conformance/check-version.sh` (asks the binary its version) · `VERSION` · `docs/` · `RELEASE.md`.

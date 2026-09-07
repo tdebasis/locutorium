@@ -381,13 +381,8 @@ jobs:
         if: runner.environment == 'self-hosted'
         run: bash conformance/leftovers.sh reap
 
-      - name: the suite is the specification
-        # It boots its own server on a random port in its own temp LOC_HOME and
-        # tears both down, so nothing here needs a service or a fixture.
-        run: bash conformance/run.sh
-
       - name: the Go toolchain is present
-        # The second suite run needs a compiler. A self-hosted machine is
+        # The suite drives the built binary, so it needs a compiler. A self-hosted machine is
         # somebody's computer and this job installs nothing on it — the same
         # rule the medium keeps two steps up — so an absent toolchain is a setup
         # fault, reported by name and loudly, and never repaired by the job.
@@ -402,13 +397,14 @@ jobs:
           go version
           make --version | head -1
 
-      - name: the suite against the Go binary
-        # THE SAME FILE, the same cases, a different binary. This is what makes
-        # the suite the gate for both implementations rather than a test of one:
-        # LOC_BIN_DIR says which loc to drive, LOC_IMPL says which implementation
-        # is being driven, and the run prints by name the cases it did not ask
-        # (the listener's, which this build does not have yet).
+      - name: the suite is the specification
+        # ONE run, because there is one implementation. This job used to run the
+        # whole suite twice — once per implementation — and the first run needed
+        # no build because the shell tool was the checkout. The suite now drives
+        # build/bin/loc, so the build comes first; LOC_BIN_DIR defaults there.
+        # It boots its own server on a random port in its own temp LOC_HOME and
+        # tears both down, so nothing here needs a service or a fixture.
         run: |
           set -euo pipefail
           make build
-          LOC_BIN_DIR="$PWD/build/bin" LOC_IMPL=go bash conformance/run.sh
+          bash conformance/run.sh

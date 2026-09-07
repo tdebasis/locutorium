@@ -65,8 +65,7 @@ cat > "$CHILD" <<'CHILDEOF'
 #!/usr/bin/env bash
 set -uo pipefail
 ROOT="$1"; SCRATCH="$2"; PIDS="$3"; OTHER="$4"; IDLE="$5"
-LOC_IMPL=shell
-LOC_BIN_DIR="$ROOT/bin"
+LOC_BIN_DIR="$ROOT/build/bin"
 export LOC_HOME="$SCRATCH/deployment"
 mkdir -p "$LOC_HOME/run" "$OTHER/run"
 sleep 900 & SERVER_PID=$!

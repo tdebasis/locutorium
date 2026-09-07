@@ -28,7 +28,7 @@ const testPassword = "conformance-scratch"
 const topicWindow = 7 * 24 * time.Hour
 
 // harness is one scratch deployment: a server, a $LOC_HOME, and the streams
-// the code expects to find. The shapes come from lib/providers/nats.sh's
+// the code expects to find. The shapes come from the NATS provider's
 // `provider_doctor --init`:
 //
 //	QUEUE_<e>  subjects queue.<e>, work-queue retention, one durable pull

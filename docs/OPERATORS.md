@@ -54,9 +54,8 @@ selects none of them.
 ## The service
 
 `./install.sh` renders `providers/nats/launchd/com.locutorium.nats-server.plist.in` with the
-`nats-server` path and `$LOC_HOME` of the machine it runs on, and loads it. It also links the shell
-tool as `loc`, and with `--go` builds and links the Go build beside it as `loc-go` — the flag is
-additive and the `loc` link is untouched either way. `--restart-service` is
+`nats-server` path and `$LOC_HOME` of the machine it runs on, and loads it. It also builds `loc`,
+copies the stamped binary into `lib/locutorium`, and links `loc` at that copy. `--restart-service` is
 the only path that stops a running medium. Logs: `$LOC_HOME/server.log`. State of the agent:
 `launchctl list com.locutorium.nats-server`. Endpoints survive a medium restart — queues are
 durable; listeners reconnect.
@@ -65,9 +64,9 @@ durable; listeners reconnect.
 
 | key | default | meaning |
 |---|---|---|
-| `provider` | — (required) | which medium adapter to use. The shell tool reads it as a filename and sources `lib/providers/<name>.sh`; the Go build looks the name up in a registry compiled into the binary, so a name it was not built with is refused rather than searched for. Same key, same value, two ways of finding the thing |
+| `provider` | — (required) | which medium adapter to use. The name is looked up in a registry compiled into the binary, so a name it was not built with is refused rather than searched for |
 | `nats_url` | `nats://127.0.0.1:4222` | where the medium listens |
-| `monitor_url` | — (no default) | the medium's HTTP monitor. Required by the shell tool's `loc registry`, which reads it over HTTP; the Go build asks the instance's host over the bus and needs neither the key nor `curl` |
+| `monitor_url` | — (no default) | the medium's HTTP monitor. `loc registry` asks the instance's host over the bus instead, so this key is optional |
 | `topic_window` | `7d` | how long a topic's messages live |
 | `send_requires_attendance` | `no` | *say-semantics*: refuse a send to an endpoint that is not attending, so the sender learns at the only moment it can act |
 | `wake_window_seconds` | `5` | the listener's coalescing window before it knocks |
@@ -104,16 +103,15 @@ hook does, the invariant is the product's: *a wake never makes a message unreada
 |---|---|
 | a config key | delete the line |
 | a hook | your deployment repository's history (keep the hooks in one) |
-| the shell tool | `git checkout vX.Y.Z && ./install.sh` — the link follows the tree, so the checkout is the rollback |
-| the Go build | `git checkout vX.Y.Z && make build && ./install.sh --go` — the binary is a copy of a moment, so it must be remade; the checkout alone rolls back nothing |
+| `loc` | `git checkout vX.Y.Z && ./install.sh` — the binary is a copy of a moment, so the installer remakes and re-copies it; a checkout alone rolls back nothing, because the installed copy is deliberately not the tree |
 | the medium's definition | edit or restore the plist, then `./install.sh --restart-service` |
 | attendance | `loc unsub`; the queue keeps holding messages |
 
 ## Uninstall
 
-`./install.sh --uninstall` removes both links — `loc` and, if it is there, `loc-go` — and the agent,
-and prints the `rm -rf $LOC_HOME` line without running it. Each link goes only if it points at what
-this clone would have made; anything else is refused and left where it is.
+`./install.sh --uninstall` removes the `loc` link, the stamped copies in `lib/locutorium`, and the
+agent, and prints the `rm -rf $LOC_HOME` line without running it. The link goes only if it points at
+what this clone would have made; anything else is refused and left where it is.
 
 ## The suite on a machine that stays
 
@@ -132,8 +130,7 @@ own.
 
 ## When something is wrong
 
-`loc doctor` (four checks, as any endpoint; the shell tool's — the Go build refuses it by name) ·
-`loc status` (unread per endpoint) ·
-`loc registry` (who is attending — the shell tool needs `monitor_url` for it) · `run/<endpoint>.delivery.log` (what the
+`loc status` (unread per endpoint, and whether a seat is registered) ·
+`loc registry` (who is attending) · `run/<endpoint>.delivery.log` (what the
 listener did and when) · `loc read --peek` (look without taking) · `loc watch` (every envelope,
 read-only).

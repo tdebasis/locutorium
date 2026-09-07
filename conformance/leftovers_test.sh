@@ -37,8 +37,8 @@ plant() { # <argv[0]> → pid, on stdout
   ARGV0="$1" bash -c 'exec -a "$ARGV0" sleep 1000' >/dev/null 2>&1 &
   printf '%s\n' "$!"
 }
-listener="$(plant "$WS/house/bin/loc sub")"
-tap="$(plant "$WS/house/bin/loc watch")"
+listener="$(plant "$WS/house/build/bin/loc mcp")"
+tap="$(plant "$WS/house/build/bin/loc watch")"
 server="$(plant "nats-server -c $TMP/loc-conformance.aaaa/deployment/nats-server.conf")"
 control="$(plant "an unrelated process that this runner did not start")"
 sleep 1

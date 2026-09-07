@@ -31,9 +31,8 @@ it as one, not work around it.
 ‡ **The Go build's verb.** It is that build's answer to `sub`: one process the runtime launches,
 doing register-listen-wake instead of a background listener. `docs/CLI.md` §mcp has the config line.
 
-† **The shell tool's verbs.** There are two implementations of `loc` (`docs/INSTALL.md`). The Go
-build names these three and answers `not implemented in this build`; every other row it answers
-itself. If a verb refuses that way, you are holding the other tool, not a broken one.
+† **Attendance is `mcp`.** A seat is held by a stdio MCP server the agent runtime launches and ends
+(`docs/CLI.md` §mcp), not by a background listener you start yourself.
 
 ## Semantics you must not get wrong
 

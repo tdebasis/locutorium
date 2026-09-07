@@ -4,15 +4,15 @@ One version, stated once in `VERSION`, agreed everywhere. `conformance/check-ver
 that `loc version` prints it, that every `vX.Y.Z` in the docs equals it, and that a release tag on
 HEAD equals it.
 
-1. `conformance/run.sh` green, twice — and green again under `LOC_IMPL=go` with `LOC_BIN_DIR`
-   pointing at `build/bin`, since the suite is the gate for both implementations.
+1. `conformance/run.sh` green, twice. The suite is the gate; there is one implementation for it to
+   be the gate for.
 2. Bump `VERSION` (plain `X.Y.Z`, no `v`).
 3. `make build`. THE BINARY IS STAMPED, so it is a copy of a moment: `-ldflags -X` writes the
    number from `VERSION` into it at link time, and a binary built before the bump goes on saying
    the old number however current the tree is. Rebuild after the bump, never before, or the release
    ships an artifact that disagrees with the tag on it.
-4. `conformance/check-version.sh` — clean. It asks the shell tool AND the built binary, so this is
-   where a stale stamp is caught rather than shipped.
+4. `conformance/check-version.sh` — clean. It asks the built binary, so this is where a stale stamp
+   is caught rather than shipped.
 5. `git switch -c release/vX.Y.Z`, then `git commit -am "release: vX.Y.Z"`. The default branch is
    protected, so a direct push to it is refused and a release lands the way every other change
    does: as a pull request.
@@ -59,8 +59,9 @@ What a number means (`docs/PROTOCOL.md` §8): additive envelope fields are minor
 major; `kind` registry changes are minor. CLI-only changes that keep the envelope follow the same
 rule — a verb that changes meaning is major.
 
-Current: **v0.1.1** — the Go build reads, ships stamped beside the shell tool (`install.sh --go`), and
-is proven by the identical conformance suite; the suite tears down on a cancelled run. The first tagged
+Current: **v0.1.1** — the binary reads, ships stamped, and is proven by the conformance suite; the
+suite tears down on a cancelled run. The bash implementation it once shipped beside has been deleted:
+one program, one gate. The first tagged
 version was the CLI, the NATS provider, the conformance suite, the installer, and these
 documents. `build/` holds no releasable state — it is remade by `make build` from whatever is checked
 out, which is what makes the rebuild in step 3 the whole of the artifact's provenance.

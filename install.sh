@@ -2,35 +2,33 @@
 # install.sh — put loc on your PATH and the medium under launchd.
 #
 # It writes these things and nothing else:
-#   1. $PREFIX/loc — a symlink to this tree's bin/loc, the shell tool
-#   2. $PREFIX/loc-go — a symlink to this tree's build/bin/loc, the Go build (--go only)
+#   1. $LIBDIR/loc-<version>-<sha> — the built binary, COPIED out of build/
+#   2. $PREFIX/loc — a symlink to that copy
 #   3. $HOME/Library/LaunchAgents/com.locutorium.nats-server.plist — the server agent
 # It never writes under $LOC_HOME (your deployment: creds, config, endpoints, store),
 # never runs bootstrap for you, and never restarts a running agent unless asked.
 #
 # Usage:
-#   ./install.sh [--prefix DIR] [--go] [--dry-run] [--no-service] [--restart-service]
+#   ./install.sh [--prefix DIR] [--dry-run] [--no-service] [--restart-service]
 #   ./install.sh --uninstall [--prefix DIR] [--dry-run]
 #
-# --go is ADDITIVE. It runs `make build` and links the stamped binary beside the
-# shell tool as loc-go; the loc link is untouched, and both keep answering. The
-# two are named apart on purpose: one PATH, two implementations, no ambiguity
-# about which one answered.
+# WHY A COPY AND NOT A LINK INTO build/. A link into the build tree makes the
+# installed tool whatever was last compiled — `make build` would silently change
+# what every caller runs, with no act that looks like an act. The copy is named
+# for its version and commit, so what is installed can be read without running it.
 #
 # Exit: 0 done (or nothing to do) · 2 usage · 3 missing dependency · 4 refusal · 5 launchctl failed
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-TARGET="$ROOT/bin/loc"
-GO_TARGET="$ROOT/build/bin/loc"
+BUILT="$ROOT/build/bin/loc"
 LOC_HOME="${LOC_HOME:-$HOME/.locutorium}"
-PREFIX="" DRY=no UNINSTALL=no NO_SERVICE=no RESTART=no GO_BUILD=no
+PREFIX="" DRY=no UNINSTALL=no NO_SERVICE=no RESTART=no
 
 usage() { sed -n '2,18p' "${BASH_SOURCE[0]}"; exit 2; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --prefix) PREFIX="${2:-}"; [[ -n "$PREFIX" ]] || usage; shift 2 ;;
-    --go) GO_BUILD=yes; shift ;;
     --dry-run) DRY=yes; shift ;;
     --uninstall) UNINSTALL=yes; shift ;;
     --no-service) NO_SERVICE=yes; shift ;;
@@ -46,13 +44,10 @@ if ! (( BASH_VERSINFO[0] > 3 || (BASH_VERSINFO[0] == 3 && BASH_VERSINFO[1] >= 2)
   missing+=("bash >= 3.2 (found $BASH_VERSION)")
 fi
 command -v nats    >/dev/null 2>&1 || missing+=("nats — brew install nats-io/nats-tools/nats")
-command -v python3 >/dev/null 2>&1 || missing+=("python3 — the shell tool needs it for envelope JSON and character counting; xcode-select --install, or brew install python")
-# Only --go needs a toolchain, and it needs one on the machine: this script never
-# installs anything, so an absent `go` is a named missing dependency like the rest.
-if [[ "$GO_BUILD" == yes ]]; then
-  command -v go   >/dev/null 2>&1 || missing+=("go — the Go build needs it (--go); brew install go, or drop --go to install the shell tool alone")
-  command -v make >/dev/null 2>&1 || missing+=("make — the Go build is made by the Makefile (--go); xcode-select --install")
-fi
+# The toolchain is needed on the machine: this script never installs anything, so
+# an absent `go` is a named missing dependency like the rest.
+command -v go   >/dev/null 2>&1 || missing+=("go — loc is built from source; brew install go")
+command -v make >/dev/null 2>&1 || missing+=("make — the build is made by the Makefile; xcode-select --install")
 if [[ "$NO_SERVICE" == no ]] && ! command -v nats-server >/dev/null 2>&1; then
   missing+=("nats-server — brew install nats-server (or pass --no-service to talk to a server elsewhere)")
 fi
@@ -74,7 +69,13 @@ if [[ -z "$PREFIX" ]]; then
   else PREFIX="$HOME/.local/bin"; fi
 fi
 LINK="$PREFIX/loc"
-GO_LINK="$PREFIX/loc-go"
+# Beside the prefix, not inside it: $PREFIX/bin -> $PREFIX/lib/locutorium. The
+# installed artifact is named for what it IS, so `readlink` answers "which build
+# is this machine running" without executing anything.
+LIBDIR="$(dirname "$PREFIX")/lib/locutorium"
+VERSION_STR="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+SHA="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo nogit)"
+TARGET="$LIBDIR/loc-$VERSION_STR-$SHA"
 changed=0
 
 # ── one link, made or reported ───────────────────────────────────────────────
@@ -121,9 +122,16 @@ unlink_artifact() { # unlink_artifact <link> <target>
 # ── uninstall ────────────────────────────────────────────────────────────────
 if [[ "$UNINSTALL" == yes ]]; then
   unlink_artifact "$LINK" "$TARGET"
-  # Not gated on --go: uninstall removes everything this clone made, and the
-  # ownership test is what keeps that safe. An absent loc-go is simply absent.
-  unlink_artifact "$GO_LINK" "$GO_TARGET"
+  # The stamped copies this clone made. Removed by NAME PATTERN rather than by
+  # sweeping the directory: another clone's build may live here too, and an
+  # installer that deletes what it did not create is not an installer.
+  if [[ -d "$LIBDIR" ]]; then
+    for f in "$LIBDIR"/loc-*-*; do
+      [[ -e "$f" ]] || continue
+      echo "REMOVE     $f"; [[ "$DRY" == yes ]] || rm -f "$f"; changed=$((changed+1))
+    done
+    [[ "$DRY" == yes ]] || rmdir "$LIBDIR" 2>/dev/null || true
+  fi
   if [[ "$NO_SERVICE" == no ]]; then
     # shellcheck source=providers/nats/service.sh
     source "$ROOT/providers/nats/service.sh"
@@ -134,20 +142,24 @@ if [[ "$UNINSTALL" == yes ]]; then
   exit 0
 fi
 
-# ── symlinks ─────────────────────────────────────────────────────────────────
-link_artifact "$LINK" "$TARGET"
-
-# The Go build, when asked for. Built first: a link to a binary that was never
-# made points at nothing, and the failure would surface as a puzzle at the next
-# invocation rather than here, where the person is watching.
-if [[ "$GO_BUILD" == yes ]]; then
-  if [[ "$DRY" == yes ]]; then
-    echo "           --dry-run: 'make build' not run; $GO_LINK would point at the binary it makes"
+# ── build, copy, link ────────────────────────────────────────────────────────
+# Built FIRST: a link to a binary that was never made points at nothing, and the
+# failure would surface as a puzzle at the next invocation rather than here,
+# where the person is watching.
+if [[ "$DRY" == yes ]]; then
+  echo "           --dry-run: 'make build' not run; $LINK would point at $TARGET"
+else
+  (cd "$ROOT" && make build) || { echo "install: 'make build' failed; nothing installed" >&2; exit 3; }
+  [[ -x "$BUILT" ]] || { echo "install: the build produced no $BUILT" >&2; exit 3; }
+  mkdir -p "$LIBDIR"
+  if [[ -e "$TARGET" ]] && cmp -s "$BUILT" "$TARGET"; then
+    echo "UNCHANGED  $TARGET"
   else
-    (cd "$ROOT" && make build) || { echo "install: 'make build' failed; $GO_LINK not linked" >&2; exit 3; }
+    echo "NEW        $TARGET"; changed=$((changed+1))
+    cp "$BUILT" "$TARGET" && chmod 755 "$TARGET"
   fi
-  link_artifact "$GO_LINK" "$GO_TARGET"
 fi
+link_artifact "$LINK" "$TARGET"
 case ":$PATH:" in *":$PREFIX:"*) ;; *) echo "           $PREFIX is not on your PATH; add:  export PATH=\"$PREFIX:\$PATH\"" ;; esac
 
 # ── service ──────────────────────────────────────────────────────────────────

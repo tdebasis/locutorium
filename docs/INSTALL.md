@@ -1,50 +1,43 @@
 # Installing the Locutorium
 
-There are **two implementations** of `loc` in this tree, one command reference for both (`CLI.md`),
-and one conformance suite that is run against each.
+`loc` is a compiled binary, made by `make build` into `build/bin/loc`, with one command reference
+(`CLI.md`) and one conformance suite that is the gate. It carries its provider and its version
+inside it, so it answers from anywhere and a copy of it is simply `loc`. The version is stamped in
+at link time from `VERSION`, which is why a stale binary is worth rebuilding rather than trusting.
 
-- **The shell tool** — a bash CLI. There is no package: the clone *is* the installation, and the
-  tool finds its own tree through the link. Copy it out of the tree and it refuses, because a copy
-  has no `lib/` beside it and nothing to run.
-- **The Go build** — a compiled binary, made by `make build` into `build/bin/loc`. It carries its
-  provider and its version inside it, so it answers from anywhere and a copy of it is simply `loc`.
-  The version is stamped in at link time from `VERSION`, which is why a stale binary is worth
-  rebuilding rather than trusting.
+`./install.sh` builds it, copies the stamped binary out of the build tree, links it into your PATH
+as `loc`, and puts the medium (a `nats-server`) under launchd.
 
-`./install.sh` links the shell tool into your PATH as `loc` and puts the medium (a `nats-server`)
-under launchd. `./install.sh --go` does that **and** builds the Go binary and links it beside the
-first, as `loc-go`. The two are named apart deliberately: one PATH, two implementations, and never
-a question about which one answered.
-
-The shell tool answers every verb. The Go build answers every verb except `sub`, `unsub` and
-`doctor` — it names those three and replies `not implemented in this build`.
+> A bash implementation lived here until 2026-09-07 and was deleted. It was interim, and keeping two
+> implementations meant maintaining the layer between them — which is where its defects turned out
+> to live, not in either tool.
 
 ## Dependencies
 
 | need | why | install |
 |---|---|---|
-| bash ≥ 3.2 | the shell tool (macOS ships 3.2; that is the floor) | — |
-| `nats` | the shell tool reaches the medium by shelling out to the NATS CLI for every verb (`_nats_env`, `provider_*`); the Go build speaks the protocol itself and never runs it | `brew install nats-io/nats-tools/nats` |
+| `go`, `make` | `loc` is built from source; the installer refuses by name rather than installing a toolchain for you | `brew install go` |
+| bash ≥ 3.2 | the installer, the suite and the provider scripts (macOS ships 3.2; that is the floor) | — |
+| `nats` | `bootstrap.sh` shells out to the NATS CLI for its bcrypt hashes; `loc` itself speaks the protocol and never runs it | `brew install nats-io/nats-tools/nats` |
 | `nats-server` | the medium itself, run by the LaunchAgent | `brew install nats-server` |
-| `python3` | the shell tool's envelope JSON and character counting (`loc_envelope`, `loc_render`); the Go build does both itself | ships with the developer tools; `brew install python` |
-| `curl` | the shell tool's `loc registry` reads the server's HTTP monitor endpoint; the Go build asks the instance's host over the bus instead and needs neither `curl` nor `monitor_url` | ships with macOS |
 | `openssl` | `bootstrap.sh` generates credentials | ships with macOS |
-| `go`, `make` | **only** for the Go build: `make build`, and `./install.sh --go`. Nothing else in the tree needs a toolchain, and the installer refuses `--go` by name rather than installing one for you | `brew install go` |
 
 Development only (the conformance suite): `jq`, `nats-server` on PATH, and BSD `sed` (`sed -i ''`);
-the suite is macOS-only for now. To run it against the Go build, `make build` first and then
-`LOC_BIN_DIR="$PWD/build/bin" LOC_IMPL=go bash conformance/run.sh` — the same file, the same cases,
-with the cases that are the shell tool's by nature skipped by name, each with its reason printed and counted.
+the suite is macOS-only for now. `make build` first, then `bash conformance/run.sh` — `LOC_BIN_DIR`
+defaults to `build/bin`. A seat's listener is the `mcp` verb, which the suite does not speak; those
+cases are skipped by name, each printing its reason and where the property IS proven, and counted.
 
 ## What `./install.sh` writes — the whole list
 
-Two things, or three with `--go`:
+Three things:
 
-1. `$PREFIX/loc` — a symlink to `bin/loc` in this clone, the shell tool. `$PREFIX` is
-   `$(brew --prefix)/bin` if it is writable, else `~/.local/bin`; override with `--prefix DIR`.
-2. `$PREFIX/loc-go` — **with `--go` only** — a symlink to `build/bin/loc` in this clone, the Go
-   build. The flag is additive: it runs `make build` first (and refuses, naming `go`, if there is
-   no toolchain) and never disturbs the `loc` link.
+1. `$LIBDIR/loc-<version>-<sha>` — the built binary, **copied** out of `build/`. `$LIBDIR` is
+   `lib/locutorium` beside the prefix. **A copy, not a link into `build/`**: a link would make the
+   installed tool whatever was last compiled, so `make build` would silently change what every
+   caller runs. The name carries the version and commit, so `readlink` answers which build a machine
+   is on without executing anything.
+2. `$PREFIX/loc` — a symlink to that copy. `$PREFIX` is `$(brew --prefix)/bin` if it is writable,
+   else `~/.local/bin`; override with `--prefix DIR`.
 3. `~/Library/LaunchAgents/com.locutorium.nats-server.plist` — rendered from
    `providers/nats/launchd/com.locutorium.nats-server.plist.in` with the `nats-server` path and
    `$LOC_HOME` resolved on your machine, then loaded with `launchctl bootstrap`.
@@ -57,19 +50,18 @@ if needed), and never restarts a loaded agent unless you pass `--restart-service
 
 | flag | effect |
 |---|---|
-| `--prefix DIR` | where the `loc` link goes (and `loc-go`, with `--go`) |
-| `--go` | also `make build` the Go binary and link it as `loc-go`; additive, the `loc` link is untouched |
+| `--prefix DIR` | where the `loc` link goes; the stamped copy goes in `lib/locutorium` beside it |
 | `--dry-run` | print NEW / CHANGED / UNCHANGED for each artifact (with a diff for the plist); write and load nothing |
-| `--no-service` | link `loc` only; no LaunchAgent (use when the medium runs elsewhere, or on Linux) |
+| `--no-service` | install `loc` only; no LaunchAgent (use when the medium runs elsewhere, or on Linux) |
 | `--restart-service` | the only way a running agent is stopped and started again — needed after the plist changes |
-| `--uninstall` | remove both links (each only if it points into this clone) and the agent + plist; never `$LOC_HOME`. Not gated on `--go`: uninstall removes everything this clone made |
+| `--uninstall` | remove the `loc` link (only if it points at a copy this clone made), the stamped copies, and the agent + plist; never `$LOC_HOME` |
 | `-h`, `--help` | usage |
 
 ## What a run looks like
 
 ```
 $ ./install.sh --dry-run
-UNCHANGED  /opt/homebrew/bin/loc -> ~/src/locutorium/bin/loc
+UNCHANGED  /opt/homebrew/bin/loc -> /opt/homebrew/lib/locutorium/loc-0.1.1-d616027
 CHANGED    ~/Library/LaunchAgents/com.locutorium.nats-server.plist
            --- (on disk)
            +++ (rendered)
@@ -96,7 +88,8 @@ to be started or supervised; it needs the binary on `PATH` and the endpoint it i
 ## Exit codes
 
 `0` done or nothing to do · `2` usage · `3` a dependency is missing (each is named with its
-install line — including `go` under `--go`, and a `make build` that failed) · `4` refusal — something is in the way that the installer did not create · `5`
+install line), or a `make build` that failed · `4` refusal — something is in the way that the
+installer did not create · `5`
 `launchctl` failed (the command is echoed).
 
 ## Uninstall
