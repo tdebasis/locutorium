@@ -26,7 +26,8 @@ What a number means (`docs/PROTOCOL.md` §8): additive envelope fields are minor
 major; `kind` registry changes are minor. CLI-only changes that keep the envelope follow the same
 rule — a verb that changes meaning is major.
 
-Current: **v0.1.0** — the first tagged version: the CLI, the NATS provider, the conformance suite,
-the installer, and these documents. `build/` holds no releasable state — it is remade by `make
-build` from whatever is checked out, which is what makes the rebuild in step 3 the whole of the
-artifact's provenance.
+Current: **v0.1.1** — the Go build reads, ships stamped beside the shell tool (`install.sh --go`), and
+is proven by the identical conformance suite; the suite tears down on a cancelled run. The first tagged
+version was the CLI, the NATS provider, the conformance suite, the installer, and these
+documents. `build/` holds no releasable state — it is remade by `make build` from whatever is checked
+out, which is what makes the rebuild in step 3 the whole of the artifact's provenance.
