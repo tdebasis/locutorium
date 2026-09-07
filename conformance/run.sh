@@ -159,7 +159,7 @@ sleep 1
   # queue exists while someone is subscribed and not otherwise, which is what
   # makes `send` to an unattended endpoint refusable at all.
   #
-  # TOPICS is created with the SAME configuration lib/providers/nats.sh gives
+  # TOPICS is created with the SAME configuration the NATS provider gives
   # it (subjects topic.>, limits retention, max-age = the configured window,
   # file storage, one replica), read from the config the bootstrap just wrote.
   window="$(sed -n 's/^topic_window[[:space:]]*=[[:space:]]*//p' "$LOC_HOME/config" | head -1)"

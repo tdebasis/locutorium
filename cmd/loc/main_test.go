@@ -189,37 +189,6 @@ func TestArgumentCheckHappensBeforeTheProviderIsOpened(t *testing.T) {
 	}
 }
 
-// --------------------------------------------------------- the three absent
-
-// A verb this build knows the name of but cannot do says so on stderr, in the
-// tool's one error shape, and exits 1. It must never fall through to usage:
-// "this build cannot" and "you typed it wrong" are different answers.
-func TestUnimplementedVerbs(t *testing.T) {
-	for _, verb := range []string{"sub", "unsub", "doctor"} {
-		t.Run(verb, func(t *testing.T) {
-			d := newDeployment(t, "ada")
-			code, out, errOut := exec(verb)
-			assertResult(t, code, out, errOut, 1, "", "loc: not implemented in this build\n")
-			if d.spy.closed != 0 {
-				t.Error("an unimplemented verb opened the medium")
-			}
-		})
-	}
-}
-
-// The same, with the arguments those verbs take in the shell implementation:
-// the flag must not change the answer.
-func TestUnimplementedVerbsIgnoreTheirArguments(t *testing.T) {
-	newDeployment(t, "ada")
-	for _, args := range [][]string{
-		{"sub", "--watch-pid", "1234"},
-		{"doctor", "--init"},
-	} {
-		code, out, errOut := exec(args...)
-		assertResult(t, code, out, errOut, 1, "", "loc: not implemented in this build\n")
-	}
-}
-
 // ----------------------------------------------------------------- version
 
 // version answers from the VERSION file and touches no medium, so it must work

@@ -1,6 +1,5 @@
-# The Go build. There is nothing to build for the shell tool — the clone is its
-# installation — so this file exists for exactly one artifact: a stamped `loc`
-# binary under build/bin.
+# This file exists for exactly one artifact: a stamped `loc` binary under
+# build/bin.
 #
 # VERSION IS THE SOURCE OF TRUTH AND IT IS STATED ONCE. The number is not copied
 # into the Go tree; it is read from the file here and stamped into the binary at

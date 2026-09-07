@@ -25,5 +25,5 @@ and never a particular deployment.
 | **identity** | `LOC_IDENTITY` or `hooks/identity`; a refusal, never a guess | knowing who is speaking |
 | **say-semantics** | `send_requires_attendance = yes`: a send to an absent endpoint is refused | you cannot speak to an empty chair |
 | **medium** | the transport a provider drives — v1 is `nats-server` with JetStream on loopback | the air in the room |
-| **provider** | `lib/providers/<name>.sh`; a provider is a Locutorium provider iff the suite passes | the room's builder |
+| **provider** | an adapter compiled into the binary and named by the `provider` config key; a provider is a Locutorium provider iff the suite passes | the room's builder |
 | **house rules** | `PROTOCOL.md`: identity, addressing, the envelope, the doorbell grammar, what receipt means, what the bus never carries | the rules of the room |
