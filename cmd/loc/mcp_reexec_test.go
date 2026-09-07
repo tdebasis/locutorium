@@ -22,8 +22,13 @@ package main
 // the pipes, and the seat is given up and the serving process is gone.
 
 import (
+	"errors"
+	"io"
 	"os"
+	osexec "os/exec"
+	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -141,3 +146,196 @@ func servingPID(t *testing.T, home, endpoint string) int {
 // alive reports whether a pid still names a running process. Signal 0 is
 // delivered to nothing and answers exactly that question.
 func alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
+
+// ── the supervision, without a binary to re-execute ─────────────────────────
+//
+// The case above is the whole mechanism through a real process; these are the
+// parts of it that a real process HIDES. Everything mcpParent does after the
+// re-execution — waiting, and turning the child's ending into this process's
+// exit code — runs in the launched binary, where no test in this package can
+// see it, and the one thing that cannot be exercised in place is the
+// re-execution itself. So the stand-in child's ending is chosen instead, and
+// what is asserted is the exit code the runtime is handed.
+
+// stubChild replaces the re-execution with a shell that ends how the case
+// says. The real selfCommand is put back when the case finishes.
+func stubChild(t *testing.T, script string) {
+	t.Helper()
+	prev := selfCommand
+	selfCommand = func(int) (*osexec.Cmd, error) {
+		return osexec.Command("sh", "-c", script), nil
+	}
+	t.Cleanup(func() { selfCommand = prev })
+}
+
+func TestMCP_TheLaunchedProcessExitsWithItsServersStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name, script string
+		want         int
+	}{
+		// A seat given up cleanly is a clean ending for the runtime too.
+		{"a clean ending", "exit 0", 0},
+		// A refusal — a live seat held by somebody else — has already been
+		// printed by the child on the shared stderr, and its code is carried
+		// up unchanged so the runtime shows the server as failed.
+		{"a refusal keeps its code", "exit 1", 1},
+		{"any other code survives", "exit 3", 3},
+		// A child killed outright has no exit code of its own. Something went
+		// wrong, and inventing what is not this process's business.
+		{"a killed server is 1", "kill -9 $$", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stubChild(t, tc.script)
+			var errOut strings.Builder
+			if got := run([]string{"mcp", launchFlag}, io.Discard, &errOut); got != tc.want {
+				t.Errorf("the launched process exited %d for a server that ended with %q; want %d",
+					got, tc.script, tc.want)
+			}
+			// SAID ONCE. The child shares this process's stderr and has
+			// already spoken in this tool's one error shape; a second `loc:`
+			// line here would make one failure read as two.
+			if errOut.Len() != 0 {
+				t.Errorf("the launched process added %q to stderr; the server had already said "+
+					"whatever there was to say, on this very stream", errOut.String())
+			}
+		})
+	}
+}
+
+// A SERVER THAT NEVER STARTED IS THIS TOOL'S OWN FAILURE, and is reported in
+// this tool's own shape: nothing has been written to stderr yet, because there
+// was no child to write it.
+func TestMCP_AServerThatCannotBeStartedIsReportedHere(t *testing.T) {
+	prev := selfCommand
+	selfCommand = func(int) (*osexec.Cmd, error) {
+		return osexec.Command(filepath.Join(t.TempDir(), "no-such-loc")), nil
+	}
+	t.Cleanup(func() { selfCommand = prev })
+
+	var errOut strings.Builder
+	if got := run([]string{"mcp", launchFlag}, io.Discard, &errOut); got != 1 {
+		t.Errorf("exit %d when the server could not be started; want 1", got)
+	}
+	if !strings.HasPrefix(errOut.String(), "loc: ") {
+		t.Errorf("the failure is not in this tool's one error shape: %q", errOut.String())
+	}
+}
+
+// A WAIT THAT FAILED FOR SOME OTHER REASON is not an exit code and must not be
+// dressed up as one: it is passed along as the error it is, so it prints.
+func TestMCP_AnEndingThatIsNotAnExitCodeIsPassedAlong(t *testing.T) {
+	if err := childStatus(nil); err != nil {
+		t.Errorf("a child that ended cleanly gave %v; a clean ending is no error at all", err)
+	}
+	odd := errors.New("waitpid: no child processes")
+	if got := childStatus(odd); got != odd {
+		t.Errorf("childStatus rewrote %v as %v; only an exit code becomes an exit code", odd, got)
+	}
+	// The carrier is still a legible error, for anything that ever prints one.
+	if got, want := exitStatus(3).Error(), "exit status 3"; got != want {
+		t.Errorf("the exit-status carrier reads %q; want %q", got, want)
+	}
+}
+
+// WHICH INVOCATIONS ARE LAUNCHES. Only a bare `loc mcp` from a command line
+// is one. Everything else — the re-execution's own arguments, every other
+// verb, and the bare form a test drives in process — passes through and is
+// served or dispatched as it stands.
+func TestMCP_OnlyABareMcpInvocationIsALaunch(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"a bare mcp is the one that re-executes", []string{"mcp"}, []string{"mcp", launchFlag}},
+		{"the re-execution's own arguments are left alone",
+			[]string{"mcp", serveFlag, pidFlag, "42"}, []string{"mcp", serveFlag, pidFlag, "42"}},
+		{"another verb is not a launch", []string{"read"}, []string{"read"}},
+		{"nothing at all is not a launch", nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := launchArgs(tc.in); !slices.Equal(got, tc.want) {
+				t.Errorf("launchArgs(%q) = %q; want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// THE RE-EXECUTION NAMES THIS BINARY, THE SERVE FLAG AND THE RUNTIME'S PID.
+// Nothing else can check this: in the running tool the command is handed
+// straight to the operating system, and by the time anything could look at it
+// the arguments are a different process's.
+func TestMCP_TheReExecutionCarriesTheRuntimesPid(t *testing.T) {
+	cmd, err := selfCommand(4242)
+	if err != nil {
+		t.Fatalf("build the re-execution: %v", err)
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("ask for this executable: %v", err)
+	}
+	if cmd.Path != self {
+		t.Errorf("the re-execution runs %q; it must run this same binary, %q", cmd.Path, self)
+	}
+	if want := []string{self, "mcp", serveFlag, pidFlag, "4242"}; !slices.Equal(cmd.Args, want) {
+		t.Errorf("the re-execution is %q; want %q — the runtime's pid is passed down "+
+			"because the child's own parent is the wrapper and no longer the runtime", cmd.Args, want)
+	}
+}
+
+// A PID THAT IS NOT A PID IS A TYPO, and a typo is the usage failure, not a
+// server that registers something meaningless.
+func TestMCP_TheServeFormRefusesAPidThatIsNotOne(t *testing.T) {
+	for _, bad := range []string{"zero", "-1", "0", ""} {
+		t.Run("--pid "+bad, func(t *testing.T) {
+			var out strings.Builder
+			if got := run([]string{"mcp", serveFlag, pidFlag, bad}, &out, io.Discard); got != 1 {
+				t.Errorf("exit %d for --pid %q; a pid that is not a positive number is a usage failure", got, bad)
+			}
+			if !strings.Contains(out.String(), "usage: loc") {
+				t.Errorf("--pid %q did not print the verb list; someone who has not got the "+
+					"invocation right yet is reading, not scripting", bad)
+			}
+		})
+	}
+}
+
+// A DELIVERED SIGNAL IS PASSED DOWN, NOT OBEYED. Exiting here on a TERM would
+// orphan a server still holding the seat; the child is the one that knows how
+// to give a seat up, so it is the one told.
+//
+// THE SIGNAL IS SENT TO THIS PROCESS, which is only safe because the case
+// arms its own handler for the whole of its life FIRST: with a notification
+// registered, the runtime's default disposition — terminate — is off, whether
+// or not the code under test has reached its own Notify yet.
+func TestMCP_ADeliveredSignalIsForwardedToTheServer(t *testing.T) {
+	guard := make(chan os.Signal, 1)
+	signal.Notify(guard, syscall.SIGHUP)
+	t.Cleanup(func() { signal.Stop(guard) })
+
+	// A stand-in server that survives until it is told, and reports being told
+	// with an exit code nothing else produces.
+	started := filepath.Join(t.TempDir(), "started")
+	stubChild(t, "trap 'exit 7' HUP; : > "+started+"; while :; do sleep 0.05; done")
+
+	done := make(chan int, 1)
+	go func() { done <- run([]string{"mcp", launchFlag}, io.Discard, io.Discard) }()
+
+	if !waitFor(5*time.Second, func() bool { _, err := os.Stat(started); return err == nil }) {
+		t.Fatalf("the stand-in server never started")
+	}
+	if err := syscall.Kill(os.Getpid(), syscall.SIGHUP); err != nil {
+		t.Fatalf("signal this process: %v", err)
+	}
+
+	select {
+	case got := <-done:
+		if got != 7 {
+			t.Errorf("the launched process exited %d; the server exits 7 when it is signalled, "+
+				"so anything else means the signal stopped here instead of going down", got)
+		}
+	case <-time.After(exitWait):
+		t.Fatalf("the launched process was still waiting %s after the signal; "+
+			"a signal it neither obeys nor forwards leaves the seat held by nobody", exitWait)
+	}
+}

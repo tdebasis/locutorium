@@ -85,21 +85,24 @@ func main() {
 	// state of its own, so it remains drivable by a test.
 	signal.Ignore(syscall.SIGPIPE)
 
-	// A LAUNCHED `loc mcp` BECOMES ITS OWN SUPERVISOR.
-	//
-	// The server deliberately runs one generation below the process an agent
-	// runtime launches, so that a runtime which ends its child with SIGKILL
-	// cannot take the seat's goodbye with it (cmd/loc/mcp.go, mcpParent).
-	// Re-executing is something only a real process invocation can do, and
-	// this is the only place that knows an invocation is one: run is also
-	// called in-process by tests, where "re-execute this binary" would mean
-	// re-running the test binary. So the launch is asked for HERE, by name,
-	// and everywhere else `mcp` is the server itself.
-	args := os.Args[1:]
+	os.Exit(run(launchArgs(os.Args[1:]), os.Stdout, os.Stderr))
+}
+
+// launchArgs marks a real `loc mcp` invocation as a LAUNCH.
+//
+// The server deliberately runs one generation below the process an agent
+// runtime starts, so that a runtime which ends its child with SIGKILL cannot
+// take the seat's goodbye with it (cmd/loc/mcp.go, mcpParent). Re-executing is
+// something only a real process invocation can do, and main is the only caller
+// that IS one: run is also called in-process by tests, where "re-execute this
+// binary" means re-running the test binary, which is a fork bomb. So the
+// launch is asked for here, by name, and everywhere else `mcp` is the server
+// itself. Everything else passes through untouched.
+func launchArgs(args []string) []string {
 	if len(args) == 1 && args[0] == "mcp" {
-		args = []string{"mcp", launchFlag}
+		return []string{"mcp", launchFlag}
 	}
-	os.Exit(run(args, os.Stdout, os.Stderr))
+	return args
 }
 
 // errUsage means "you typed it wrong". It is the one failure that prints the
