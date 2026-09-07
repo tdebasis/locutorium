@@ -344,7 +344,7 @@ it has destroyed the delivery silently. The line is followed by a blank line and
 `loc read` prints:
 
 ```
-Nothing below has been shown to anyone yet — the bell only rang. Print it verbatim before you act on it.
+Nothing below has been shown to anyone yet; the bell only rang. Print it on screen verbatim, then act on it.
 
 ── queue.workshop.scribe ──
   `workshop.clerk -> workshop.scribe`  09:00  a question about the ledger
