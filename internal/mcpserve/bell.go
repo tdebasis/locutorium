@@ -157,7 +157,14 @@ func (b *bell) fire() {
 	b.hourN++
 	b.mu.Unlock()
 
-	b.s.d.Nudge(b.s.d.Endpoint, fmt.Sprintf(bellLine, n))
+	// A BELL THAT COULD NOT RING SAYS SO, and is never recorded as a wake.
+	// The breaker has already been charged for it, which is deliberate: a hook
+	// that fails will fail again, and a broken bell must not become a way to
+	// hammer the pane once it is fixed.
+	if err := b.s.d.Nudge(b.s.d.Endpoint, fmt.Sprintf(bellLine, n)); err != nil {
+		b.s.warn(fmt.Sprintf("bell failed %s: %v", b.s.d.Endpoint, err))
+		return
+	}
 	b.s.log(fmt.Sprintf("wake %s count=%d", b.s.d.Endpoint, n))
 }
 

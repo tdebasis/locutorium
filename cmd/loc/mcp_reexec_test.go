@@ -136,9 +136,13 @@ func servingPID(t *testing.T, home, endpoint string) int {
 			"the registration carries the RUNTIME's pid, so without this file "+
 			"nothing can say which process is actually serving the seat", path, err)
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	// TWO LINES: the pid, then the start time the presence model records for
+	// it. The pid is the first line; the second is what keeps a recycled
+	// number from reading as the same process.
+	first := strings.TrimSpace(strings.SplitN(string(b), "\n", 2)[0])
+	pid, err := strconv.Atoi(first)
 	if err != nil {
-		t.Fatalf("%s held %q, which is not a pid", path, strings.TrimSpace(string(b)))
+		t.Fatalf("%s held %q, whose first line is not a pid", path, string(b))
 	}
 	return pid
 }

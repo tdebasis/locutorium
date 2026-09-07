@@ -11,6 +11,7 @@ package mcpserve
 // to be in that state.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -49,6 +50,7 @@ type fake struct {
 
 	unread    int
 	unreadErr error
+	nudgeErr  error
 	sendErr   error
 	slowLeave time.Duration
 }
@@ -111,10 +113,11 @@ func (f *fake) deps() Deps {
 			return func() {}, nil
 		},
 		Unread: func(string) (int, error) { return f.unread, f.unreadErr },
-		Nudge: func(_, line string) {
+		Nudge: func(_, line string) error {
 			f.mu.Lock()
 			defer f.mu.Unlock()
 			f.nudged = append(f.nudged, line)
+			return f.nudgeErr
 		},
 		// A pid that is alive and is not this process, so "our parent" is a
 		// fact a case can arrange rather than inherit.
@@ -448,6 +451,75 @@ func TestBell_ArrivalsInsideTheWindowRingOnce(t *testing.T) {
 	}
 }
 
+// A BELL THAT COULD NOT RING SAYS SO.
+//
+// The nudge hook is the one part of a wake that lives outside this binary, and
+// it is the part most likely to be missing or broken — an unset deployment, a
+// file without its execute bit, a script that exits non-zero. A wake lost that
+// way is exactly as invisible as a wake that was never due, so the failure is
+// written where the deployment already looks for what was delivered, and said
+// once on the runtime's own log.
+//
+// THE REAL HOOK PATH, not the fake seam: the case is about what happens when
+// the thing outside the binary is not there, so the seam is left unfilled and
+// a home with no hooks/ directory is the whole arrangement.
+func TestBell_ABellThatCouldNotRingSaysSo(t *testing.T) {
+	dir := home(t, "provider = none\nwake_window_seconds = 1\n")
+	f := &fake{}
+	d := f.deps()
+	d.Nudge = nil // the real hook, and there is none in this home
+	var stderr bytes.Buffer
+	d.Stderr = &stderr
+	sess, done := serve(t, d)
+	defer stop(t, sess, done)
+
+	f.ready(t)
+	f.ring()
+	time.Sleep(2 * time.Second)
+
+	log := delivery(t, dir)
+	if !strings.Contains(log, "bell failed "+seat+":") {
+		t.Errorf("the delivery log does not say the bell failed: %q\n"+
+			"a wake that could not ring is indistinguishable from one that was never due "+
+			"unless the failure is written down", log)
+	}
+	if !strings.Contains(stderr.String(), "bell failed "+seat+":") {
+		t.Errorf("nothing reached the runtime's log: %q", stderr.String())
+	}
+	if got := f.bells(); len(got) != 0 {
+		t.Errorf("the fake seam recorded %v; this case runs the real hook", got)
+	}
+}
+
+// The other way a bell fails: the hook is there and exits non-zero. Same
+// treatment, because the seat's occupant is equally untold either way, and the
+// wake is NOT recorded — a line saying the pane was woken when it was not is
+// worse than no line at all.
+func TestBell_AHookThatExitsNonZeroIsAFailedBell(t *testing.T) {
+	dir := home(t, "provider = none\nwake_window_seconds = 1\n")
+	f := &fake{nudgeErr: fmt.Errorf("exit status 3")}
+	d := f.deps()
+	var stderr bytes.Buffer
+	d.Stderr = &stderr
+	sess, done := serve(t, d)
+	defer stop(t, sess, done)
+
+	f.ready(t)
+	f.ring()
+	time.Sleep(2 * time.Second)
+
+	log := delivery(t, dir)
+	if !strings.Contains(log, "bell failed "+seat+": exit status 3") {
+		t.Errorf("the delivery log does not carry the hook's own reason: %q", log)
+	}
+	if strings.Contains(log, "wake "+seat) {
+		t.Errorf("a failed bell was written down as a wake: %q", log)
+	}
+	if !strings.Contains(stderr.String(), "bell failed "+seat) {
+		t.Errorf("nothing reached the runtime's log: %q", stderr.String())
+	}
+}
+
 // WAKE ON BACKLOG, at start and after every reconnect: those are the two
 // moments an arrival can have been seen by nobody.
 func TestBell_ABacklogRingsAtStartAndAfterAReconnect(t *testing.T) {
@@ -593,7 +665,7 @@ func TestAgentToken(t *testing.T) {
 
 func TestWithDefaults_FillsTheSeamsWithTheRealThing(t *testing.T) {
 	d := Deps{}.withDefaults()
-	if d.Nudge == nil || d.Now == nil || d.Ppid == nil || d.Wd == nil {
+	if d.Nudge == nil || d.Now == nil || d.Ppid == nil || d.Wd == nil || d.Stderr == nil {
 		t.Fatal("a zero Deps left a seam unfilled")
 	}
 	if d.Ppid() != os.Getppid() {

@@ -43,12 +43,17 @@ refused before anything is sent.
 
 - **Body limit is 4000 characters, not bytes.** Counted in codepoints, so emoji cost one each. An
   over-long body is refused *before* it reaches the medium — nothing is partially sent.
-- Prints `sent → queue.<endpoint>`.
-- **The doorbell rings only for a seat without a live server.** A seat that holds a live
-  registration runs its own server, which is watching that queue and will ring for the same arrival
-  — coalesced and breaker-capped — so `send` stays quiet rather than putting two lines in one pane
-  for one message; where it does ring, the line is `[LOC] 1 new → loc read` and names the CLI verb,
-  because a seat with no server is a seat that reads with the command line.
+- Prints `sent → queue.<endpoint>`, with a parenthetical when it holds its own bell back (below).
+- **The doorbell rings unless the recipient's server is running.** A seat whose server is up is
+  watching that queue and will ring for the same arrival — coalesced and breaker-capped — so `send`
+  stays quiet rather than putting two lines in one pane for one message, and says so on its own
+  stdout: `sent → queue.<endpoint> (the seat's server rings)`. Running means a live process, asked
+  of `run/<endpoint>.mcp.pid` and judged on **both** of its lines, the pid and that process's start
+  time — a registration is not the question, because a host can register a seat whose server never
+  started or has since died, and a pid whose start time no longer matches is a recycled number, not
+  the server. Where `send` does ring, the line is the plain `sent → queue.<endpoint>` and the
+  doorbell reads `[LOC] 1 new → loc read`, naming the CLI verb, because a seat with no server is a
+  seat that reads with the command line.
 - If the house sets `send_requires_attendance = yes`, a send to an endpoint with no listener is
   **refused**. Off by default.
 
@@ -353,8 +358,13 @@ closes. **The pipe closing is the goodbye a kill cannot take away**, so in the c
 runtime exits and its descriptors close — the seat is given up within the two-second departure bound.
 A signal that IS delivered (`TERM`, `INT`, `HUP`) is forwarded down and waited on. The registration
 still names the RUNTIME'S pid, not the launched process's and not the server's; which process is
-actually serving is recorded separately in `run/<endpoint>.mcp.pid`, written when the seat is taken
-and removed when it is given up.
+actually serving is recorded separately in `run/<endpoint>.mcp.pid`, written once the listener is up
+— a sender reads this file to decide it need not ring, so it must not exist before there is a bell —
+and removed when the seat is given up. **That file is two lines — the pid, then that process's start time
+in the presence model's stamp** — because the pid alone starts naming a stranger the moment the
+kernel reuses the number, and a reader asking "is this seat's server running" would then get a
+confident yes about somebody else. Both lines are compared, by the same liveness the presence model
+uses on the pids it records.
 
 **It is also the listener.** It holds a core subscription on this endpoint's own queue subject, which
 sees every arrival and consumes nothing, and asks how much is waiting at start and after every
@@ -368,6 +378,11 @@ reads. Each wake calls the deployment's `hooks/nudge` with ONE LINE and no body:
 
 and appends `wake <endpoint> count=3` to `run/<endpoint>.delivery.log`. A tripped breaker says so
 once. Nothing is lost to a suppressed wake: the queue keeps the truth.
+
+**A bell that could not ring says so.** If the hook is missing, not executable, or exits non-zero,
+`bell failed <endpoint>: <reason>` goes to `run/<endpoint>.delivery.log` *and* to stderr, which is
+the runtime's own log — stdout is the protocol's. No `wake` line is written for it: a failed bell is
+not a wake, and a log saying the pane was woken when it was not is worse than no log at all.
 
 **Four tools, and each is the verb of the same name** — `send {to, body}`, `read {peek?}`,
 `status {endpoint?}`, `topics {}`. Each runs this binary's own function and returns exactly what the
