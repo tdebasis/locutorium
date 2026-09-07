@@ -115,6 +115,21 @@ hook does, the invariant is the product's: *a wake never makes a message unreada
 and prints the `rm -rf $LOC_HOME` line without running it. Each link goes only if it points at what
 this clone would have made; anything else is refused and left where it is.
 
+## The suite on a machine that stays
+
+Run the conformance suite in CI on a machine of your own rather than a fresh image, and a cancelled
+job does not take the run with it. The step's shell is killed; the seats' listener loops and the
+scratch server are not, because the run detached them. They live on into the next job, whose own
+listener census counts them and whose registry and wake cases then read a second, stale attendance —
+four failures with nothing wrong in the tree. The suite now tears itself down on `TERM` and `INT` as
+well as on exit, taking the server it started and the listeners its own pidfiles name; and
+`conformance/leftovers.sh reap` runs as a step before the suite to take away whatever an earlier job
+still managed to leave. Its scope is the runner's own work tree and the runner's own temp directory,
+both read from the environment and neither ever guessed: with neither named it refuses to run, and it
+excludes its own shell, everything that started it, and everything it starts. If anything it named is
+still standing afterwards the step fails, so a run never begins against processes that are not its
+own.
+
 ## When something is wrong
 
 `loc doctor` (four checks, as any endpoint; the shell tool's — the Go build refuses it by name) ·

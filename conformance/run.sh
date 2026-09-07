@@ -71,7 +71,17 @@ MPORT=$(( PORT + 1 ))
 # cleanliness check reads its vocabulary list from there, so the suite must
 # still check the tree against the deployment the machine actually runs.
 REAL_LOC_HOME="${LOC_HOME:-$HOME/.locutorium}"
-export LOC_HOME="$(mktemp -d)/deployment"
+# WHERE THE SCRATCH TREES GO, AND WHY IT IS NOT JUST `mktemp -d`. The scratch
+# server is started as `nats-server -c <scratch home>/nats-server.conf`, so
+# that path is the only thing about the process that says whose it is — and on
+# a runner, a job that was cancelled is cleaned up afterwards by matching
+# command lines against the runner's own directories. A bare `mktemp -d` follows
+# TMPDIR, which on a runner is the per-user temp directory the service manager
+# hands every process, not the runner's own temp directory: the path would name
+# nothing the cleanup can scope to. Off a runner RUNNER_TEMP is unset and this
+# is `mktemp -d` with a name on it. See conformance/leftovers.sh.
+scratch_dir() { mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/loc-conformance.XXXXXX"; }
+export LOC_HOME="$(scratch_dir)/deployment"
 PATH="$LOC_BIN_DIR:$PATH"
 _creds() { cat "$LOC_HOME/creds/$1"; }
 SERVER_PID=""
@@ -633,7 +643,7 @@ say "— the front page shows what the tool prints —"
 if [[ "$LOC_IMPL" == go ]]; then
 skip "README transcript equals a fresh run (timestamps masked)" "the captured transcript addresses bare endpoints, which the presence model bars — a bare name is never an endpoint — so replaying it against this build would be replaying a deployment it cannot have; the Go build's render contract is internal/loc/render_test.go, which diffs this same README block directly"
 else
-DEMO_HOME="$(mktemp -d)/house"; DEMO_PORT=$(( 20000 + RANDOM % 20000 )); DEMO_MPORT=$(( DEMO_PORT + 1 ))
+DEMO_HOME="$(scratch_dir)/house"; DEMO_PORT=$(( 20000 + RANDOM % 20000 )); DEMO_MPORT=$(( DEMO_PORT + 1 ))
 LOC_HOME="$DEMO_HOME" "$ROOT/providers/nats/bootstrap.sh" ada bob carol >/dev/null
 sed -i '' -e "s|127.0.0.1:4222|127.0.0.1:$DEMO_PORT|" -e "s|127.0.0.1:8222|127.0.0.1:$DEMO_MPORT|" \
   "$DEMO_HOME/config" "$DEMO_HOME/nats-server.conf"
