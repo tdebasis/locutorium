@@ -77,7 +77,9 @@ thing that matters — it is the server's parent, so the server holds the runtim
 birth, not by searching for it. Registering that pid is then the same mechanical act, done one level
 in; the seat is registered because the runtime created the process, and freed when the runtime lets
 it go. Nothing about the model changes: the pid is still received for free, still belongs to the
-process whose death ends the session, and is still recorded by whoever received it.
+process whose death ends the session, and is still recorded by whoever received it. And the runtime
+is the only launcher: nothing else starts a server for that seat, which is what keeps one seat to
+one listener and one registration.
 
 **If the agent fails to start, the host says so.** The host is the only party that expected a
 registration, so it is the only one that can notice its absence — and absence is not an event.
