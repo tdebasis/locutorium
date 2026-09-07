@@ -303,7 +303,7 @@ docs and the git tag all agree.
 | `provider` | none | which provider backs this house |
 | `nats_url` | `nats://127.0.0.1:4222` | where the medium is |
 | `idle_window` | `10m` | how long after an event `status <endpoint>` still reads *active* |
-| `send_requires_attendance` | `no` | refuse sends to endpoints with no listener |
+| `send_requires_attendance` | `no` | refuse sends to endpoints that are not attending. On the Go build with the NATS provider the key is satisfied by the live queue: a subscribed peer attends, and an unsubscribed one has no queue, so its send is refused for absence — no pidfile is read. The listener-pidfile form of the same key applies to the shell tool. |
 | `monitor_url` | none | read by the shell tool's own `registry`, and written by its bootstrap; no Go verb reads it |
 | `topic_window` | `7d` | how long topic messages live (the shell tool) |
 | `wake_window_seconds` | `5` | wakes are coalesced across this window (the shell tool) |
