@@ -17,10 +17,29 @@ import (
 //	                             subscribe and destroyed on unsubscribe, so
 //	                             there is no mailbox for an agent that is not
 //	                             running and nothing to drain or reconcile
-//	topic.<instance>          -> one subject per instance, spoken plainly:
+//	presence.<instance>       -> one subject per instance, spoken plainly:
 //	                             events are historyless, and a consumer builds
 //	                             its own picture from what it hears
 //	registry.<instance>       -> a request the instance's supervisor answers
+
+// eventSubjectPrefix is the ONE place the events subject family is spelled, so
+// that changing the family is changing this line and nothing else.
+//
+// EVENTS HAVE THEIR OWN PLANE. `presence.<instance>` is plane-first, exactly as
+// `queue.<instance>.<agent>`, `topic.<room>` and `registry.<instance>` are, and
+// two things follow from that shape. A grant is per plane — `presence.>` — so
+// an operator authorises events without authorising rooms. And no room can ever
+// collide with an instance name, which is what it did while events were spoken
+// on `topic.<instance>`: the message plane's TOPICS stream captures `topic.>`,
+// so every registration was written into room history and handed to the next
+// reader's cursor as though someone had said it.
+//
+// THAT CAPTURE WAS INCIDENTAL, NEVER A RETENTION PROMISE. Nothing captures
+// `presence.>` and nothing is meant to. Events stay core NATS and best-effort:
+// `watch` is live, and a consumer that needs the past asks the registry rather
+// than replaying a history that does not exist (docs/PRESENCE.md §After a host
+// restart). Nothing else in this provider publishes here.
+const eventSubjectPrefix = "presence."
 
 // emitDial bounds every step of the one verb that must never make its caller
 // wait. An adapter runs inside the agent's own lifecycle hook, so anything it
@@ -112,7 +131,7 @@ func (p *Provider) Emit(instance string, event []byte) error {
 	if err := p.connectWithin(emitDial); err != nil {
 		return err
 	}
-	if err := p.nc.Publish("topic."+instance, event); err != nil {
+	if err := p.nc.Publish(eventSubjectPrefix+instance, event); err != nil {
 		return err
 	}
 	return p.nc.FlushTimeout(emitDial)
@@ -141,7 +160,7 @@ func (p *Provider) Watch(instance string, w io.Writer) error {
 	if err := p.connect(); err != nil {
 		return err
 	}
-	sub, err := p.nc.SubscribeSync("topic." + instance)
+	sub, err := p.nc.SubscribeSync(eventSubjectPrefix + instance)
 	if err != nil {
 		return err
 	}

@@ -122,11 +122,15 @@ func read(p provider.Provider, w io.Writer, peek bool) error {
 // isPresenceEvent reports whether a topic payload is a presence event rather
 // than something somebody said.
 //
-// THE INSTANCE'S TOPIC CARRIES TWO DIFFERENT THINGS. Conversation goes to
-// topic.<room>; the presence model publishes its events to topic.<instance>;
-// and the message plane's TOPICS stream captures topic.>, so a reader's room
-// cursor is handed both. The subject-level separation is tracked separately —
-// this is the read side of it.
+// THE SEPARATION IS AT THE SUBJECT LEVEL NOW, AND THIS IS STILL HERE. Events
+// are published on presence.<instance>, a family no stream captures, so a room
+// stream laid today holds conversation and nothing else. This predicate is the
+// GUARD FOR READERS ON OLDER DEPLOYMENTS: rooms that were filled while events
+// were spoken on topic.<instance> still hold those events, inside the TOPICS
+// stream's own subject space, until the window ages them out — and a reader
+// meeting one deserves not to be shown a registration as though someone had
+// written to them. It costs one JSON probe per room message and it is the only
+// thing standing between an existing deployment and that.
 //
 // A payload is an event IFF it is a JSON OBJECT WHOSE `kind` IS ONE OF THE SIX
 // PRESENCE KINDS, and the taxonomy is asked for rather than restated, so a

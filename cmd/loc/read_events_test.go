@@ -1,14 +1,20 @@
 package main
 
-// Presence events on the room cursor.
+// Presence events on the room cursor — the guard for older deployments.
 //
-// The instance's topic carries TWO different things. Conversation is published
-// on topic.<room>, and the presence model publishes its events on
-// topic.<instance> — and the message plane's TOPICS stream captures topic.>,
-// so one reader's room cursor delivers both. An event is not mail: rendering
-// one puts an envelope with no `from`, no `to` and no body in front of a
-// reader as though someone had written to them, which is what two seats' join
-// events did to the first reader of a live instance.
+// Events are spoken on presence.<instance> now, so nothing a fresh deployment
+// lays can put one in a room. These cases hold the OTHER half: a room that was
+// filled while events shared the message plane's subject family still carries
+// them until the window ages them out, and a reader meeting one must not be
+// shown it. An event is not mail: rendering one puts an envelope with no
+// `from`, no `to` and no body in front of a reader as though someone had
+// written to them, which is what two seats' join events did to the first
+// reader of a live instance.
+//
+// So the events here are put in the room BY THE ADMIN OBSERVER, in the old
+// shape, rather than by subscribing a seat — which is what an older
+// deployment's rooms actually hold, and what the subject split no longer
+// produces.
 //
 // The deployment, the ACL user set and the seeding helpers belong to the
 // presence suite (newPresence, seedQueue, seedTopics, post, safeBuffer, run);
@@ -18,6 +24,9 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
+
+	natsgo "github.com/nats-io/nats.go"
 )
 
 // A join event on the instance's topic is NOT shown, and the room message
@@ -27,14 +36,40 @@ func TestReadPassesOverAPresenceEventAndStillShowsTheRoom(t *testing.T) {
 	p := newPresence(t)
 	p.seedTopics(t)
 
-	// The supervisor subscribes a seat; the join event lands on topic.workshop.
+	// A REAL join event, put where an older deployment's room holds it. The
+	// supervisor subscribes a seat, the event is caught on the plane it is
+	// spoken on now, and THAT PAYLOAD — not a hand-written imitation of one —
+	// is republished into the room, which is exactly the shape a room filled
+	// before the subject split still carries.
+	sub := p.witness(t, "presence.workshop")
 	p.as(t, "host")
 	if code, _, errOut := exec("subscribe", e2, "--pid", pidStr(livePid(t)),
 		"--type", "acme-cli", "--version", "3.2.0"); code != 0 {
 		t.Fatalf("subscribe exit %d, stderr %q", code, errOut)
 	}
+	events := collect(sub, 2*time.Second)
+	if len(events) == 0 {
+		t.Fatalf("no join event was emitted, so there is nothing to age into a room")
+	}
+	if err := p.admin.Publish("topic.workshop", []byte(events[0])); err != nil {
+		t.Fatalf("publish the event into the old room: %v", err)
+	}
+	if err := p.admin.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
 	// And someone says something in a room.
 	p.post(t, "topic.standup", "host", "#standup", "room-canary")
+
+	// THE FIXTURE IS LOAD-BEARING, SO IT IS ASSERTED. Without this the case
+	// would pass on an empty room: every check below is a negative, and
+	// "no event was rendered" is trivially true where no event exists.
+	info, err := p.adminJS.StreamInfo("TOPICS", &natsgo.StreamInfoRequest{SubjectsFilter: "topic.>"})
+	if err != nil {
+		t.Fatalf("stream info TOPICS: %v", err)
+	}
+	if n := info.State.Subjects["topic.workshop"]; n != 1 {
+		t.Fatalf("the room is not holding the event this case passes over: subjects %v", info.State.Subjects)
+	}
 
 	code, out, errOut := exec("read")
 	if code != 0 || errOut != "" {

@@ -54,6 +54,16 @@ for name in "${ENDPOINTS[@]}" admin watch; do
   # grants use $name. An un-namespaced name has no dot, so $s is $name and an
   # existing deployment's grants are unchanged.
   s="${name//./_}"
+  # THE EVENTS PLANE. Lifecycle and activity events are spoken on
+  # presence.<instance> — their own subject family, beside the queue and the
+  # room rather than inside either, so a grant is per plane and no room name
+  # can collide with an instance name. A seat emits its OWN events, so its
+  # publish grant is scoped to its instance: a namespaced endpoint
+  # <instance>.<agent> carries that instance in its first token. An
+  # un-namespaced name carries no instance at all, so there is nothing to
+  # scope to and the grant is the whole plane. Following is `watch` from any
+  # endpoint, so the subscribe grant is the plane either way.
+  if [[ "$name" == *.* ]]; then ev="presence.${name%%.*}"; else ev="presence.>"; fi
   pw="$(pw_for)"
   printf '%s' "$pw" > "$LOC_HOME/creds/$name"
   chmod 600 "$LOC_HOME/creds/$name"
@@ -63,7 +73,7 @@ for name in "${ENDPOINTS[@]}" admin watch; do
       users_block+="      { user: admin, password: \"$hash\" }"$'\n' ;;
     watch)
       users_block+="      { user: watch, password: \"$hash\", permissions: {
-          subscribe: { allow: [\"queue.>\", \"topic.>\"] },
+          subscribe: { allow: [\"queue.>\", \"topic.>\", \"presence.>\"] },
           publish:   { deny:  [\">\"] } } }"$'\n' ;;
     *)
       # A SEAT MAKES ITS OWN CURSOR. The reader's durable consumer on its own
@@ -90,7 +100,7 @@ for name in "${ENDPOINTS[@]}" admin watch; do
       # Answering is a different job with a different grant, and this is not it.
       users_block+="      { user: $name, password: \"$hash\", permissions: {
           publish: { allow: [
-            \"queue.*\", \"queue.*.*\", \"topic.>\", \"registry.>\",
+            \"queue.*\", \"queue.*.*\", \"topic.>\", \"registry.>\", \"$ev\",
             \"\$JS.ACK.QUEUE_$s.>\", \"\$JS.ACK.TOPICS.$s.>\",
             \"\$JS.API.INFO\",
             \"\$JS.API.STREAM.INFO.*\", \"\$JS.API.STREAM.NAMES\", \"\$JS.API.STREAM.LIST\",
@@ -105,7 +115,7 @@ for name in "${ENDPOINTS[@]}" admin watch; do
             \"\$JS.API.CONSUMER.DURABLE.CREATE.QUEUE_$s.$s\",
             \"\$JS.API.CONSUMER.DURABLE.CREATE.TOPICS.$s\",
             \"\$JS.API.CONSUMER.CREATE.TOPICS.$s\", \"\$JS.API.CONSUMER.CREATE.TOPICS.$s.>\" ] },
-          subscribe: { allow: [\"queue.$name\", \"topic.>\", \"_INBOX.>\"] } } }"$'\n' ;;
+          subscribe: { allow: [\"queue.$name\", \"topic.>\", \"presence.>\", \"_INBOX.>\"] } } }"$'\n' ;;
   esac
 done
 

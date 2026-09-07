@@ -169,19 +169,22 @@ if [[ "$LOC_IMPL" == go ]]; then
   # file storage, one replica), read from the config the bootstrap just wrote.
   window="$(sed -n 's/^topic_window[[:space:]]*=[[:space:]]*//p' "$LOC_HOME/config" | head -1)"
   window="${window:-7d}"
-  # AFTER the subscribes below, deliberately: a subscribe announces itself on
-  # topic.<instance>, which falls inside TOPICS' own subject space, and a room
-  # history that opens with three registration events is not the fixture any
-  # case here is about.
+  # BEFORE the subscribes below, and that ordering is now the point. A
+  # registration used to announce itself on topic.<instance>, which fell
+  # inside TOPICS' own subject space, so the room had to be stood up
+  # afterwards or its history opened with three registration events. THE
+  # COLLISION IS CLOSED AT THE SUBJECT LEVEL NOW: events are spoken on
+  # presence.<instance>, a family no stream captures, so the room may exist
+  # first and the case below asserts that it stayed empty through all three.
+  env NATS_URL="$NURL" NATS_USER=admin NATS_PASSWORD="$(_creds admin)" \
+    nats stream add TOPICS --subjects 'topic.>' --retention limits \
+      --max-age "$window" --storage file --replicas 1 --defaults >/dev/null \
+    || { bad "stream init (TOPICS)"; exit 1; }
   for _s in $(ep alice) $(ep bob) $(ep carol); do
     LOC_IDENTITY=$_s "$LOC_BIN_DIR/loc" subscribe "$_s" \
       --pid $$ --type conformance --version 0 >/dev/null \
       || { bad "stream init (subscribe $_s)"; exit 1; }
   done
-  env NATS_URL="$NURL" NATS_USER=admin NATS_PASSWORD="$(_creds admin)" \
-    nats stream add TOPICS --subjects 'topic.>' --retention limits \
-      --max-age "$window" --storage file --replicas 1 --defaults >/dev/null \
-    || { bad "stream init (TOPICS)"; exit 1; }
 else
   LOC_IDENTITY=admin $SETUP_LOC doctor --init >/dev/null || { bad "stream init"; exit 1; }
 fi
@@ -192,6 +195,29 @@ cat > "$LOC_HOME/hooks/nudge" <<EOF
 echo "\$1 \$2" >> "$LOC_HOME/nudges.log"
 EOF
 chmod +x "$LOC_HOME/hooks/nudge"
+
+if [[ "$LOC_IMPL" == go ]]; then
+  say "— registration events are not room history —"
+  # The three seats above registered through the verb under test, into a room
+  # stream that already existed. Each registration announced itself. An event
+  # is not mail: were it still spoken inside the room's subject family, TOPICS
+  # would be holding three of them on topic.house right now and the next
+  # reader's cursor would be handed them as though someone had written.
+  #
+  # Two questions, because they fail differently. The count is the promise a
+  # reader cares about; the subject listing names WHAT arrived, so a wrong
+  # answer says where the leak is instead of only that there is one.
+  _ti="$(env NATS_URL="$NURL" NATS_USER=admin NATS_PASSWORD="$(_creds admin)" \
+    nats stream info TOPICS --json 2>/dev/null)"
+  _tsub="$(env NATS_URL="$NURL" NATS_USER=admin NATS_PASSWORD="$(_creds admin)" \
+    nats stream subjects TOPICS --json 2>/dev/null)"
+  if [[ "$(jq -r '.state.messages' <<<"$_ti")" == "0" ]]; then
+    ok "no registration reached the room stream"
+  else bad "no registration reached the room stream"; fi
+  if grep -q '"topic\.house"' <<<"$_tsub"; then
+    bad "the room stream holds no topic.house subject"
+  else ok "the room stream holds no topic.house subject"; fi
+fi
 
 say "— identity —"
 check_not "unattributable send is refused" \
