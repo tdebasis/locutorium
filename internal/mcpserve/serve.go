@@ -111,6 +111,25 @@ const bellLine = "🔔 %d new → read"
 func Serve(ctx context.Context, d Deps, t mcp.Transport) error {
 	d = d.withDefaults()
 
+	// THE HANDLER IS INSTALLED BEFORE THERE IS ANYTHING TO GIVE UP.
+	//
+	// Everything below this line — the preflight, the handshake, the
+	// registration, the pid file and the first ring of the bell, which runs
+	// the deployment's nudge hook and waits for it — takes time a signal can
+	// arrive in. Notifying only once the server settled down to wait left
+	// exactly that stretch with Go's DEFAULT disposition in place: terminate
+	// where you stand. A TERM landing there killed a process that had already
+	// registered, and the seat stayed in the registry naming a runtime that
+	// had gone — the one outcome registering was supposed to make impossible.
+	//
+	// The channel is buffered, so a signal arriving before anyone is reading
+	// it is HELD rather than dropped, and wait finds it the moment it looks.
+	// The registration is never abandoned half-made: it finishes, and then
+	// the server departs through the one goodbye path there is, which is also
+	// the only code that undoes what registering did.
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+
 	// PREFLIGHT, BEFORE A BYTE IS SPOKEN. A seat held by a LIVE process that
 	// is not the runtime which launched us is not ours to take: two servers
 	// draining one queue would each receive part of the mail. Refusing here
@@ -150,7 +169,7 @@ func Serve(ctx context.Context, d Deps, t mcp.Transport) error {
 	// makes the file mean what it says.
 	stopBell := s.startBell()
 	s.claimPIDFile()
-	reason := s.wait(ss)
+	reason := s.wait(ss, sig)
 	stopBell()
 	s.logGoodbye(reason)
 	s.depart(reason)
@@ -170,13 +189,13 @@ type departReason struct {
 }
 
 // wait blocks until the runtime lets go: stdin reaches EOF (the runtime
-// exited) or a signal arrives. Either is an ordinary ending.
-func (s *server) wait(ss *mcp.ServerSession) departReason {
+// exited) or a signal arrives. Either is an ordinary ending. The signal
+// channel is handed in rather than made here because it is installed at the
+// top of Serve, before there is a registration to strand; a signal that
+// arrived during startup is already in it and is taken at once.
+func (s *server) wait(ss *mcp.ServerSession, sig <-chan os.Signal) departReason {
 	done := make(chan struct{})
 	go func() { defer close(done); _ = ss.Wait() }()
-
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 
 	// ONCE THE END IS DECIDED, EVERY LATER SIGNAL IS IGNORED FOR GOOD.
 	//
