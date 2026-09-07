@@ -55,6 +55,7 @@ presence — called by a person, or by a consumer
   watch [<instance>]        follow the event stream, read-only (^C to stop)
 
 other
+  mcp                       serve this seat to an agent runtime over stdio
   sub [--watch-pid <pid>]   register attendance: start your wake listener
   unsub                     end attendance (the queue keeps holding messages)
   doctor [--init]           health checks; --init creates streams (admin)
@@ -182,6 +183,9 @@ func dispatch(args []string, w io.Writer) error {
 
 	// The listener and the health checks are not in this binary yet. They are
 	// named here rather than falling through to usage.
+	case "mcp":
+		return mcpVerb(rest)
+
 	case "sub", "unsub", "doctor":
 		return errNotImplemented
 
