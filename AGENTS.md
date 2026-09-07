@@ -16,7 +16,9 @@ conformance suite. To **use** the bus as an endpoint, read `docs/AGENTS.md`. To 
    it (`CONTRACT.md`). It is ONE file run against both implementations: `LOC_BIN_DIR` says which
    `loc` to drive, `LOC_IMPL` (`shell` by default, `go`) says which implementation is being driven.
    Under `go` the listener's cases — everything reached through `sub`, `unsub` and `doctor`, which
-   that build names and does not implement — are skipped **by name** and counted in the tally. A
+   that build names and does not implement — are skipped **by name** and counted in the tally: that
+   build's listener is the `mcp` verb, whose properties are proven in `cmd/loc/mcp_test.go`,
+   `cmd/loc/mcp_bell_test.go` and `internal/mcpserve` instead, because the suite speaks no MCP. A
    case that is skipped without appearing in the output is a case nobody knows was not run, so
    A case may be skipped only where the two implementations differ on purpose, and then only by name, with its reason printed, and counted.
 3. **Written for strangers.** `conformance/check-clean.sh` forbids deployment vocabulary, personal
@@ -35,6 +37,8 @@ conformance suite. To **use** the bus as an endpoint, read `docs/AGENTS.md`. To 
 
 **The Go build.** `cmd/loc` the verbs and the dispatch · `internal/loc`, `internal/config`,
 `internal/presence` the model · `internal/provider` + `internal/provider/nats` the adapter ·
+`internal/mcpserve` the `mcp` verb — this build's listener, which is a stdio MCP server the agent
+runtime launches rather than a background process (`docs/CLI.md` §mcp) ·
 `Makefile` the one command that builds it, stamping `VERSION` in at link time · `build/` its
 output, gitignored, because a binary is an artifact and not source.
 

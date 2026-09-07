@@ -70,6 +70,15 @@ Registration is therefore **mechanical**: it happens because the host created th
 the agent remembered to announce itself. Conventions an agent must remember are the ones that fail
 quietly.
 
+**A runtime that launches the agent's server is the host by proxy.** The agent's own process need
+not be launched by a supervisor for this to hold: it is enough that SOMETHING with the pid does the
+registering. An agent runtime that starts a stdio server for its session hands that server the one
+thing that matters — it is the server's parent, so the server holds the runtime's process id by
+birth, not by searching for it. Registering that pid is then the same mechanical act, done one level
+in; the seat is registered because the runtime created the process, and freed when the runtime lets
+it go. Nothing about the model changes: the pid is still received for free, still belongs to the
+process whose death ends the session, and is still recorded by whoever received it.
+
 **If the agent fails to start, the host says so.** The host is the only party that expected a
 registration, so it is the only one that can notice its absence — and absence is not an event.
 A failure to launch is announced, not inferred from silence.

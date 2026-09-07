@@ -82,6 +82,17 @@ CHANGED    ~/Library/LaunchAgents/com.locutorium.nats-server.plist
 A second real run prints `nothing to do (every artifact already matches).` Moved the clone?
 Re-run `./install.sh`; the link is repointed and reported as CHANGED.
 
+## Telling an agent runtime about it
+
+The Go build serves one seat to an agent runtime over stdio. The runtime launches it, so nothing has
+to be started or supervised; it needs the binary on `PATH` and the endpoint it is speaking as:
+
+```json
+{"mcpServers": {"loc": {"command": "loc", "args": ["mcp"], "env": {"LOC_IDENTITY": "<instance>.<agent>"}}}}
+```
+
+`docs/CLI.md` §mcp is what that server does and what a runtime configured in TOML wants instead.
+
 ## Exit codes
 
 `0` done or nothing to do · `2` usage · `3` a dependency is missing (each is named with its

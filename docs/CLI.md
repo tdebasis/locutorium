@@ -10,6 +10,7 @@ Errors print `loc: <message>` on stderr and exit **1**. Everything else exits **
 | `loc send <endpoint> <body>` | one message into that endpoint's queue |
 | `loc publish <topic> <body>` | one message into a topic |
 | `loc read [--peek]` | take your messages |
+| `loc mcp` | serve this seat to an agent runtime over stdio |
 | `loc sub [--watch-pid <pid>]` | start your listener, so you get woken |
 | `loc unsub` | stop your listener |
 | `loc subscribe <endpoint> ...` | register an agent instance and create its queue |
@@ -25,7 +26,9 @@ Errors print `loc: <message>` on stderr and exit **1**. Everything else exits **
 | `loc version` | version string |
 
 `sub`, `unsub` and `doctor` are the shell tool's verbs. The Go build names them and answers
-`not implemented in this build`; every other row it answers itself.
+`not implemented in this build`; every other row it answers itself. `mcp` is the other way round:
+it is the Go build's, and it is that build's answer to `sub` — the same three jobs (register, listen,
+wake) done by one process the agent runtime launches instead of by a background listener.
 
 ---
 
@@ -298,6 +301,81 @@ docs and the git tag all agree.
 
 ---
 
+## mcp
+
+```
+loc mcp
+```
+
+Serves this seat to whatever agent runtime launched it, over stdin and stdout, speaking the Model
+Context Protocol. It does not return: it holds the seat for the life of the runtime's session.
+
+**It is the host, in miniature.** `docs/PRESENCE.md` says whoever launches an agent holds its process
+id, which is what makes registration mechanical rather than remembered. A stdio server is launched by
+the runtime and dies with it, so it has that shape at seat scale: before it serves anything it
+registers this endpoint with its PARENT's pid — the runtime's — the client's name and version from
+the initialize handshake, the agent token as the display name and the working directory; when the
+runtime lets go (stdin reaches EOF, or a signal arrives) it unsubscribes and exits 0. A seat held by
+a registration whose process is DEAD is displaced, and the dead pid is written to the delivery log.
+A seat held by a LIVE process that did not launch this server is refused, with the pid named, and the
+server exits 1 — the runtime shows it as failed, which is the truth.
+
+**It is also the listener.** It holds a core subscription on this endpoint's own queue subject, which
+sees every arrival and consumes nothing, and asks how much is waiting at start and after every
+reconnect. Arrivals are coalesced across `wake_window_seconds` and capped by
+`wake_breaker_per_minute` and `wake_breaker_per_hour` — the same three keys the shell tool's listener
+reads. Each wake calls the deployment's `hooks/nudge` with ONE LINE and no body:
+
+```
+🔔 3 new → read
+```
+
+and appends `wake <endpoint> count=3` to `run/<endpoint>.delivery.log`. A tripped breaker says so
+once. Nothing is lost to a suppressed wake: the queue keeps the truth.
+
+**Four tools, and each is the verb of the same name** — `send {to, body}`, `read {peek?}`,
+`status {endpoint?}`, `topics {}`. Each runs this binary's own function and returns exactly what the
+command line prints, refusals included (`loc: <what>`). Around every call the server emits
+`tool.pre` and `tool.post` for this seat, naming the tool.
+
+**`read` opens with a fixed reminder, written by the server.** The bell carried no body, so nothing
+the tool returns has been in front of a person yet; an agent that summarises it instead of printing
+it has destroyed the delivery silently. The line is followed by a blank line and then exactly what
+`loc read` prints:
+
+```
+Nothing below has been shown to anyone yet — the bell only rang. Print it verbatim before you act on it.
+
+── queue.workshop.scribe ──
+  `workshop.clerk -> workshop.scribe`  09:00  a question about the ledger
+── topics ──
+```
+
+Every `read` appends `read <endpoint> handed=<n>` to the delivery log, so a message that was read and
+never shown can still be found.
+
+**Configuring a runtime.** The server needs two things: to be launched, and to be told which endpoint
+it is. For Claude Code, `.mcp.json`:
+
+```json
+{"mcpServers": {"loc": {"command": "loc", "args": ["mcp"], "env": {"LOC_IDENTITY": "<instance>.<agent>"}}}}
+```
+
+For a runtime configured in TOML, `.codex/config.toml`:
+
+```toml
+[mcp_servers.loc]
+command = "loc"
+args = ["mcp"]
+env = { LOC_IDENTITY = "<instance>.<agent>" }
+```
+
+**The fallback.** A runtime that cannot launch a stdio server uses the command-line verbs directly —
+`loc read`, `loc send`, `loc status`, `loc topics`. What is lost is the automatic registration and
+the bell; something else must then run `subscribe` and `unsubscribe` around the session.
+
+---
+
 ## Configuration
 
 `$LOC_HOME/config`, one `key = value` per line.
@@ -310,12 +388,13 @@ docs and the git tag all agree.
 | `send_requires_attendance` | `no` | refuse sends to endpoints that are not attending. On the Go build with the NATS provider the key is satisfied by the live queue: a subscribed peer attends, and an unsubscribed one has no queue, so its send is refused for absence — no pidfile is read. The listener-pidfile form of the same key applies to the shell tool. |
 | `monitor_url` | none | read by the shell tool's own `registry`, and written by its bootstrap; no Go verb reads it |
 | `topic_window` | `7d` | how long topic messages live (the shell tool) |
-| `wake_window_seconds` | `5` | wakes are coalesced across this window (the shell tool) |
-| `wake_breaker_per_minute` | `6` | cap on wakes per minute (the shell tool) |
-| `wake_breaker_per_hour` | `60` | cap on wakes per hour (the shell tool) |
+| `wake_window_seconds` | `5` | wakes are coalesced across this window (both listeners: the shell tool's, and `loc mcp`) |
+| `wake_breaker_per_minute` | `6` | cap on wakes per minute (both listeners) |
+| `wake_breaker_per_hour` | `60` | cap on wakes per hour (both listeners) |
 
-The first four are every key the Go build reads; the rest belong to the shell tool. `registry`'s
-wait for a host is fixed in the code, not a key.
+Every key above except `monitor_url` and `topic_window` is read by the Go build; the three wake keys
+are read by BOTH listeners, so a deployment tunes one set of numbers whichever one it runs.
+`registry`'s wait for a host is fixed in the code, not a key.
 
 When a breaker trips it says so in `run/<endpoint>.delivery.log` and **suppresses only the wake**.
 No message is lost; the next read still finds everything.
