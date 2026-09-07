@@ -16,6 +16,11 @@
 #   spawned by the run  → the scratch server, the demo's server, and a listener
 #                         named by a pidfile under the run's own scratch
 #                         LOC_HOME. All three must be gone.
+#                         And a listener the run started that NO pidfile names
+#                         any more — the generation whose file was removed by
+#                         an unsub whose kill missed, or overwritten by a
+#                         successor. A census of current pidfiles cannot see
+#                         it; the run's own record of what it started can.
 #   not spawned by it   → a listener whose pidfile lives under a DIFFERENT
 #                         home. It must be untouched: the census this replaced
 #                         matched on binary path, and on a machine whose real
@@ -68,13 +73,22 @@ sleep 900 & SERVER_PID=$!
 sleep 900 & DEMO_PID=$!
 sleep 900 & listener=$!
 sleep 900 & control=$!
+sleep 900 & unnamed=$!
 # The pidfile is what marks a listener as THIS run's — the same file the
 # teardown's census reads. The control's pidfile names the same kind of
 # process under a home this run does not own.
 printf '%s\n' "$listener" > "$LOC_HOME/run/probe.listener.pid"
 printf '%s\n' "$control"  > "$OTHER/run/probe.listener.pid"
-printf 'server=%s\ndemo=%s\nlistener=%s\ncontrol=%s\n' \
-  "$SERVER_PID" "$DEMO_PID" "$listener" "$control" > "$PIDS"
+# LEDGER ONLY, ON PURPOSE — no pidfile anywhere names this one. That is the
+# state a run actually reaches: `unsub` removes the pidfile whether or not its
+# kill landed, and a successor registering inside the death window overwrites
+# it, so a still-live generation can end the run with nothing on disk naming
+# it. Written to the ledger and to no pidfile, it is invisible to a census of
+# current pidfiles and visible only to the run's own record of what it
+# started, which is the whole of what this case asks.
+printf '%s\n' "$unnamed" > "$LOC_HOME/run/suite.spawned"
+printf 'server=%s\ndemo=%s\nlistener=%s\ncontrol=%s\nunnamed=%s\n' \
+  "$SERVER_PID" "$DEMO_PID" "$listener" "$control" "$unnamed" > "$PIDS"
 . "$ROOT/conformance/teardown.sh"
 printf 'ready\n' >> "$PIDS"
 # Where a run spends its time: inside a foreground command, not at a prompt.
@@ -96,11 +110,12 @@ run_case() { # <signal> [second signal, sent while the teardown is running]
     sleep 0.2; i=$((i+1))
     if [[ $i -gt 50 ]]; then bad "$label: the child never came up"; kill -9 "$child_pid" 2>/dev/null; return; fi
   done
-  local server demo listener control
+  local server demo listener control unnamed
   server="$(sed -n 's/^server=//p' "$pids")"
   demo="$(sed -n 's/^demo=//p' "$pids")"
   listener="$(sed -n 's/^listener=//p' "$pids")"
   control="$(sed -n 's/^control=//p' "$pids")"
+  unnamed="$(sed -n 's/^unnamed=//p' "$pids")"
 
   kill -"$sig" "$child_pid" 2>/dev/null
   # Half a second in is inside the teardown's own wait for the listeners it
@@ -119,10 +134,11 @@ run_case() { # <signal> [second signal, sent while the teardown is running]
   if gone_within "$server" 10;   then ok "$label: the scratch server is gone";       else bad "$label: the scratch server survived"; fi
   if gone_within "$demo" 10;     then ok "$label: the demo server is gone";          else bad "$label: the demo server survived"; fi
   if gone_within "$listener" 10; then ok "$label: this run's listener is gone";      else bad "$label: this run's listener survived"; fi
+  if gone_within "$unnamed" 10;  then ok "$label: a listener no pidfile names is gone"; else bad "$label: a listener no pidfile names survived"; fi
   if alive "$control";           then ok "$label: another home's listener survived"; else bad "$label: another home's listener was killed"; fi
 
   local p
-  for p in "$server" "$demo" "$listener" "$control"; do
+  for p in "$server" "$demo" "$listener" "$control" "$unnamed"; do
     [[ -n "$p" ]] && kill -9 "$p" 2>/dev/null
   done
   rm -f "$idle"; rm -rf "$scratch" "$other" "$pids"

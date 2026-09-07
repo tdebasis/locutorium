@@ -40,16 +40,51 @@ suite_listeners() { # → one pid per line: this suite's own listeners, plus
     pgrep -P "$lpid" 2>/dev/null
   done
 }
+# WHAT THE RUN STARTED, AS OPPOSED TO WHAT STILL HAS A PIDFILE. The census
+# above reads CURRENT pidfiles, and a pidfile is a licence, not a receipt: it
+# is removed by every `unsub` whether or not that unsub's kill landed, and it
+# is overwritten by a successor that registers inside a dying listener's
+# death window. Either way a listener the suite started can still be running
+# with no file on disk naming it — invisible to suite_listeners(), and so
+# never reaped. That is how a run that ended `57 passed, 0 failed` left a
+# live `loc sub` behind for the next job on the same runner to find.
+#
+# So the run also keeps its own record: one pid per line, appended by the
+# `loc` helper in run.sh as each `loc sub` prints the listener it started.
+# The file lives inside the run's own scratch tree, so it can name nothing
+# that outlives the run and nothing any other deployment owns.
+SUITE_LEDGER_NAME="suite.spawned"
+suite_ledger() { # → one pid per line: every listener this run started that is
+  # still alive, plus each one's children by PARENT pid — the same tap rule as
+  # the census, and for the same reason.
+  local lf="$LOC_HOME/run/$SUITE_LEDGER_NAME" lpid
+  [[ -r "$lf" ]] || return 0
+  while IFS= read -r lpid; do
+    [[ "$lpid" =~ ^[0-9]+$ ]] || continue
+    [[ "$lpid" == "$$" ]] && continue          # never the run's own shell
+    kill -0 "$lpid" 2>/dev/null || continue    # already gone, nothing to reap
+    printf '%s\n' "$lpid"
+    pgrep -P "$lpid" 2>/dev/null
+  done < "$lf"
+}
 reap_suite_listeners() { # [pid...] — TERM, then KILL after 2s for survivors.
-  # With no arguments the target is a fresh suite_listeners() census. A
-  # caller that needs to reap pids a LATER suite_listeners() call could not
-  # rediscover — the pidfile-removal case below deletes the very file this
-  # census reads, on purpose, as its own test — passes that earlier census
-  # in explicitly instead.
+  # With no arguments the target is the UNION of a fresh suite_listeners()
+  # census and the spawn ledger — what still has a pidfile, and what this run
+  # started. Neither is a superset of the other: the census catches a listener
+  # started outside the helper, the ledger catches one whose pidfile is gone.
+  # A caller that needs to reap pids a LATER census could not rediscover — the
+  # pidfile-removal case below deletes the very file this census reads, on
+  # purpose, as its own test — passes that earlier census in explicitly
+  # instead, and gets exactly those pids and no others.
   local pids=("$@")
   if [[ "${#pids[@]}" -eq 0 ]]; then
-    local _l
-    while IFS= read -r _l; do [[ -n "$_l" ]] && pids+=("$_l"); done < <(suite_listeners)
+    local _l _seen=" "
+    while IFS= read -r _l; do
+      [[ -n "$_l" ]] || continue
+      [[ "$_seen" == *" $_l "* ]] && continue   # union, not concatenation
+      _seen="$_seen$_l "
+      pids+=("$_l")
+    done < <(suite_listeners; suite_ledger)
   fi
   [[ "${#pids[@]}" -eq 0 ]] && return 0
   local p

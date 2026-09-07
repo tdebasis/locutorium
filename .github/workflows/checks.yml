@@ -145,7 +145,7 @@ jobs:
         run: |
           set -o pipefail
           bash conformance/teardown_test.sh | tee /tmp/teardown.txt
-          grep -q 'teardown: 12 passed, 0 failed' /tmp/teardown.txt
+          grep -q 'teardown: 15 passed, 0 failed' /tmp/teardown.txt
           bash conformance/leftovers_test.sh | tee /tmp/leftovers.txt
           grep -q 'leftovers: 14 passed, 0 failed' /tmp/leftovers.txt
 
