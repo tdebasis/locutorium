@@ -228,11 +228,30 @@ func childEnding(err error) string {
 // runtime's pid because it can no longer read it: its own parent is the
 // wrapper above.
 func mcpServe(runtimePID int) error {
+	// THE HANDLER IS INSTALLED BEFORE THE FIRST DIAL.
+	//
+	// Serve installs one before it registers anything, which covers the
+	// stretch inside it. This covers the stretch BEFORE it: mcpDeps resolves
+	// the seat — running an identity hook the deployment wrote, and waiting
+	// for it — reads the version and opens the provider, and a runtime is
+	// free to end its server anywhere in there. Leaving that stretch on Go's
+	// default disposition would make an ordinary stop end the process by
+	// signal rather than cleanly, and a tool that reports a failure for an
+	// ordinary stop teaches every supervisor above it that stopping it goes
+	// wrong.
+	//
+	// The channel is buffered and handed to Serve, so there is ONE
+	// registration for the whole life of the process and a signal that landed
+	// during startup is still waiting when the server looks.
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+
 	d, release, err := mcpDeps()
 	if err != nil {
 		return err
 	}
 	defer release()
+	d.Signals = sig
 	d.Ppid = func() int { return runtimePID }
 	return mcpserve.Serve(context.Background(), d, &mcp.StdioTransport{})
 }

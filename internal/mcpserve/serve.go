@@ -69,6 +69,18 @@ type Deps struct {
 	Watch  func(endpoint string, arrived, reconnected func()) (stop func(), err error)
 	Unread func(endpoint string) (int, error)
 
+	// Signals is the caller's OWN signal channel, when it has one. The
+	// handler belongs at the earliest moment there is, and for cmd/loc that
+	// is earlier than this function: resolving the seat runs a hook the
+	// deployment wrote and opening the provider is a dial, and both happen
+	// before Serve is called. A caller that installed the notification itself
+	// hands the channel in so there is ONE registration and one queue, and
+	// anything that arrived during its startup is already waiting in it.
+	// Left nil — every in-package case, and any caller with nothing to do
+	// before serving — Serve installs its own, which is then the earliest
+	// moment there is.
+	Signals <-chan os.Signal
+
 	// Seams a test replaces. The zero value is the real thing.
 	Nudge func(endpoint, line string) error
 	Now   func() time.Time
@@ -127,8 +139,12 @@ func Serve(ctx context.Context, d Deps, t mcp.Transport) error {
 	// The registration is never abandoned half-made: it finishes, and then
 	// the server departs through the one goodbye path there is, which is also
 	// the only code that undoes what registering did.
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	sig := d.Signals
+	if sig == nil {
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+		sig = c
+	}
 
 	// PREFLIGHT, BEFORE A BYTE IS SPOKEN. A seat held by a LIVE process that
 	// is not the runtime which launched us is not ours to take: two servers
