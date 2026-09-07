@@ -79,7 +79,10 @@ in; the seat is registered because the runtime created the process, and freed wh
 it go. Nothing about the model changes: the pid is still received for free, still belongs to the
 process whose death ends the session, and is still recorded by whoever received it. And the runtime
 is the only launcher: nothing else starts a server for that seat, which is what keeps one seat to
-one listener and one registration.
+one listener and one registration. The pid received for free is the pid of whatever process launched
+the server, so a shell or a shim placed between the runtime and the binary becomes the registered
+pid and the seat names a process that is not the agent — which is why a deployment's config invokes
+the binary directly rather than through a wrapper.
 
 **A hard kill leaves no goodbye.** A runtime is free to end the server it launched with SIGKILL,
 which delivers nothing and runs nothing, so that seat's registration outlives its session — it reads

@@ -37,35 +37,28 @@ func TestDepartLog_GoodbyeAndLeftOnEOF(t *testing.T) {
 	}
 }
 
-// TestDepartLog_GoodbyeSignalOnTerminate verifies that a signal-ended session
-// logs the goodbye line with the signal name.
-func TestDepartLog_GoodbyeSignalOnTerminate(t *testing.T) {
+// TestDepartLog_GoodbyeAndLeftWhenTheSeatWasFullyUp is the same ending as the
+// case above, taken at the other moment: the client lets go only once the
+// listener is wired and the seat is being served, rather than possibly while
+// the server is still starting. Both write goodbye and left, which is the
+// point — a departure is not a race the occupant has to win.
+//
+// NOTHING HERE IS SIGNALLED, whatever the name once said. A signal cannot be
+// delivered in this process without taking the test binary down with it, so
+// the signal ending is proved against a real child in cmd/loc
+// (mcp_signal_test.go and mcp_signal_window_test.go) and never here.
+func TestDepartLog_GoodbyeAndLeftWhenTheSeatWasFullyUp(t *testing.T) {
 	dir := home(t, "provider = none\n")
 	f := &fake{}
 	sess, done := serve(t, f.deps())
 
-	// Give the server time to start up
+	// A client's Connect returns before the seat is registered, so the wait
+	// is what makes this case the LATER moment rather than the same one.
 	f.ready(t)
-
-	// Simulate receiving a signal by closing the session after a small delay
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		_ = sess.Close()
-	}()
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Errorf("the server returned %v; an ordinary ending is a clean one", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("the server did not return after the runtime let go")
-	}
+	stop(t, sess, done)
 
 	log := delivery(t, dir)
 
-	// The session ends with EOF (since it's client-initiated close), not a signal
-	// But the log should still have both goodbye and left lines
 	if !strings.Contains(log, "goodbye workshop.scribe: eof") {
 		t.Errorf("delivery log missing 'goodbye workshop.scribe: eof' line; got:\n%s", log)
 	}
@@ -95,8 +88,8 @@ func TestDepartLog_LeftTimedOut(t *testing.T) {
 		t.Errorf("delivery log missing 'leave timed out workshop.scribe' line; got:\n%s", log)
 	}
 
-	// Should NOT have successful left line
-	if strings.Contains(log, "left workshop.scribe") && !strings.Contains(log, "timed out") {
-		t.Errorf("delivery log should not have successful 'left' when it timed out; got:\n%s", log)
-	}
+	// There is no third assertion. The one that stood here asked for a log
+	// that holds "left" and does NOT hold "timed out", which the assertion
+	// directly above has just required it to hold: it could not fire whatever
+	// the code did, and a guard that cannot fire is not a guard.
 }
