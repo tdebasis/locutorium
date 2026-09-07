@@ -137,9 +137,10 @@ func Serve(ctx context.Context, d Deps, t mcp.Transport) error {
 
 	s.claimPIDFile()
 	stopBell := s.startBell()
-	s.wait(ss)
+	reason := s.wait(ss)
 	stopBell()
-	s.depart()
+	s.logGoodbye(reason)
+	s.depart(reason)
 	return nil
 }
 
@@ -149,9 +150,15 @@ type server struct {
 	b *bell
 }
 
+// departReason describes why the server is departing.
+type departReason struct {
+	kind   string // "eof" or "signal"
+	signal os.Signal
+}
+
 // wait blocks until the runtime lets go: stdin reaches EOF (the runtime
 // exited) or a signal arrives. Either is an ordinary ending.
-func (s *server) wait(ss *mcp.ServerSession) {
+func (s *server) wait(ss *mcp.ServerSession) departReason {
 	done := make(chan struct{})
 	go func() { defer close(done); _ = ss.Wait() }()
 
@@ -161,8 +168,10 @@ func (s *server) wait(ss *mcp.ServerSession) {
 
 	select {
 	case <-done:
-	case <-sig:
+		return departReason{kind: "eof"}
+	case s := <-sig:
 		_ = ss.Close()
+		return departReason{kind: "signal", signal: s}
 	}
 }
 
@@ -251,20 +260,36 @@ func heldElsewhere(endpoint string, held *model.Registration) error {
 		"a seat has one listener, so this one will not start", endpoint, held.Process.PID)
 }
 
+// logGoodbye logs the reason the server is departing.
+func (s *server) logGoodbye(reason departReason) {
+	if reason.kind == "eof" {
+		s.log(fmt.Sprintf("goodbye %s: eof", s.d.Endpoint))
+	} else if reason.kind == "signal" {
+		s.log(fmt.Sprintf("goodbye %s: signal %s", s.d.Endpoint, reason.signal.String()))
+	}
+}
+
 // depart frees the seat on the way out, bounded.
-func (s *server) depart() {
-	done := make(chan struct{})
+func (s *server) depart(reason departReason) {
+	done := make(chan error, 1)
 	go func() {
-		defer close(done)
 		// --force because our own pid is alive: it is this very process doing
 		// the leaving, and the safe-reconciliation refusal exists to stop
 		// somebody ELSE displacing a running agent.
-		_ = s.d.Unsubscribe([]string{s.d.Endpoint, "--reason", "clean", "--force"})
+		done <- s.d.Unsubscribe([]string{s.d.Endpoint, "--reason", "clean", "--force"})
 	}()
+
 	select {
-	case <-done:
+	case err := <-done:
+		if err != nil {
+			s.log(fmt.Sprintf("leave failed %s: %v", s.d.Endpoint, err))
+		} else {
+			s.log(fmt.Sprintf("left %s", s.d.Endpoint))
+		}
 	case <-time.After(departureWait):
+		s.log(fmt.Sprintf("leave timed out %s", s.d.Endpoint))
 	}
+
 	s.releasePIDFile()
 }
 

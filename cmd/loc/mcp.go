@@ -8,8 +8,10 @@ import (
 	"os"
 	osexec "os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -117,6 +119,7 @@ func mcpParent() error {
 		case s := <-sig:
 			_ = cmd.Process.Signal(s)
 		case err := <-done:
+			supervisorLog(err)
 			return childStatus(err)
 		}
 	}
@@ -160,6 +163,39 @@ func childStatus(err error) error {
 		return exitStatus(code)
 	}
 	return exitStatus(1)
+}
+
+// supervisorLog appends one line to the child's delivery log, best-effort.
+func supervisorLog(err error) {
+	endpoint, err := loc.Identity()
+	if err != nil {
+		return
+	}
+
+	dir := filepath.Join(config.Home(), "run")
+	logPath := filepath.Join(dir, endpoint+".delivery.log")
+
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	status := "exit 0"
+	if err != nil {
+		var ee *osexec.ExitError
+		if errors.As(err, &ee) {
+			if code := ee.ExitCode(); code >= 0 {
+				status = fmt.Sprintf("exit %d", code)
+			} else {
+				status = fmt.Sprintf("signal %s", ee.String())
+			}
+		} else {
+			status = fmt.Sprintf("error: %v", err)
+		}
+	}
+
+	_, _ = fmt.Fprintf(f, "%s supervisor %s: child ended %s\n", time.Now().UTC().Format("2006-01-02T15:04:05Z"), endpoint, status)
 }
 
 // mcpServe is the generation that actually holds the seat. It is handed the
