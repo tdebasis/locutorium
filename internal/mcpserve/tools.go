@@ -33,8 +33,8 @@ import (
 // in passing — silently destroys the delivery: the message arrived, was read,
 // and was never seen. The line says what has not happened and what to do about
 // it, in that order.
-const ReadReminder = "Nothing below has been shown to anyone yet — the bell only rang. " +
-	"Print it verbatim before you act on it."
+const ReadReminder = "Nothing below has been shown to anyone yet; the bell only rang. " +
+	"Print it on screen verbatim, then act on it."
 
 // sendArgs, readArgs, statusArgs and topicsArgs are the tools' inputs. The
 // schemas are generated from these by the SDK.
