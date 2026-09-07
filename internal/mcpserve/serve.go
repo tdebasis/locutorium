@@ -164,7 +164,23 @@ func (s *server) wait(ss *mcp.ServerSession) departReason {
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
-	defer signal.Stop(sig)
+
+	// ONCE THE END IS DECIDED, EVERY LATER SIGNAL IS IGNORED FOR GOOD.
+	//
+	// Observed under a real runtime: `goodbye ... signal interrupt` and then
+	// nothing — no `left`, the registration still in place, the pid file still
+	// there. A runtime signals the whole process tree, and the launched
+	// process forwards its own copy downward on top of that, so a second
+	// signal is not an edge case here, it is the normal delivery. Stopping
+	// the notification would put the default disposition back — terminate
+	// where you stand — for exactly the stretch that matters: the goodbye
+	// line, the unregistration and the pid file all run AFTER this returns.
+	// Ignoring instead means no signal from any source can interrupt them,
+	// and the process still ends, on its own, a moment later.
+	//
+	// SIGKILL still wins. Nothing here changes that, and nothing needs to:
+	// the two-generation shape in cmd/loc/mcp.go is what survives a kill.
+	defer signal.Ignore(syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 
 	select {
 	case <-done:

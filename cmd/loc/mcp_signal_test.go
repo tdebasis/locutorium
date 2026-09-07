@@ -117,6 +117,12 @@ func startSeat(t *testing.T, bin, home, endpoint string) (*osexec.Cmd, <-chan er
 	}
 
 	cmd := osexec.Command(bin, "mcp")
+	// ITS OWN PROCESS GROUP, so that a case can deliver a GROUP signal the way
+	// an agent runtime's own exit delivers one — to the whole tree at once,
+	// reaching the launched process and the serving child in a single
+	// delivery — without that signal also landing on the test runner. The
+	// group leader is then the launched process, so its pid is the pgid.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Env = append(os.Environ(), "LOC_HOME="+home, "LOC_IDENTITY="+endpoint)
 	cmd.Stdin = inR
 	cmd.Stdout = outW

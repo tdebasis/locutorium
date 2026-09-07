@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -108,6 +109,15 @@ func mcpParent() error {
 	// The endings that ARE delivered are passed along rather than obeyed: this
 	// process exiting on a TERM would orphan a server still holding the seat,
 	// and the child already knows how to give a seat up cleanly.
+	//
+	// FORWARDED EVEN THOUGH THE CHILD SHARES OUR PROCESS GROUP. A runtime
+	// that signals the group has already reached the child directly, so the
+	// forward is usually a SECOND copy of a signal it has had — but a runtime
+	// is equally free to signal only the process it launched, and that one
+	// would otherwise reach nobody. Forwarding is therefore kept, and made
+	// harmless at the other end: once the child has decided to depart it
+	// ignores these for the rest of its life (internal/mcpserve, wait), so a
+	// duplicate cannot cut its goodbye short.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	defer signal.Stop(sig)
@@ -166,13 +176,21 @@ func childStatus(err error) error {
 }
 
 // supervisorLog appends one line to the child's delivery log, best-effort.
-func supervisorLog(err error) {
+//
+// The wait's error is named apart from every other error in here on purpose:
+// it is the only thing this function has to say, and a shadowed `err` reported
+// each ending as `exit 0` — the one status that rules out the explanation
+// somebody reading an abandoned seat's log is looking for.
+func supervisorLog(waitErr error) {
 	endpoint, err := loc.Identity()
 	if err != nil {
 		return
 	}
 
 	dir := filepath.Join(config.Home(), "run")
+	// Best-effort, and unchecked on purpose: if the directory cannot be made
+	// the open below fails and says so by returning, and one refusal is enough.
+	_ = os.MkdirAll(dir, 0o700)
 	logPath := filepath.Join(dir, endpoint+".delivery.log")
 
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
@@ -181,21 +199,29 @@ func supervisorLog(err error) {
 	}
 	defer f.Close()
 
-	status := "exit 0"
-	if err != nil {
-		var ee *osexec.ExitError
-		if errors.As(err, &ee) {
-			if code := ee.ExitCode(); code >= 0 {
-				status = fmt.Sprintf("exit %d", code)
-			} else {
-				status = fmt.Sprintf("signal %s", ee.String())
-			}
-		} else {
-			status = fmt.Sprintf("error: %v", err)
-		}
-	}
+	_, _ = fmt.Fprintf(f, "%s supervisor %s: child ended %s\n",
+		time.Now().UTC().Format("2006-01-02T15:04:05Z"), endpoint, childEnding(waitErr))
+}
 
-	_, _ = fmt.Fprintf(f, "%s supervisor %s: child ended %s\n", time.Now().UTC().Format("2006-01-02T15:04:05Z"), endpoint, status)
+// childEnding renders how the child ended, in the words that distinguish the
+// endings from each other. A process killed by a signal has NO exit code —
+// ExitCode answers -1 for it — so the code is asked for only once it is known
+// to be one, and the signal is named where there is one to name.
+func childEnding(err error) string {
+	if err == nil {
+		return "exit 0"
+	}
+	var ee *osexec.ExitError
+	if !errors.As(err, &ee) {
+		return fmt.Sprintf("error: %v", err)
+	}
+	if code := ee.ExitCode(); code >= 0 {
+		return fmt.Sprintf("exit %d", code)
+	}
+	// No exit code at all means the process was killed by a signal, and the
+	// wait status already names it — "signal: killed". Only the punctuation is
+	// changed, so the line reads like the exit form beside it.
+	return strings.Replace(ee.String(), "signal: ", "signal ", 1)
 }
 
 // mcpServe is the generation that actually holds the seat. It is handed the
