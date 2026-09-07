@@ -94,9 +94,36 @@ reap_suite_listeners() { # [pid...] — TERM, then KILL after 2s for survivors.
 }
 
 cleanup() {
+  # A SECOND CANCEL DURING TEARDOWN IS IGNORED, NOT OBEYED HALFWAY — and this
+  # is the first statement here because everything below it is the part that
+  # was being abandoned.
+  #
+  # The rule, and the version it turns on. The manual says a signal arriving
+  # while the shell waits for a command is held: "If Bash is waiting for a
+  # command to complete and receives a signal for which a trap has been set,
+  # it will not execute the trap until the command completes." The reap below
+  # waits two seconds between TERM and KILL, so a canceller's second signal
+  # lands there and is held exactly that long. What happens when it is finally
+  # delivered is what moved: bash 5.0 lists "Bash now allows SIGINT trap
+  # handlers to execute recursively" among its new features, and this shell's
+  # handlers behave that way for the cancelling signals — the handler runs
+  # AGAIN, nested inside itself. The once-guard makes that nested cleanup
+  # return immediately, and the trap's own `exit 143` then exits the shell
+  # from inside the OUTER handler, at the reap, before the servers are
+  # killed and before the scratch tree is removed. bash 3.2 (still the system
+  # shell on macOS) runs the handler once and swallows the second signal,
+  # which is why this passed there and failed on a hosted bash 5.
+  #
+  # Ignoring is right rather than merely convenient: teardown is already the
+  # thing the canceller is asking for, and there is nothing further to obey.
+  # It is not a way to refuse to die — KILL is not trappable and still wins,
+  # and the reap's own KILL step still runs on schedule.
+  trap '' TERM INT
   # Torn down once. A run that is signalled tears down in the signal's trap and
-  # then reaches the EXIT trap on its way out, and a second signal arriving
-  # while this is running is held until it returns.
+  # then reaches the EXIT trap on its way out. The guard is what stops that
+  # second pass; the line above is what stops a second SIGNAL, which the guard
+  # cannot, because the guard only decides what a re-entered handler does, not
+  # where the shell resumes when that handler exits.
   [[ -n "${_TORE_DOWN:-}" ]] && return 0
   _TORE_DOWN=1
   # ATTENDANCE ENDS BEFORE THE SERVER DOES. Under the presence model a queue
