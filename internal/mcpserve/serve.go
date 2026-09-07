@@ -70,10 +70,14 @@ type Deps struct {
 	Unread func(endpoint string) (int, error)
 
 	// Seams a test replaces. The zero value is the real thing.
-	Nudge func(endpoint, line string)
+	Nudge func(endpoint, line string) error
 	Now   func() time.Time
 	Ppid  func() int
 	Wd    func() (string, error)
+
+	// Where a line goes that the RUNTIME must see. Stdout is the protocol's,
+	// byte for byte, so anything said to a human goes here.
+	Stderr io.Writer
 }
 
 const (
@@ -135,8 +139,17 @@ func Serve(ctx context.Context, d Deps, t mcp.Transport) error {
 		return err
 	}
 
-	s.claimPIDFile()
+	// THE BELL FIRST, THEN THE FILE THAT CLAIMS THERE IS ONE.
+	//
+	// The pid file is what a sender reads to decide it need not ring: a seat
+	// whose server is up rings its own bell, so `send` stays quiet (cmd/loc,
+	// hasItsOwnBell). Writing the file before the listener exists opens a
+	// window where that is a lie — the sender is told the seat rings, the seat
+	// is not yet watching, and the message arrives with no bell at all, which
+	// is the one outcome this whole arrangement exists to prevent. The order
+	// makes the file mean what it says.
 	stopBell := s.startBell()
+	s.claimPIDFile()
 	reason := s.wait(ss)
 	stopBell()
 	s.logGoodbye(reason)
@@ -322,18 +335,36 @@ func (s *server) pidFile() string {
 	return filepath.Join(config.Home(), "run", s.d.Endpoint+".mcp.pid")
 }
 
-// claimPIDFile records this process. A failure is not fatal: the file is an
-// aid to whoever is looking, not a lock, and a seat that could not write it is
-// still a seat being served.
+// claimPIDFile records this process: TWO LINES, the pid and the start time the
+// presence model records for it, written with that model's own function so the
+// value and the comparison can never drift apart. The pair is the identity —
+// the pid alone begins naming a stranger the moment the kernel reuses the
+// number, and a reader deciding whether this server is running would then get
+// a confident yes about somebody else.
+//
+// A failure is not fatal: the file is an aid to whoever is looking, not a
+// lock, and a seat that could not write it is still a seat being served.
 func (s *server) claimPIDFile() {
 	if err := os.MkdirAll(filepath.Join(config.Home(), "run"), 0o700); err != nil {
 		return
 	}
-	_ = os.WriteFile(s.pidFile(), []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600)
+	pid := os.Getpid()
+	_ = os.WriteFile(s.pidFile(),
+		[]byte(strconv.Itoa(pid)+"\n"+model.StartedAt(pid)+"\n"), 0o600)
 }
 
 // releasePIDFile removes it on the way out.
 func (s *server) releasePIDFile() { _ = os.Remove(s.pidFile()) }
+
+// warn is a line that must not be lost: it goes to the delivery log, where a
+// deployment already looks for what was delivered and what was not, AND to the
+// runtime's own log, because the delivery log is a file somebody has to think
+// to open and a failure nobody reads is a failure nobody fixes. Stdout is the
+// protocol's, so the second copy goes to stderr.
+func (s *server) warn(line string) {
+	s.log(line)
+	_, _ = fmt.Fprintf(s.d.Stderr, "loc mcp: %s\n", line)
+}
 
 // log appends one line to the seat's delivery log, in the shell listener's
 // format and its own file, so a deployment has ONE place to look for what was
@@ -355,7 +386,7 @@ func (s *server) log(line string) {
 // withDefaults fills the seams a test replaces with the real thing.
 func (d Deps) withDefaults() Deps {
 	if d.Nudge == nil {
-		d.Nudge = loc.Nudge
+		d.Nudge = loc.NudgeErr
 	}
 	if d.Now == nil {
 		d.Now = time.Now
@@ -365,6 +396,9 @@ func (d Deps) withDefaults() Deps {
 	}
 	if d.Wd == nil {
 		d.Wd = os.Getwd
+	}
+	if d.Stderr == nil {
+		d.Stderr = os.Stderr
 	}
 	return d
 }
