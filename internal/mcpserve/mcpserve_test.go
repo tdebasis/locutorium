@@ -555,6 +555,73 @@ func TestBell_AnUnanswerableBacklogRingsNothing(t *testing.T) {
 	}
 }
 
+// THE BACKLOG FIGURE IS THE BROKER'S, NOT A SECOND COUNT.
+//
+// Unread is the consumer's NumPending, and it ALREADY INCLUDES every arrival
+// the watcher has counted since the last ring. Adding the two together counted
+// one message twice: a seat that received a single message in the stretch
+// between the watcher going live and the backlog sample was rung for two, and
+// the second of them does not exist. The sample SETS the figure instead, and
+// keeps whichever is larger — a figure the broker holds is the truth, and the
+// watcher's tally is only ever a lower bound on it.
+func TestBell_TheBacklogSampleDoesNotCountAnArrivalTwice(t *testing.T) {
+	home(t, "provider = none\nwake_window_seconds = 30\n")
+	f := &fake{unread: 1}
+	d := f.deps()
+	d.Watch = arrivalsDuringWatch(d.Watch, 1)
+	sess, done := serve(t, d)
+	defer stop(t, sess, done)
+
+	if !waitFor(3*time.Second, func() bool { return len(f.bells()) == 1 }) {
+		t.Fatalf("the backlog sample rang %v; one message was waiting and it is one bell", f.bells())
+	}
+	if got := f.bells()[0]; got != "🔔 1 new → read" {
+		t.Errorf("the bell said %q; the watcher's arrival and the broker's count "+
+			"are the SAME message, and the seat has one thing to read", got)
+	}
+	// The coalescing window is thirty seconds and nothing else arrives, so a
+	// second bell could only come from a phantom the sample left pending.
+	time.Sleep(300 * time.Millisecond)
+	if got := f.bells(); len(got) != 1 {
+		t.Errorf("rang %v; the sample must leave nothing behind", got)
+	}
+}
+
+// THE LARGER FIGURE WINS, AND IT IS THE BROKER'S. A watcher that counted two
+// while the queue holds five has simply not been listening for the whole of
+// the queue's life, which is the ordinary case at start.
+func TestBell_TheBacklogSampleTakesTheLargerFigure(t *testing.T) {
+	home(t, "provider = none\nwake_window_seconds = 30\n")
+	f := &fake{unread: 5}
+	d := f.deps()
+	d.Watch = arrivalsDuringWatch(d.Watch, 2)
+	sess, done := serve(t, d)
+	defer stop(t, sess, done)
+
+	if !waitFor(3*time.Second, func() bool { return len(f.bells()) == 1 }) {
+		t.Fatalf("rang %v; want one bell", f.bells())
+	}
+	if got := f.bells()[0]; got != "🔔 5 new → read" {
+		t.Errorf("the bell said %q; the broker holds five and the watcher saw two of them", got)
+	}
+}
+
+// arrivalsDuringWatch wraps the fake's Watch so that n arrivals land in the one
+// stretch a case cannot otherwise reach: after the watcher is live and before
+// startBell takes its backlog sample.
+func arrivalsDuringWatch(watch func(string, func(), func()) (func(), error), n int) func(string, func(), func()) (func(), error) {
+	return func(endpoint string, arrived, reconnected func()) (func(), error) {
+		stop, err := watch(endpoint, arrived, reconnected)
+		if err != nil {
+			return stop, err
+		}
+		for i := 0; i < n; i++ {
+			arrived()
+		}
+		return stop, nil
+	}
+}
+
 // THE BREAKER CAPS WAKES AND SAYS SO ONCE. A suppressed wake loses nothing —
 // the messages are in the queue, and the next read finds all of them — which
 // is what makes a cap safe to have; a breaker that shouted on every

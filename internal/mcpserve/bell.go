@@ -105,6 +105,14 @@ func (b *bell) arrived() {
 // without the window: there is nothing to coalesce with, and a seat waiting on
 // a five-second window to be told about mail that arrived an hour ago would be
 // waiting for no reason.
+//
+// THE FIGURE IS SET, NOT ADDED. Unread is the consumer's NumPending, and it
+// already counts every arrival the watcher has counted since the last ring:
+// the two are views of ONE queue, not two sources of messages. Adding them
+// rang for mail that does not exist — one message landing between the watcher
+// going live and this sample rang the pane for two — so the broker's figure
+// REPLACES the tally, and the larger of the two is kept: what the broker holds
+// is the truth, and the watcher's count is only ever a lower bound on it.
 func (b *bell) backlog() {
 	if b.s.d.Unread == nil {
 		return
@@ -118,7 +126,9 @@ func (b *bell) backlog() {
 		b.mu.Unlock()
 		return
 	}
-	b.pending += n
+	if n > b.pending {
+		b.pending = n
+	}
 	if b.timer != nil {
 		b.timer.Stop()
 		b.timer = nil
