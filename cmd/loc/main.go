@@ -300,9 +300,36 @@ func send(p provider.Provider, w io.Writer, to, body string) error {
 	if err := p.SendQueue(to, env); err != nil {
 		return err
 	}
-	loc.Nudge(to, "[LOC] 1 new → loc read")
+	// ONE MESSAGE, ONE BELL, AND THE RECIPIENT DECIDES WHOSE.
+	//
+	// A seat that holds a LIVE registration runs its own MCP server, and that
+	// server is a listener on this very queue: the arrival just made will ring
+	// its pane, coalesced across the wake window and answering to the breaker.
+	// Ringing here as well puts TWO lines in one pane for one message, and the
+	// sender's is the one that knows least — it cannot coalesce, it is not
+	// capped, and it does not know what else is waiting. Where there is no
+	// live registration there is nobody to ring but us: a seat whose runtime
+	// has died, or a shell-era seat that never joined the presence model at
+	// all. The line names the CLI verb, because that is what such a seat reads
+	// with; a seat that has a server has the tool instead, and its own server
+	// says so in its own words.
+	if !hasItsOwnBell(to) {
+		loc.Nudge(to, "[LOC] 1 new → loc read")
+	}
 	fmt.Fprintf(w, "sent → queue.%s\n", to)
 	return nil
+}
+
+// hasItsOwnBell reports whether the recipient holds a live presence
+// registration, and therefore has a server of its own to ring for it.
+//
+// AN UNREADABLE ANSWER MEANS NO. Every failure here — no ledger, a registration
+// that will not parse — falls back to ringing, because the two ways of being
+// wrong are not equal: one bell too many is a line somebody scrolls past, and
+// one too few is a message nobody was told about.
+func hasItsOwnBell(endpoint string) bool {
+	reg, err := model.Load(endpoint)
+	return err == nil && reg != nil && reg.Alive()
 }
 
 // topicName is the whole grammar of a topic: lowercase, starting with a
