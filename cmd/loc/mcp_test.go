@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/tdebasis/locutorium/internal/mcpserve"
 )
 
 func TestMCP_TheServerHoldsTheSeatItWasLaunchedFor(t *testing.T) {
@@ -67,6 +69,19 @@ func TestMCP_TheServerHoldsTheSeatItWasLaunchedFor(t *testing.T) {
 	}
 	if got := bells(t, spool)[0]; got != "🔔 1 new → read" {
 		t.Errorf("bell line %q; one arrival is one new message and the line carries no body", got)
+	}
+
+	// ── the read tool: the reminder, then the message ───────────────────────
+	res, err := sess.CallTool(ctx, &mcp.CallToolParams{Name: "read"})
+	if err != nil {
+		t.Fatalf("call the read tool: %v", err)
+	}
+	got := toolText(t, res)
+	if !strings.HasPrefix(got, mcpserve.ReadReminder+"\n\n") {
+		t.Errorf("the read tool's result did not open with the reminder; it began %q", first(got, 120))
+	}
+	if !strings.Contains(got, "the clerk has a question") {
+		t.Errorf("the read tool did not hand over the message; it said %q", first(got, 400))
 	}
 
 	// ── the runtime exits: the seat is free within a second ─────────────────
@@ -120,4 +135,26 @@ func TestMCP_ASecondServerForALiveSeatRefusesAndNamesThePid(t *testing.T) {
 	if !strings.HasPrefix(errOut.String(), "loc: ") {
 		t.Errorf("the refusal is not in this tool's one error shape: %q", errOut.String())
 	}
+}
+
+// toolText is the text a tool result carries.
+func toolText(t *testing.T, res *mcp.CallToolResult) string {
+	t.Helper()
+	var b strings.Builder
+	for _, c := range res.Content {
+		tc, ok := c.(*mcp.TextContent)
+		if !ok {
+			t.Fatalf("a tool returned %T; these tools return text, which is what the CLI prints", c)
+		}
+		b.WriteString(tc.Text)
+	}
+	return b.String()
+}
+
+// first keeps a failure line readable.
+func first(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }

@@ -222,6 +222,7 @@ jobs:
           check cmd/loc                93
           check internal/config        98
           check internal/loc           88
+          check internal/mcpserve      85
           check internal/provider      95
           check internal/provider/nats 94
           exit $fail

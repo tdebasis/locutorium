@@ -235,6 +235,19 @@ func stop(t *testing.T, sess *mcp.ClientSession, done chan error) {
 	}
 }
 
+func toolText(t *testing.T, res *mcp.CallToolResult) string {
+	t.Helper()
+	var b strings.Builder
+	for _, c := range res.Content {
+		tc, ok := c.(*mcp.TextContent)
+		if !ok {
+			t.Fatalf("a tool returned %T, not text", c)
+		}
+		b.WriteString(tc.Text)
+	}
+	return b.String()
+}
+
 // ── registration ────────────────────────────────────────────────────────────
 
 func TestServe_RegistersTheRuntimesPidAndTheRuntimesName(t *testing.T) {
@@ -335,6 +348,82 @@ func TestServe_LeavingIsBounded(t *testing.T) {
 	}
 }
 
+// ── the tools ───────────────────────────────────────────────────────────────
+
+func TestTools_EachIsTheVerbAndTheEventsBracketIt(t *testing.T) {
+	dir := home(t, "provider = none\n")
+	f := &fake{}
+	sess, done := serve(t, f.deps())
+	ctx := context.Background()
+
+	call := func(name string, args map[string]any) *mcp.CallToolResult {
+		res, err := sess.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
+		if err != nil {
+			t.Fatalf("call %s: %v", name, err)
+		}
+		return res
+	}
+
+	if got := toolText(t, call("topics", nil)); got != "(no active topics)\n" {
+		t.Errorf("topics said %q", got)
+	}
+	if got := toolText(t, call("status", nil)); got != "status of \"\"\n" {
+		t.Errorf("bare status said %q", got)
+	}
+	if got := toolText(t, call("status", map[string]any{"endpoint": "workshop.clerk"})); got != "status of \"workshop.clerk\"\n" {
+		t.Errorf("status of an endpoint said %q", got)
+	}
+	if got := toolText(t, call("send", map[string]any{"to": "workshop.clerk", "body": "hello"})); got != "sent → queue.workshop.clerk\n" {
+		t.Errorf("send said %q", got)
+	}
+
+	got := toolText(t, call("read", nil))
+	if !strings.HasPrefix(got, ReadReminder+"\n\n") {
+		t.Fatalf("read did not open with the reminder: %q", got)
+	}
+	if !strings.Contains(got, "first") || !strings.Contains(got, "second") {
+		t.Errorf("read did not hand the messages over: %q", got)
+	}
+	// TWO handed over, and the log says so — the only remaining evidence that
+	// a message was delivered and read, if the agent never prints it.
+	if !strings.Contains(delivery(t, dir), "read "+seat+" handed=2") {
+		t.Errorf("the delivery log did not record what was handed over: %q", delivery(t, dir))
+	}
+
+	events := f.events()
+	for _, want := range []string{
+		"tool.pre " + seat + " topics", "tool.post " + seat + " topics",
+		"tool.pre " + seat + " read", "tool.post " + seat + " read",
+	} {
+		if !strings.Contains(strings.Join(events, "\n"), want) {
+			t.Errorf("no %q in the event stream: %v", want, events)
+		}
+	}
+	stop(t, sess, done)
+}
+
+// A verb's refusal comes back in the shape the command line prints it in, so
+// an agent reading a tool error and an operator reading a terminal are reading
+// the same sentence.
+func TestTools_ARefusalKeepsTheToolsOneErrorShape(t *testing.T) {
+	home(t, "provider = none\n")
+	f := &fake{sendErr: fmt.Errorf("nobody is attending 'workshop.clerk'")}
+	sess, done := serve(t, f.deps())
+
+	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "send", Arguments: map[string]any{"to": "workshop.clerk", "body": "x"}})
+	if err != nil {
+		t.Fatalf("call send: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("a refused send came back as a success")
+	}
+	if got := toolText(t, res); !strings.HasPrefix(got, "loc: ") {
+		t.Errorf("the refusal was %q; the command line prints 'loc: <what>'", got)
+	}
+	stop(t, sess, done)
+}
+
 // ── the bell ────────────────────────────────────────────────────────────────
 
 func TestBell_ArrivalsInsideTheWindowRingOnce(t *testing.T) {
@@ -418,7 +507,63 @@ func TestBell_TheBreakerCapsWakesAndTripsOnce(t *testing.T) {
 	}
 }
 
+// A medium that cannot be watched costs the WAKE and nothing else: the seat
+// stays registered, the tools keep working, and the agent can still read.
+func TestBell_AnUnwatchableMediumStillServesTheSeat(t *testing.T) {
+	home(t, "provider = none\n")
+	f := &fake{}
+	d := f.deps()
+	d.Watch = func(string, func(), func()) (func(), error) { return nil, fmt.Errorf("cannot reach the medium") }
+	sess, done := serve(t, d)
+	defer stop(t, sess, done)
+
+	res, err := sess.CallTool(context.Background(), &mcp.CallToolParams{Name: "topics"})
+	if err != nil {
+		t.Fatalf("call topics on a seat with no listener: %v", err)
+	}
+	if got := toolText(t, res); got != "(no active topics)\n" {
+		t.Errorf("topics said %q", got)
+	}
+}
+
 // ── the small pieces ────────────────────────────────────────────────────────
+
+// queueCount counts what the QUEUE handed over and nothing else, and passes
+// every byte through untouched.
+func TestQueueCount_CountsQueueEnvelopesOnly(t *testing.T) {
+	var out strings.Builder
+	c := &queueCount{w: &out}
+	for _, s := range []string{
+		"── queue.workshop.scribe ──\n",
+		"  `a -> b` one\n",
+		"  `a -> b` two\n",
+		"── topics ──\n",
+		"  `a -> #room` not mail\n",
+	} {
+		if _, err := io.WriteString(c, s); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	if c.n != 2 {
+		t.Errorf("counted %d handed over; two came out of the queue", c.n)
+	}
+	if !strings.HasSuffix(out.String(), "not mail\n") {
+		t.Errorf("the counter changed what was written: %q", out.String())
+	}
+}
+
+// A peek's trailer stands where the rooms would be, and begins with the same
+// heading — so it closes the queue exactly as the plain heading does.
+func TestQueueCount_ThePeekTrailerClosesTheQueue(t *testing.T) {
+	c := &queueCount{w: io.Discard}
+	_, _ = io.WriteString(c, "── queue.workshop.scribe ──\n")
+	_, _ = io.WriteString(c, "  `a -> b` one\n")
+	_, _ = io.WriteString(c, "── topics ── (not shown: --peek never consumes)\n")
+	_, _ = io.WriteString(c, "trailing noise\n")
+	if c.n != 1 {
+		t.Errorf("counted %d; one was handed over", c.n)
+	}
+}
 
 func TestConfigInt_ATypoIsNotNoCapAtAll(t *testing.T) {
 	home(t, "provider = none\nwake_breaker_per_minute = six\nwake_breaker_per_hour = 0\n")
