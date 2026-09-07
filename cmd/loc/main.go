@@ -224,7 +224,8 @@ func send(p provider.Provider, w io.Writer, to, body string) error {
 	// and in the inner parlor there are no mailboxes for agents that are not
 	// running. On a medium without presence the file is still the only answer
 	// available, and stays the one used.
-	if pr, ok := p.(provider.Presence); ok {
+	pr, hasPresence := p.(provider.Presence)
+	if hasPresence {
 		if err := model.ValidEndpoint(to); err != nil {
 			return err
 		}
@@ -244,7 +245,18 @@ func send(p provider.Provider, w io.Writer, to, body string) error {
 	// KNOWS nobody is attending, accepting the message would manufacture a
 	// false belief in the sender. Durable store-and-forward semantics belong
 	// to a different channel, not to send.
-	if config.Get("send_requires_attendance", "no") == "yes" && !loc.ListenerAlive(to) {
+	//
+	// THE GATE READS NO PIDFILE ON A PRESENCE MEDIUM. ListenerAlive answers out
+	// of a listener pidfile, which only a deployment whose agents run a shell
+	// listener ever writes. An agent that joined through the presence model
+	// (`subscribe`) runs no such listener and leaves no such file, so there the
+	// pidfile's silence says nothing about attendance — it is silent for every
+	// peer, present or absent. On that medium attendance IS the live queue
+	// (PRESENCE.md §Queue lifetime; §Inner and outer parlors), so the question
+	// this key asks has already been asked and answered a few lines up by the
+	// QueueExists refusal, from a live fact instead of a file. Without presence
+	// the pidfile is still the only answer available, and stays the one used.
+	if !hasPresence && config.Get("send_requires_attendance", "no") == "yes" && !loc.ListenerAlive(to) {
 		return fmt.Errorf("not attending: '%s' has no live listener "+
 			"(say-semantics: a send expects an attending peer; "+
 			"use a durable channel for messages meant to wait)", to)
