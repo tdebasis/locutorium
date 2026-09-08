@@ -13,10 +13,11 @@ VERSION := $(shell tr -d '[:space:]' < VERSION)
 GO      ?= go
 BIN     := build/bin/loc
 
-.PHONY: build test clean
+.PHONY: build test clean clean-check
 
-# Default: the thing this file is for.
-build:
+# Default: the thing this file is for. It refuses to build a tree that carries
+# this machine's private vocabulary — see clean-check.
+build: clean-check
 	$(GO) build -trimpath -ldflags "-X main.buildVersion=$(VERSION)" -o $(BIN) ./cmd/loc
 
 # The Go unit tests, and the shell tests that stand beside them. The
@@ -32,3 +33,16 @@ test:
 
 clean:
 	rm -rf build
+
+# THE PRIVATE-VOCABULARY CHECK RUNS WHERE THE LIST LIVES, AND NOWHERE ELSE.
+# The forbidden list is deployment data: a maintainer's names, paths and
+# deployment words, kept under $LOC_HOME and never in the tree. If it is
+# present on this machine, a build runs the check and a hit fails the build. If
+# it is absent (CI, a contributor's clone), this is one line and the build goes
+# on. The check's exit code is passed through on purpose: an `|| true` here
+# would swallow a real hit along with the absent-file case, and a guard that
+# cannot fail is decoration.
+clean-check:
+	@f="$${LOC_FORBIDDEN_FILE:-$${LOC_HOME:-$$HOME/.locutorium}/forbidden}"; \
+	if [ -r "$$f" ]; then bash conformance/check-clean.sh; \
+	else echo "check-clean: no private list on this machine; skipped"; fi
