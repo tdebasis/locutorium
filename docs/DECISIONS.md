@@ -16,7 +16,8 @@ Some calls that produced this record were about a deployment's own courier, not 
 
 **Context:** A wake may spawn a courier to carry a spooled body onto an endpoint's surface (see
 *Glossary: courier*). Two shapes qualify, and they are not interchangeable: a **mechanical** courier
-that writes onto that surface — a terminal, typically — and never touches the bus; and an
+that writes onto that surface — a terminal, typically — and never touches the bus itself (the
+listener already did, before the courier ever runs; see entry 2); and an
 **agent-native** courier that resolves the destination through its own runtime's inter-instance
 addressing, where that runtime happens to offer one. Only some runtimes offer the second kind. *(One
 reference implementation of the agent-native shape, built against Claude Code's own session-addressing
@@ -48,13 +49,15 @@ that have both options, which is worth revisiting if they ever are.
 
 ---
 
-## 2. A mechanical courier never touches the bus
+## 2. The bus is touched by the listener, never by a mechanical courier
 
-**Context:** By the time any courier runs, the wake hook has already drained the queue into a spool
-(*Glossary: wake*). A courier whose only job is presenting an already-drained spool has no reason to
-hold a bus credential at all — and the risk isn't hypothetical: an agent-native courier that *could*
-read live content once reasoned about it and acted on its own judgment, when its only job was to place
-it.
+**Context:** A message is posted to the bus by its sender, and pulled off the bus by the endpoint's
+listener, in the ordinary way — none of that changes here. What's new is only what happens after: by
+the time any courier runs, the listener has already drained the queue into a spool and the message has
+already left the bus (*Glossary: wake*). A courier whose only job is presenting an already-drained
+spool has no reason to hold a bus credential at all — and the risk isn't hypothetical: an agent-native
+courier that *could* read live content once reasoned about it and acted on its own judgment, when its
+only job was to place it.
 
 **Decision:** The reference mechanical courier holds no bus credential and never calls `loc`. It
 writes exactly the spool the wake hook handed it, and nothing else.
