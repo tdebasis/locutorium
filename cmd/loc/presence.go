@@ -48,6 +48,22 @@ func withPresence(fn func(provider.Presence) error) error {
 // order. Anything it does not know is a usage error rather than a silent
 // ignore: a misspelled flag that changes nothing is the failure a caller does
 // not notice.
+//
+// A FLAG GIVEN WITH AN EMPTY VALUE IS REFUSED, so that absent and empty stay
+// different facts. Every optional field here is stored `omitempty` and read
+// back as a plain string, so `--cwd ""` and no `--cwd` at all are byte
+// identical on the wire and identical after unmarshal. That tolerance is
+// harmless while a field is decorative — an empty cwd only means nobody said
+// where an agent works — and stops being harmless the moment something
+// depends on the value. An empty delivery address is not a missing detail. It
+// is an endpoint nothing can reach, recorded as though it had been configured,
+// and a registration outlives the process that wrote it.
+//
+// The check lives HERE, where a flag name is matched, rather than in a caller
+// scanning args for the flag it cares about. "The string `--address` appears
+// in args" is a different question from "`--address` was given as a flag" —
+// `--cwd --address` satisfies the first and not the second — and a guard that
+// answers the adjacent question fires when it should not.
 func parseFlags(args []string, values map[string]*string, switches map[string]*bool) error {
 	for i := 0; i < len(args); i++ {
 		if p, ok := switches[args[i]]; ok {
@@ -57,6 +73,9 @@ func parseFlags(args []string, values map[string]*string, switches map[string]*b
 		p, ok := values[args[i]]
 		if !ok || i+1 >= len(args) {
 			return errUsage
+		}
+		if args[i+1] == "" {
+			return fmt.Errorf("%s was given with no value; omit the flag to leave it unset", args[i])
 		}
 		*p = args[i+1]
 		i++
@@ -121,10 +140,10 @@ func subscribeVerb(args []string) error {
 	if err := model.ValidEndpoint(endpoint); err != nil {
 		return err
 	}
-	var pidArg, agentType, version, display, role, cwd string
+	var pidArg, agentType, version, display, role, cwd, address string
 	if err := parseFlags(args[1:], map[string]*string{
 		"--pid": &pidArg, "--type": &agentType, "--version": &version,
-		"--display": &display, "--role": &role, "--cwd": &cwd,
+		"--display": &display, "--role": &role, "--cwd": &cwd, "--address": &address,
 	}, nil); err != nil {
 		return err
 	}
@@ -155,6 +174,7 @@ func subscribeVerb(args []string) error {
 		Agent:      model.Agent{Type: agentType, Version: version},
 		Process:    model.Process{PID: pid, Started: model.StartedAt(pid)},
 		Cwd:        cwd,
+		Address:    address,
 		Registered: model.Now(),
 	}
 	// Either half stands on its own: a deployment may name its agents without
@@ -184,6 +204,7 @@ func emitJoin(pr provider.Presence, reg *model.Registration) error {
 	ev.Process = &reg.Process
 	ev.Display = reg.Display
 	ev.Cwd = reg.Cwd
+	ev.Address = reg.Address
 	return emitEvent(pr, ev)
 }
 

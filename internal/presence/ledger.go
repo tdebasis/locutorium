@@ -31,6 +31,7 @@ type Registration struct {
 	Process    Process  `json:"process"`
 	Display    *Display `json:"display,omitempty"`
 	Cwd        string   `json:"cwd,omitempty"`
+	Address    string   `json:"address,omitempty"`
 	Registered string   `json:"registered"`
 }
 

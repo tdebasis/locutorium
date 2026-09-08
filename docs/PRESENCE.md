@@ -97,7 +97,9 @@ registration, so it is the only one that can notice its absence — and absence 
 A failure to launch is announced, not inferred from silence.
 
 **What a registration carries:** the endpoint identifier · the agent's **type and version** ·
-display information · the process id and its start time · the working directory.
+display information · the process id and its start time · the working directory · optionally, a
+delivery **address** — opaque to the bus, meaningful only to whatever consumes it (see `CLI.md
+§subscribe`).
 
 The type is what lets everything downstream stay uniform: register once with it, and later events
 need not repeat it. It is also where per-agent allowances belong — a consumer that knows an agent
@@ -225,7 +227,8 @@ an agent comes from here or from the registry.
   "agent":   { "type": "acme-cli", "version": "3.2.0" },
   "process": { "pid": 48213, "started": "2026-01-14T09:12:04.006Z" },
   "display": { "name": "The Scribe", "role": "Records" },
-  "cwd": "/…/workspaces/scribe"
+  "cwd": "/…/workspaces/scribe",
+  "address": "workshop:1.2"
 }
 ```
 

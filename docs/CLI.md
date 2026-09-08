@@ -141,7 +141,7 @@ well as the queue.
 
 ```
 loc subscribe <endpoint> --pid <n> --type <t> --version <v>
-              [--display <name>] [--role <role>] [--cwd <dir>]
+              [--display <name>] [--role <role>] [--cwd <dir>] [--address <addr>]
 ```
 
 Registers one agent instance, creates its queue, and publishes `agent.subscribe` — the one heavy
@@ -154,6 +154,25 @@ the process id of the agent that was launched, and `--type` and `--version` say 
 `--display` and `--role` are what a person or a display should call it and what it is there to do;
 both are optional, and a role that was not given is absent from the event rather than empty. `--cwd`
 records where it is working.
+
+`--address` is optional and opaque to the bus: it names wherever a delivery mechanism should reach
+this instance — a terminal target for one that gets typed into, a runtime-specific session identifier
+for one with its own inter-instance push, whatever a given deployment's courier expects. Locutorium
+stores and republishes it unexamined; it does not parse, validate, or act on the value. **A
+runtime-native push address is only as good as the caller's own guarantee that it stays valid** — for
+example, a Claude Code session's display name can drift mid-session if the session was not launched
+with an explicit `-n`/`--name` (measured directly: an unnamed session's name changed with nothing
+restarted). Satisfying that precondition is the deployment's responsibility; locutorium neither
+enforces nor can enforce it.
+
+**Any of these flags is refused if it is given with an empty value** — `--address ""` is an error, and
+so is omitting the flag's value entirely. Omit the flag to leave a field unset. This keeps *absent* and
+*empty* different facts: every optional field is stored `omitempty`, so a flag passed empty and a flag
+never passed produce identical JSON and cannot be told apart afterwards. That costs nothing while a
+field is decorative, and costs a great deal once something depends on it — an empty delivery address is
+not a missing detail but an endpoint nothing can reach, recorded as though it had been configured, in a
+registration that outlives the process which wrote it. Refusing an empty value is not validation of the
+value: the string is still never parsed or interpreted.
 
 An endpoint holds **one instance at a time, and a held one is refused** (non-zero), naming the
 incumbent's process — displacing it is a deliberate act by whoever knows the old process is
