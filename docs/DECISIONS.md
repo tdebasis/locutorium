@@ -10,195 +10,259 @@ Consequences form. New entries append; existing ones are not renumbered once ano
 Some calls that produced this record were about a deployment's own courier, not about the bus itself
 — those are marked, and their reasoning generalizes even where the specific mechanism doesn't.
 
+**An entry records a decision, which is not the same as a description.** Some describe behaviour that is
+settled and not yet built, and they are written in the present tense because that is how a decision
+reads. **The code is the authority on what exists today; this file is the authority on what was decided
+and why.** Where the two disagree, one of them is a bug, and it is worth finding out which.
+
 ---
 
-## 1. Two courier shapes for one wake, not one universal mechanism
+## 1. Why there are two ways to deliver a message, and neither is the default
 
-**Context:** A wake may spawn a courier to carry a body onto an endpoint's surface (see *Glossary:
-courier*). Two shapes qualify, and neither is universal: a **mechanical** courier that writes onto
-that surface directly — a tmux pane, for a runtime hosted in one — and an **agent-native** courier
-that resolves the destination through its own runtime's inter-instance addressing, where that runtime
-happens to offer one. Mechanical assumes the runtime is hosted somewhere with an addressable,
-keystroke-writable surface at all; a headless runtime with no such surface has nothing for it to write
-into. Agent-native assumes the opposite kind of thing — a runtime feature, not a hosting choice — and
-only some runtimes have it. *(One reference implementation of the agent-native shape, built against
-Claude Code's own session-addressing tool, is named `claude-courier` in the deployment that built it —
-a deployment-specific name for one instance of this shape, not a second category.)*
+**Context:** A wake may spawn a courier to carry a body onto an endpoint's surface (*Glossary:
+courier*). There are two ways to do that, and each needs something the other does not.
 
-Writing onto a terminal is exactly the mechanism whose collision risk motivated building a bus at all
+| shape | how it delivers | what it needs |
+|---|---|---|
+| **mechanical** | writes onto the surface directly, such as a tmux pane | a runtime hosted somewhere you can type into |
+| **agent-native** | pushes through the runtime's own instance-to-instance messaging | a runtime that offers such a feature |
+
+A headless runtime gives mechanical nothing to write into. A runtime without instance-to-instance
+messaging gives agent-native nothing to use. Neither shape works everywhere.
+
+Today the imbalance is severe. Every runtime hosted in a terminal supports mechanical delivery. Only
+Claude Code supports agent-native, because it is the only one that lets one instance push into
+another. Gemini CLI, Codex CLI, OpenCode, Aider and Cline have no such feature, and Codex declined the
+request for one. So agent-native is a category with a single member, and entry 4 is about that member.
+
+Mechanical delivery types into a terminal, which is the collision this bus was built to avoid
 (*README: "Keystrokes typed into another agent's window collide with whatever it was typing and submit
-the mixture"*). Attendance and the wake do not fully retire that risk for a courier that still writes
-into the terminal: knowing an endpoint is genuinely *idle*, not merely registered, is a separate and
-still-imperfect problem — this deployment currently has two named, open defects in that liveness check
-(one cannot distinguish a whole delivery from a lost head; the other answers "would this execute?"
-rather than "is the recipient ready?", and is known to pass on a busy surface). A courier that instead
-pushes through the runtime's own addressing never touches the terminal's input stream at all, so it
-isn't exposed to that collision risk regardless of whether the liveness check is right.
+the mixture"*). Registering an endpoint does not solve that, because registered does not mean idle.
+Two defects in the idle check are open today. One cannot tell a complete delivery from one that lost
+its head. The other reports success while the recipient is busy. Agent-native delivery never touches
+the terminal, so neither defect can affect it.
 
-**Decision:** Support both, chosen per endpoint at attendance time — neither is a house-wide default,
-because neither is guaranteed available. Where a runtime is hosted in an addressable surface,
-mechanical needs no cooperation from the runtime itself and is free of any dependency on a language
-model. Where a runtime additionally offers its own inter-instance push, agent-native is preferable
-**there**, and the reason is correctness, not speed: it removes a real, currently-open collision risk
-that mechanical delivery still carries (below). It is measurably slower to run than a bare keystroke
-write, and a runtime that offers neither property has no courier option at all under this design —
-worth stating rather than leaving implicit.
+**Decision:** Support both. Each endpoint states its shape when it registers. There is no house-wide
+default, because neither shape is available everywhere.
 
-**Consequences:** An endpoint's courier shape is a property of how and where its runtime happens to be
-hosted, not a choice made once for the whole house. A house mixing runtimes may find some endpoints
-have only the mechanical option, some have both, and in principle a runtime with neither — a headless
-agent with no addressable surface and no native push — needs a third shape not yet designed here. The
-two liveness defects (below) are what makes agent-native worth choosing over mechanical where both are
-available; closing them would remove that reason for the runtimes that have both.
+Where both work, prefer agent-native. It is slower than typing into a pane, and it is still preferred,
+because it avoids the collision risk above.
+
+**Consequences:** An endpoint's shape follows from where its runtime runs, not from one decision made
+for the whole house. A house running mixed runtimes will have some endpoints with one option and some
+with both. A headless runtime with no native messaging has no option at all, and would need a third
+shape that does not exist yet.
+
+If the two idle-check defects are fixed, the reason to prefer agent-native goes away.
+
+*(`claude-courier` is one deployment's name for its agent-native courier, built on Claude Code's
+session addressing. It is not a third shape.)*
 
 ---
 
-## 2. The bus is touched by the listener, never by a mechanical courier
+## 2. Who fetches the message: the hook, not the courier
 
-**Context:** A message is posted to the bus by its sender, and pulled off the bus by the endpoint's
-listener, in the ordinary way — none of that changes here. What's new is only what happens after: by
-the time any courier runs, the listener has already drained the queue into a spool and the message has
-already left the bus (*Glossary: wake*). A courier whose only job is presenting an already-drained
-spool has no reason to hold a bus credential at all — and the risk isn't hypothetical: an agent-native
-courier that *could* read live content once reasoned about it and acted on its own judgment, when its
-only job was to place it.
+**Context:** A wake ends with a message body appearing on an endpoint's surface, by one of the two
+shapes in entry 1. Which component should hold the bus credential? This has already gone wrong once:
+an agent-native courier that could read live content reasoned about it and acted on its own judgment,
+when its only job was to hand it over.
 
-**Decision:** The reference mechanical courier holds no bus credential and never calls `loc`. It
-writes exactly the spool the wake hook handed it, and nothing else.
+**Decision:** The wake hook fetches the message, with an ordinary read, under the endpoint's own
+identity. Neither courier holds a bus credential or speaks on the bus. Each is handed the body it is
+to place, and places it.
 
-**Consequences:** This shape is structurally non-agentic, so it cannot decide anything about a
-message's content — cheaper and faster than any agent-based courier by construction, and immune to
-the failure mode above by removing the actor that could cause it, not by instructing that actor not
-to.
+**Consequences:**
 
----
-
-## 3. Registered liveness names the runtime's own process, never a proxy for it
-
-**Context:** `PRESENCE.md` already settles this for the general case: a runtime that launches its own
-server is the host "by proxy," and the registered pid must be the thing whose death actually ends the
-session — never a shell or wrapper placed in front of it (*PRESENCE.md: How an agent joins*). The same
-rule binds an agent-native courier's addressing: if the runtime crashes but something in front of it
-survives, the registration must not read as still alive.
-
-**Decision:** No exception for courier-style delivery. The discipline is the general presence rule
-already written, not a separate one invented for this case.
-
-**Consequences:** An implementation that finds it convenient to register something more stable than
-the actual runtime process — a supervising shell, say — is choosing convenience over correctness, and
-`PRESENCE.md`'s own reasoning already explains why that trade is wrong.
+- **Both shapes have the same relationship to the bus.** The registered type only decides how a body
+  reaches a surface. It does not decide how far the courier is trusted.
+- The failure above becomes impossible rather than forbidden. A courier with no credential has nothing
+  to read, so it cannot act on what it read.
+- **The fetch finishes before the relay starts, so a failed relay loses that message.** A read hands a
+  message over once and acknowledges it as it does. The bus cannot return it. This is answered by the
+  message log in entry 10, which is what makes the loss recoverable instead of silent.
+- **Fetch and relay could be made one transaction, but only inside a single process.** An
+  acknowledgement belongs to the connection that fetched the message, so a hook cannot look, exit, and have a later process acknowledge what it saw. The envelope's `id` cannot address a stored message either, because the stream API works by sequence number with no cheap way between the two. What remains possible is one process that fetches, relays and acknowledges only on success, which would put a failed relay back on the queue. That is not built. It needs a new mode on the read verb, and it holds a message in flight for as long as the relay takes, which for an agent-native courier is
+  several seconds and unbounded if it hangs.
 
 ---
 
-## 4. Agent-native addressing needs a stable identity the runtime must be told to keep
+## 3. Which process must be registered as proof an agent is alive
 
-*(Deployment-specific reasoning; generalizes past the one runtime it was measured against.)*
+**Context:** `PRESENCE.md` already answers this in general. Register the process whose death ends the
+session, never a shell or wrapper sitting in front of it (*PRESENCE.md: How an agent joins*).
 
-**Context:** Measured directly against a real runtime's own inter-instance messaging: an instance's
-default display identity is not guaranteed stable across its own lifetime — one drifted mid-session,
-unprompted, with nothing restarted — and even a stable identity isn't safely discoverable by search
-among many unrelated instances on one machine.
+Courier delivery makes the rule matter more. If the agent crashes but the shell around it survives, and
+the shell was the registered process, the endpoint still reads as alive. The courier then delivers into
+something that is not listening.
 
-**Decision:** An agent-native courier addresses an instance only by an identity the deployment fixed
-explicitly at launch — a name given at start, never one assumed or discovered later. This is a
-precondition the deployment must satisfy; the Locutorium documents it without attempting to enforce or
-work around it from outside the runtime.
+**Decision:** Courier delivery gets no exception. The existing presence rule applies unchanged.
 
-**Consequences:** A deployment that launches instances without fixing this identity will see
-agent-native delivery fail unpredictably, in a way that looks like a bus problem but isn't one — worth
-stating plainly rather than left as a silent assumption.
+**Consequences:** Registering a steadier process than the agent itself is the easier thing to do and
+the wrong one. `PRESENCE.md` explains why.
 
 ---
 
-## 5. No silent defaults on how an endpoint is reached
+## 4. Why a Claude Code session must be launched with a name you set
 
-**Context:** An earlier version of this reasoning let a delivery choice fall back to a computed
-default when the deployment didn't specify one. Rejected: an override-if-set pattern still hides an
-incorrect default underneath a misconfiguration, and a broken setup should fail loud rather than limp
-along silently wrong.
+*(This entry is about Claude Code specifically. It is currently the only runtime with
+instance-to-instance messaging, so it is also the only agent-native courier that exists.)*
 
-**Decision:** How an endpoint is reached is required configuration, checked at registration.
-Attendance refuses to start if it's missing — for every endpoint, not only the ones where a default
-would happen to be wrong.
+**Context:** Claude Code gives every session a display name and addresses sessions by it. Left alone,
+it generates that name itself, and the generated name can change while the session runs. One drifted
+mid-session with nothing restarted.
 
-**Consequences:** There is no configuration state where "nobody said, so we guessed" reads as
-success. This matches the house's existing failures-are-announced discipline (*PRESENCE.md: Properties
-this produces*) rather than adding a new exception to it.
+Searching for the right session by name is not safe either. A machine can be running dozens of
+unrelated sessions, and their generated names resemble each other.
 
----
+Claude Code accepts a name at launch, with `-n`. A name set that way does not drift.
 
-## 6. Locutorium ships the mechanism; who wires it up, and how, is the deployment's call
+**Decision:** An agent-native courier addresses a session only by a name the deployment set at launch.
+It never guesses a name and never searches for one. The Locutorium states this requirement but cannot
+enforce it, because the name belongs to the runtime.
 
-**Context:** Whether attendance is registered by the runtime itself, by whatever process launched it,
-or by neither until something else notices — these are legitimate, different answers for different
-deployments, and none of them changes anything about the bus itself.
+**Consequences:** A deployment that launches sessions without setting names will see delivery fail in
+ways that look like bus faults and are not.
 
-**Decision:** The Locutorium ships the primitives — register, watch, send, read — and, at most, one
-labeled reference implementation per delivery shape. It does not decide who calls the primitives or
-when. That decision, and its correctness, belongs entirely to whatever runs on top.
-
-**Consequences:** A deployment that has the runtime register itself carries a different risk profile
-(readiness — registering before the instance can actually be reached) than one where a launcher
-registers on the instance's behalf (a readiness race of its own, mitigated by waiting for a liveness
-signal before registering). Both are valid; the choice, and the mitigation, is the deployment's to
-make, not the bus's.
+The part that outlives Claude Code: address an instance by an identifier you assigned, never by one the
+runtime generated for display. Display names are for humans, and humans do not mind if they change.
 
 ---
 
-## 7. A resumable identity beats both a cold restart and a permanently-running process, where the runtime supports it
+## 5. Why every endpoint must state how it is reached, with no default
 
-*(Deployment-specific reasoning, about an agent-native courier's own process shape.)*
+**Context:** An earlier draft let an endpoint's delivery shape fall back to a computed default when the
+deployment did not say. That was rejected. A default also applies when the configuration is simply
+wrong, so a misconfigured endpoint keeps running the wrong way instead of stopping.
 
-**Context:** Three shapes were possible for an agent-native courier: restart cold for every message,
-run one instance continuously, or reuse one fixed identity across calls without keeping it running
-between them. Continuous was ruled out before any measurement, not by it: it needs its own supervisor,
-its own liveness check layered on top of the one this whole design already answers for endpoints, and
-it holds a process slot the whole time for work that is actually rare. That left the other two worth
-measuring: timed, repeated round trips through a real agent-native path showed reusing one fixed
-identity consistently faster than restarting cold, with no overlap between the two clusters across
-repeated runs.
+**Decision:** Every endpoint states how it is reached. Registration checks for it and refuses to start
+without it. This applies to all endpoints, not only the ones where a guess would be wrong.
 
-**Decision:** Where the runtime supports resuming a specific prior instance by a fixed identity, a
-courier should do that — not restart cold each time, not run continuously.
-
-**Consequences:** This gets most of a continuously-running courier's speed advantage without its
-operating cost: it still starts and exits per call, so nothing new has to be supervised or watched for
-liveness. Left open: whether latency degrades as a resumed identity's own history grows across many
-calls over its lifetime — not something a short measurement can show either way, which is what the
-next entry hedges against rather than assumes away.
+**Consequences:** No endpoint can be running on a guess. This matches how the rest of the house handles
+missing information (*PRESENCE.md: Properties this produces*).
 
 ---
 
-## 8. Pin a courier's execution profile explicitly; don't let it inherit a caller's default
+## 6. What Locutorium owns, and what the deployment owns
 
-*(Deployment-specific reasoning, but the discipline generalizes.)*
+**Context:** Attendance can be registered by the runtime itself, by whatever launched it, or by
+something that notices later. These are different answers for different deployments, and none of them
+changes the bus.
 
-**Context:** It's tempting to justify a cheaper execution tier by also assuming it's the faster one.
-Checked directly against a costlier alternative on the same task: the comparison came back
-inconclusive at the sample size tested — the cheaper tier was not shown to be faster.
+**Decision:** The Locutorium ships the primitives: register, watch, send, read. It also ships at most
+one labelled reference implementation per delivery shape. It does not decide who calls the primitives,
+or when. That belongs to whatever runs on top.
 
-**Decision:** Choose a courier's execution tier for what it actually costs to run continuously, state
-it as that, and pin it explicitly on every invocation — never left to inherit whatever the calling
-account or environment currently defaults to.
-
-**Consequences:** An unstated inherited default means a future account-wide change silently changes
-what every courier invocation costs, with nothing in this design noticing. An explicit pin means it
-can't.
+**Consequences:** Each choice carries its own risk. A runtime that registers itself may register before
+it can actually be reached. A launcher registering on the runtime's behalf has the same race, and can
+wait for a liveness signal first. Both are valid. Picking one, and handling its race, is the
+deployment's job.
 
 ---
 
-## 9. Bound a resumed identity's growth; don't restrict how it authenticates to do it
+## 7. Why a courier resumes one session instead of restarting or running forever
 
-*(Deployment-specific reasoning, but the ordering of concerns generalizes.)*
+*(About Claude Code, for the reason given in entry 4.)*
 
-**Context:** One considered way to keep a resumed courier identity's context from growing without
-limit turned out to restrict how it could authenticate at all — a real conflict for any deployment
-that can't use that authentication mode.
+**Context:** A courier could work three ways: start a fresh session for every message, keep one session
+running all the time, or reuse one session by a fixed id without keeping it running in between.
 
-**Decision:** Bound a resumed identity's context growth through whatever mechanism the runtime offers
-for that specifically — a compaction floor, a rotation policy. Treat any approach that also narrows
-authentication as disqualified, regardless of how well it bounds context.
+The always-running option was dropped without measuring it. It needs a supervisor and a liveness check
+of its own, on top of the liveness this design already tracks for endpoints, and it holds a process open
+continuously for work that happens rarely.
+
+The other two were measured. Repeated timed round trips showed that resuming a session by a fixed id is
+consistently faster than starting a fresh one, with no overlap between the two sets of results.
+
+**Decision:** Resume a session by a fixed id (`claude --resume <id>`). Do not start cold each time. Do
+not run continuously.
+
+**Consequences:** This gets most of the speed of an always-running courier with nothing new to
+supervise, because the courier still exits after each call.
+
+Open: whether a resumed session slows down as its own history grows over many calls. A short measurement
+cannot show this either way. Entry 9 bounds that growth rather than assuming it is harmless.
+
+---
+
+## 8. Why a courier's model and settings are pinned on every call
+
+*(About Claude Code, for the reason given in entry 4.)*
+
+**Context:** A cheaper model is easy to justify twice over, by also assuming it is the faster one. That
+was checked against a more expensive model on the same task. At the sample size tested the result was
+inconclusive: the cheaper model was not shown to be faster.
+
+**Decision:** Pick the courier's model on cost, say that cost is the reason, and pass it explicitly on
+every call (`--model`). Do not let it inherit whatever the account or environment currently defaults to.
+
+**Consequences:** An inherited default means a later change to the account changes what every courier
+call costs, and nothing here would notice. An explicit setting cannot drift that way.
+
+---
+
+## 9. How a courier's context is bounded without limiting how it signs in
+
+*(About Claude Code, for the reason given in entry 4.)*
+
+**Context:** One way to stop a resumed session's context from growing forever was `--bare`. It also
+changes how the session signs in: under `--bare` only an API key is read, and the subscription login
+this deployment runs on is ignored. It was therefore unusable, whatever it did for context.
+
+**Decision:** Bound the context with a mechanism meant for that alone, such as a compaction floor
+(`--autocompact`). Reject any approach that also narrows authentication, however well it bounds
+context.
 
 **Consequences:** Which mechanism exists, and what it's called, is deployment-specific by nature. What
 generalizes is the ordering: satisfy authentication first, bound context second, and never let the
 second override the first.
+
+---
+
+## 10. The message log, and what it can and cannot recover
+
+**Context:** Entry 2 leaves a hole. The fetch acknowledges the message, the relay may then fail, and the
+message is gone from the bus. Nothing on the bus can bring it back.
+
+**Decision:** Every send is written to a log the moment it is sent, before delivery is attempted. Each
+relay appends a second line saying whether it arrived.
+
+One file per day, append-only, JSON lines. Every line carries the same six fields:
+
+```json
+{"uid":"01J...","status":"sent","ts":"2026-09-08T17:02:11Z","from":"conclave.steward","to":"conclave.forge","body":"..."}
+{"uid":"01J...","status":"delivered","ts":"2026-09-08T17:02:19Z","from":"conclave.steward","to":"conclave.forge","body":"..."}
+```
+
+`status` is `sent`, `delivered` or `failed`. The lines for one message share its `uid`.
+
+Every line repeats `from`, `to` and `body` so that any single line means something on its own: an agent
+searching the day's file for its own name gets whole records back, not fragments it has to join. The
+body is stored twice per message, which is a cost worth paying at this volume.
+
+One file, shared by everyone, rather than one per sender or one per recipient. An endpoint finds its own
+traffic with a single search of the day's file. The cost is that many processes append to the same file,
+which makes one rule load-bearing: **write each line with a single write call.** A regular file opened
+for appending serialises one write against other writers, so a line built in memory and written once
+cannot be interleaved, whatever its size. A line written in two calls can be.
+
+That is the whole design for now, and it is meant to be replaced when it stops being enough.
+
+**Consequences:**
+
+- A message dropped by a failed relay is still in the log, with its body, and can be read.
+- **The log restores content, not delivery.** The message is off the bus for good. Re-sending what the
+  log holds creates a new message with a new `uid`.
+- Both lines are needed. A `sent` line with no matching `delivered` is how a lost message is found; the
+  send line alone says what was sent and never what went missing.
+- **The log holds message bodies in plain text on disk.** It lives under `$LOC_HOME`, with the rest of
+  a deployment's run-time state, and never inside a source tree. File permissions are the only thing
+  guarding it. The writer creates the directory `0700` and the file `0600`, which is what the delivery
+  log beside it already does.
+
+  Two limits, because a permission is easy to state and easy to over-read. A mode is applied **only when
+  a file is created**: a log file that already exists with looser permissions keeps them, and nothing
+  here re-asserts it. And permissions on one file are not a policy — anyone who puts sensitive traffic
+  on the bus should decide what `$LOC_HOME` itself needs.
+- **Keeping it out of a source tree is environmental, so a repository should enforce it too.** This one
+  ignores `run/` outright rather than by file pattern. A pattern that matched only `*.log` would cover
+  the delivery log and miss the message log, which is the file that actually holds bodies.
