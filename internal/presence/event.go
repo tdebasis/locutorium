@@ -92,6 +92,7 @@ type Event struct {
 	Process  *Process `json:"process,omitempty"`
 	Display  *Display `json:"display,omitempty"`
 	Cwd      string   `json:"cwd,omitempty"`
+	Address  string   `json:"address,omitempty"`
 	Reason   string   `json:"reason,omitempty"`
 	Tool     string   `json:"tool,omitempty"`
 	Refs     []string `json:"refs,omitempty"`

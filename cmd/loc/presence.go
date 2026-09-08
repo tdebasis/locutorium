@@ -121,10 +121,10 @@ func subscribeVerb(args []string) error {
 	if err := model.ValidEndpoint(endpoint); err != nil {
 		return err
 	}
-	var pidArg, agentType, version, display, role, cwd string
+	var pidArg, agentType, version, display, role, cwd, address string
 	if err := parseFlags(args[1:], map[string]*string{
 		"--pid": &pidArg, "--type": &agentType, "--version": &version,
-		"--display": &display, "--role": &role, "--cwd": &cwd,
+		"--display": &display, "--role": &role, "--cwd": &cwd, "--address": &address,
 	}, nil); err != nil {
 		return err
 	}
@@ -155,6 +155,7 @@ func subscribeVerb(args []string) error {
 		Agent:      model.Agent{Type: agentType, Version: version},
 		Process:    model.Process{PID: pid, Started: model.StartedAt(pid)},
 		Cwd:        cwd,
+		Address:    address,
 		Registered: model.Now(),
 	}
 	// Either half stands on its own: a deployment may name its agents without
@@ -184,6 +185,7 @@ func emitJoin(pr provider.Presence, reg *model.Registration) error {
 	ev.Process = &reg.Process
 	ev.Display = reg.Display
 	ev.Cwd = reg.Cwd
+	ev.Address = reg.Address
 	return emitEvent(pr, ev)
 }
 

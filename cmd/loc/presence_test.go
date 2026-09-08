@@ -456,7 +456,7 @@ func TestPresence_Subscribe_PublishesFullyQualifiedJoinEvent(t *testing.T) {
 	sub := p.witness(t, "presence.workshop")
 
 	exec("subscribe", e2, "--pid", pidStr(pid), "--type", "acme-cli", "--version", "3.2.0",
-		"--display", "The Clerk", "--cwd", "/workspaces/clerk")
+		"--display", "The Clerk", "--cwd", "/workspaces/clerk", "--address", "workshop:1.2")
 
 	events := collect(sub, 2*time.Second)
 	m, ok := findEvent(t, events, "agent.subscribe")
@@ -489,6 +489,9 @@ func TestPresence_Subscribe_PublishesFullyQualifiedJoinEvent(t *testing.T) {
 	}
 	if m["cwd"] != "/workspaces/clerk" {
 		t.Errorf("join event cwd = %v, want the value passed %q", m["cwd"], "/workspaces/clerk")
+	}
+	if m["address"] != "workshop:1.2" {
+		t.Errorf("join event address = %v, want the value passed %q", m["address"], "workshop:1.2")
 	}
 }
 

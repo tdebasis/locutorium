@@ -141,7 +141,7 @@ well as the queue.
 
 ```
 loc subscribe <endpoint> --pid <n> --type <t> --version <v>
-              [--display <name>] [--role <role>] [--cwd <dir>]
+              [--display <name>] [--role <role>] [--cwd <dir>] [--address <addr>]
 ```
 
 Registers one agent instance, creates its queue, and publishes `agent.subscribe` — the one heavy
@@ -154,6 +154,16 @@ the process id of the agent that was launched, and `--type` and `--version` say 
 `--display` and `--role` are what a person or a display should call it and what it is there to do;
 both are optional, and a role that was not given is absent from the event rather than empty. `--cwd`
 records where it is working.
+
+`--address` is optional and opaque to the bus: it names wherever a delivery mechanism should reach
+this instance — a terminal target for one that gets typed into, a runtime-specific session identifier
+for one with its own inter-instance push, whatever a given deployment's courier expects. Locutorium
+stores and republishes it unexamined; it does not parse, validate, or act on the value. **A
+runtime-native push address is only as good as the caller's own guarantee that it stays valid** — for
+example, a Claude Code session's display name can drift mid-session if the session was not launched
+with an explicit `-n`/`--name` (measured directly: an unnamed session's name changed with nothing
+restarted). Satisfying that precondition is the deployment's responsibility; locutorium neither
+enforces nor can enforce it.
 
 An endpoint holds **one instance at a time, and a held one is refused** (non-zero), naming the
 incumbent's process — displacing it is a deliberate act by whoever knows the old process is
