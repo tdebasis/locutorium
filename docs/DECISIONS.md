@@ -14,15 +14,16 @@ Some calls that produced this record were about a deployment's own courier, not 
 
 ## 1. Two courier shapes for one wake, not one universal mechanism
 
-**Context:** A wake may spawn a courier to carry a spooled body onto an endpoint's surface (see
-*Glossary: courier*). Two shapes qualify, and they are not interchangeable: a **mechanical** courier
-that writes onto that surface — a terminal, typically — and never touches the bus itself (the
-listener already did, before the courier ever runs; see entry 2); and an
-**agent-native** courier that resolves the destination through its own runtime's inter-instance
-addressing, where that runtime happens to offer one. Only some runtimes offer the second kind. *(One
-reference implementation of the agent-native shape, built against Claude Code's own session-addressing
-tool, is named `claude-courier` in the deployment that built it — a deployment-specific name for one
-instance of this shape, not a second category.)*
+**Context:** A wake may spawn a courier to carry a body onto an endpoint's surface (see *Glossary:
+courier*). Two shapes qualify, and neither is universal: a **mechanical** courier that writes onto
+that surface directly — a tmux pane, for a runtime hosted in one — and an **agent-native** courier
+that resolves the destination through its own runtime's inter-instance addressing, where that runtime
+happens to offer one. Mechanical assumes the runtime is hosted somewhere with an addressable,
+keystroke-writable surface at all; a headless runtime with no such surface has nothing for it to write
+into. Agent-native assumes the opposite kind of thing — a runtime feature, not a hosting choice — and
+only some runtimes have it. *(One reference implementation of the agent-native shape, built against
+Claude Code's own session-addressing tool, is named `claude-courier` in the deployment that built it —
+a deployment-specific name for one instance of this shape, not a second category.)*
 
 Writing onto a terminal is exactly the mechanism whose collision risk motivated building a bus at all
 (*README: "Keystrokes typed into another agent's window collide with whatever it was typing and submit
@@ -34,18 +35,21 @@ rather than "is the recipient ready?", and is known to pass on a busy surface). 
 pushes through the runtime's own addressing never touches the terminal's input stream at all, so it
 isn't exposed to that collision risk regardless of whether the liveness check is right.
 
-**Decision:** Support both, chosen per endpoint at attendance time. Mechanical is the default — it
-works for any endpoint's runtime, is free of any dependency on a language model, and is faster in
-absolute terms since nothing has to start. Agent-native is preferred **only** where the runtime offers
-it, and the reason is correctness, not speed: it removes a real, currently-open collision risk that
-mechanical delivery still carries. It is measurably slower to run than a bare keystroke write.
+**Decision:** Support both, chosen per endpoint at attendance time — neither is a house-wide default,
+because neither is guaranteed available. Where a runtime is hosted in an addressable surface,
+mechanical needs no cooperation from the runtime itself and is free of any dependency on a language
+model. Where a runtime additionally offers its own inter-instance push, agent-native is preferable
+**there**, and the reason is correctness, not speed: it removes a real, currently-open collision risk
+that mechanical delivery still carries (below). It is measurably slower to run than a bare keystroke
+write, and a runtime that offers neither property has no courier option at all under this design —
+worth stating rather than leaving implicit.
 
-**Consequences:** An endpoint's courier shape is a property of that endpoint's own runtime and of
-whether the open liveness defects above are trusted for it — not a house-wide default, and not chosen
-for latency in either direction. A house mixing runtimes runs both shapes side by side, deliberately,
-rather than discovering the mismatch only when a runtime without agent-native addressing needs one —
-and closing the two liveness defects would remove agent-native's only justification for the runtimes
-that have both options, which is worth revisiting if they ever are.
+**Consequences:** An endpoint's courier shape is a property of how and where its runtime happens to be
+hosted, not a choice made once for the whole house. A house mixing runtimes may find some endpoints
+have only the mechanical option, some have both, and in principle a runtime with neither — a headless
+agent with no addressable surface and no native push — needs a third shape not yet designed here. The
+two liveness defects (below) are what makes agent-native worth choosing over mechanical where both are
+available; closing them would remove that reason for the runtimes that have both.
 
 ---
 
