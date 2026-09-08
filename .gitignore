@@ -1,5 +1,13 @@
-# Deployment data never lives in this tree — it belongs to $LOC_HOME.
+# Deployment data never lives in this tree — it belongs to $LOC_HOME. That is
+# an expectation about the environment, so the tree enforces it as well: one
+# LOC_HOME unset, or pointed here, would otherwise put run-time state in a
+# repository. `*.log` alone was partial cover — it catches delivery.log and
+# misses the message log's <date>.jsonl, which is the file that holds message
+# bodies in plain text. The whole directory is ignored instead, so `git add -A`
+# cannot stage it; check-clean.sh reads the working tree rather than the index,
+# so anything present is still reported.
 *.log
+/run/
 .DS_Store
 
 # The Go build tree. Binaries are artifacts, not source.
