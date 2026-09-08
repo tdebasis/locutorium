@@ -165,6 +165,15 @@ with an explicit `-n`/`--name` (measured directly: an unnamed session's name cha
 restarted). Satisfying that precondition is the deployment's responsibility; locutorium neither
 enforces nor can enforce it.
 
+**Any of these flags is refused if it is given with an empty value** — `--address ""` is an error, and
+so is omitting the flag's value entirely. Omit the flag to leave a field unset. This keeps *absent* and
+*empty* different facts: every optional field is stored `omitempty`, so a flag passed empty and a flag
+never passed produce identical JSON and cannot be told apart afterwards. That costs nothing while a
+field is decorative, and costs a great deal once something depends on it — an empty delivery address is
+not a missing detail but an endpoint nothing can reach, recorded as though it had been configured, in a
+registration that outlives the process which wrote it. Refusing an empty value is not validation of the
+value: the string is still never parsed or interpreted.
+
 An endpoint holds **one instance at a time, and a held one is refused** (non-zero), naming the
 incumbent's process — displacing it is a deliberate act by whoever knows the old process is
 finished, not a side effect of somebody else subscribing (PRESENCE.md §One agent per endpoint).

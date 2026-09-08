@@ -440,6 +440,59 @@ func TestPresence_Subscribe_RefusesUnderscoreInEndpoint(t *testing.T) {
 		"subscribe", "workshop.scr_ibe", "--pid", pidStr(livePid(t)), "--type", "acme-cli", "--version", "3.2.0")
 }
 
+// A FLAG GIVEN WITH AN EMPTY VALUE IS REFUSED, so that absent and empty stay
+// distinguishable. Optional fields are `omitempty` strings: `--address ""` and
+// no `--address` produce identical JSON and identical values after unmarshal,
+// so without this a consumer cannot tell "this deployment predates addressing"
+// from "somebody set it to nothing". An empty cwd is only a missing detail; an
+// empty delivery address is an endpoint nothing can reach, written down as
+// though it were configured — and a registration outlives the process that
+// wrote it, so a later reader inherits the ambiguity.
+//
+// The last two arms are the control, and without them this test cannot fail in
+// the direction that matters: a parser that refused every flag would pass the
+// refusal arms alone, so "refuses everything" and "refuses correctly" would be
+// the same green.
+func TestPresence_Subscribe_RefusesAFlagGivenWithNoValue(t *testing.T) {
+	p := newPresence(t)
+	p.as(t, "host")
+	pid := pidStr(livePid(t))
+
+	// EACH ARM STANDS ALONE. A refusal arm must not register anything — that
+	// is the whole point — but if the refusal regresses it WILL register, and
+	// then every later arm fails with "endpoint is held" instead of its own
+	// reason. Clearing between arms keeps a failure pointing at the arm that
+	// actually failed. (Observed: without this, reverting the fix produced
+	// three failures, two of them noise.)
+	clear := func() { exec("unsubscribe", e2, "--force") }
+
+	// The field this was found on: an address that cannot be delivered to.
+	checkRefusal(t, "no value|empty|omit the flag",
+		"subscribe", e2, "--pid", pid, "--type", "acme-cli", "--version", "3.2.0", "--address", "")
+	clear()
+
+	// The same defect on a field where it had always been latent and harmless.
+	checkRefusal(t, "no value|empty|omit the flag",
+		"subscribe", e2, "--pid", pid, "--type", "acme-cli", "--version", "3.2.0", "--cwd", "")
+	clear()
+
+	// CONTROL 1: a real value is still accepted and still lands.
+	if code, _, errOut := exec("subscribe", e2, "--pid", pid, "--type", "acme-cli",
+		"--version", "3.2.0", "--address", "workshop:1.2"); code != 0 {
+		t.Fatalf("a non-empty --address must still be accepted; got exit=%d stderr=%q", code, errOut)
+	}
+	exec("unsubscribe", e2, "--force")
+
+	// CONTROL 2: OMITTING the flag is not the same as passing it empty, and
+	// must stay legal. This is the arm that would catch a fix which refused
+	// absence along with emptiness.
+	if code, _, errOut := exec("subscribe", e2, "--pid", pid, "--type", "acme-cli",
+		"--version", "3.2.0"); code != 0 {
+		t.Fatalf("omitting --address must remain legal; got exit=%d stderr=%q", code, errOut)
+	}
+	exec("unsubscribe", e2, "--force")
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // 2. subscribe registers, creates the queue, publishes agent.subscribe
 //    PRESENCE.md §How an agent joins; §Command-line operations → subscribe;
