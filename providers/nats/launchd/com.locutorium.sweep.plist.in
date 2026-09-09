@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.locutorium.sweep</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@LOC_BIN@</string>
+    <string>sweep</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>LOC_HOME</key>
+    <string>@LOC_HOME@</string>
+    <key>LOC_IDENTITY</key>
+    <string>supervisor</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>@SWEEP_INTERVAL@</integer>
+  <key>StandardOutPath</key>
+  <string>@LOC_HOME@/sweep.log</string>
+  <key>StandardErrorPath</key>
+  <string>@LOC_HOME@/sweep.log</string>
+</dict>
+</plist>

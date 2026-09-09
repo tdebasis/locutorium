@@ -6,7 +6,8 @@
 # Writes to $LOC_HOME (default ~/.locutorium):
 #   config             flat key=value (provider, url, window)
 #   endpoints          the deployment's registry, one name per line
-#   creds/<name>       one credential file per endpoint + admin + watch (0600)
+#   creds/<name>       one credential file per endpoint, plus admin, watch and
+#                      supervisor (0600)
 #   nats-server.conf   loopback listener, jetstream, per-user permissions
 #
 # Idempotence: refuses to overwrite an existing deployment unless --force.
@@ -45,7 +46,7 @@ printf '%s\n' "${ENDPOINTS[@]}" > "$LOC_HOME/endpoints"
 
 # --- users -------------------------------------------------------------------
 users_block=""
-for name in "${ENDPOINTS[@]}" admin watch; do
+for name in "${ENDPOINTS[@]}" admin watch supervisor; do
   # THE TWO SPELLINGS OF ONE ENDPOINT. A subject may carry a dot; a JetStream
   # object's name may not. So a namespaced endpoint <instance>.<agent> is a
   # subject as written and a stream, consumer and ack subject with the dot
@@ -71,6 +72,35 @@ for name in "${ENDPOINTS[@]}" admin watch; do
   case "$name" in
     admin)
       users_block+="      { user: admin, password: \"$hash\" }"$'\n' ;;
+    supervisor)
+      # THE SWEEP'S IDENTITY. This identity reaps and remakes ANY seat's queue,
+      # and it may not touch the topic store. `loc sweep` runs on a timer and
+      # clears the registration of a seat whose process is gone; clearing one
+      # means deleting that seat's queue. A seat may delete only its own queue,
+      # so the sweep cannot run as a seat. The admin has no permissions block at
+      # all, so running the sweep as the admin would give a permanent timer the
+      # whole broker.
+      #
+      # THE DENY LINES EXIST BECAUSE A NATS WILDCARD IS PER TOKEN. A stream name
+      # such as QUEUE_workshop_scribe is ONE token, so there is no way to write
+      # "names beginning with QUEUE_". The narrowest allow NATS can express is
+      # CREATE and DELETE on any stream name, and the deny list then subtracts
+      # the one stream that is not a seat's queue. In NATS a deny beats an
+      # allow, so this subtraction holds however the allow list is later widened.
+      #
+      # UPDATE and PURGE are denied outright. The sweep never reshapes a stream
+      # and never empties one, so a grant for either would only be a grant
+      # nobody uses.
+      users_block+="      { user: supervisor, password: \"$hash\", permissions: {
+          publish: { allow: [
+            \"\$JS.API.INFO\",
+            \"\$JS.API.STREAM.NAMES\", \"\$JS.API.STREAM.LIST\",
+            \"\$JS.API.STREAM.INFO.*\", \"\$JS.API.STREAM.CREATE.*\", \"\$JS.API.STREAM.DELETE.*\",
+            \"presence.*\" ],
+            deny: [
+            \"\$JS.API.STREAM.CREATE.TOPICS\", \"\$JS.API.STREAM.DELETE.TOPICS\",
+            \"\$JS.API.STREAM.UPDATE.>\", \"\$JS.API.STREAM.PURGE.>\" ] },
+          subscribe: { allow: [\"_INBOX.>\"] } } }"$'\n' ;;
     watch)
       users_block+="      { user: watch, password: \"$hash\", permissions: {
           subscribe: { allow: [\"queue.>\", \"topic.>\", \"presence.>\"] },
@@ -152,5 +182,6 @@ echo "deployment written to $LOC_HOME for endpoints: ${ENDPOINTS[*]}"
 echo
 echo "next steps:"
 echo "  1. point your nats-server service at $LOC_HOME/nats-server.conf and start it"
-echo "  2. LOC_IDENTITY=admin loc doctor --init     # create streams"
-echo "  3. loc doctor                               # verify as a real endpoint"
+echo "  2. run install.sh. It puts loc on your PATH and installs the sweep timer"
+echo "  3. the timer runs 'loc sweep' as the supervisor identity; set its period with"
+echo "     the sweep_interval key in $LOC_HOME/config (seconds, default 60)"

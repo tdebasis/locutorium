@@ -5,6 +5,7 @@
 #   1. $LIBDIR/loc-<version>-<sha> — the built binary, COPIED out of build/
 #   2. $PREFIX/loc — a symlink to that copy
 #   3. $HOME/Library/LaunchAgents/com.locutorium.nats-server.plist — the server agent
+#   4. $HOME/Library/LaunchAgents/com.locutorium.sweep.plist — the sweep timer
 # It never writes under $LOC_HOME (your deployment: creds, config, endpoints, store),
 # never runs bootstrap for you, and never restarts a running agent unless asked.
 #
@@ -25,7 +26,7 @@ BUILT="$ROOT/build/bin/loc"
 LOC_HOME="${LOC_HOME:-$HOME/.locutorium}"
 PREFIX="" DRY=no UNINSTALL=no NO_SERVICE=no RESTART=no
 
-usage() { sed -n '2,18p' "${BASH_SOURCE[0]}"; exit 2; }
+usage() { sed -n '2,19p' "${BASH_SOURCE[0]}"; exit 2; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --prefix) PREFIX="${2:-}"; [[ -n "$PREFIX" ]] || usage; shift 2 ;;
@@ -33,7 +34,7 @@ while [[ $# -gt 0 ]]; do
     --uninstall) UNINSTALL=yes; shift ;;
     --no-service) NO_SERVICE=yes; shift ;;
     --restart-service) RESTART=yes; shift ;;
-    -h|--help) sed -n '2,18p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help) sed -n '2,19p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "install: unknown argument: $1" >&2; usage ;;
   esac
 done
@@ -135,6 +136,7 @@ if [[ "$UNINSTALL" == yes ]]; then
   if [[ "$NO_SERVICE" == no ]]; then
     # shellcheck source=providers/nats/service.sh
     source "$ROOT/providers/nats/service.sh"
+    # svc_uninstall removes both agents: the medium and the sweep timer.
     if [[ "$DRY" == yes ]]; then svc_uninstall --dry-run; else svc_uninstall; fi
   fi
   echo "note: $LOC_HOME was not touched — it holds your credentials, config and store."
@@ -166,8 +168,17 @@ case ":$PATH:" in *":$PREFIX:"*) ;; *) echo "           $PREFIX is not on your P
 if [[ "$NO_SERVICE" == no ]]; then
   # shellcheck source=providers/nats/service.sh
   source "$ROOT/providers/nats/service.sh"
+  # The timer's plist names the STAMPED COPY, not the $PREFIX/loc symlink, for
+  # the reason service.sh gives at svc_assert_pinned: what boots must not be
+  # repointable without editing the boot configuration.
+  LOC_BIN="$TARGET"
   args=(); [[ "$DRY" == yes ]] && args+=(--dry-run); [[ "$RESTART" == yes ]] && args+=(--restart-service)
   out="$(svc_install "${args[@]+"${args[@]}"}")" || exit $?
+  printf '%s\n' "$out"
+  case "$out" in UNCHANGED*|SKIPPED*) ;; *) changed=$((changed+1)) ;; esac
+  # The same flags reach both agents, so --no-service skips both and --dry-run
+  # writes neither.
+  out="$(svc_sweep_install "${args[@]+"${args[@]}"}")" || exit $?
   printf '%s\n' "$out"
   case "$out" in UNCHANGED*|SKIPPED*) ;; *) changed=$((changed+1)) ;; esac
 fi
@@ -178,6 +189,6 @@ else echo "done: $changed artifact(s) changed."; fi
 if [[ ! -e "$LOC_HOME/nats-server.conf" ]]; then
   echo "next: no deployment at $LOC_HOME yet —"
   echo "      $ROOT/providers/nats/bootstrap.sh <endpoint> [<endpoint> ...]   # then re-run ./install.sh"
-  echo "      LOC_IDENTITY=admin loc doctor --init                          # create the streams"
-  echo "      loc doctor                                                    # verify as an endpoint"
+  echo "      the sweep timer is installed with the medium; it runs 'loc sweep' as the"
+  echo "      supervisor identity, every sweep_interval seconds (config key, default 60)"
 fi

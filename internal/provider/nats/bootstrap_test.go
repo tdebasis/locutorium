@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -293,4 +294,230 @@ func waitForEmpty(t *testing.T, js natsgo.JetStreamContext, stream string) error
 	}
 	return fmt.Errorf("the acknowledgement did not delete the message: %s still holds %d "+
 		"— the seat's ack subject is refused", stream, last)
+}
+
+// ------------------------------------------------------------- the supervisor
+//
+// THE SWEEP'S IDENTITY, GRANTED FROM THE SHIPPED SCRIPT'S OWN OUTPUT.
+//
+// `loc sweep` reaps a dead seat's registration, and reaping it means deleting
+// that seat's queue and remaking it. A seat may delete only its own queue, so
+// the sweep cannot run as a seat. Running it as the admin would hand a
+// permanent timer the whole broker. So the script generates a third identity
+// that may reap any seat's queue and may not touch the topic store or write
+// anybody's mail. These cases boot the generated configuration and read that
+// boundary from both sides.
+
+// acl is one connection made as a generated user, plus the refusals the server
+// reported on it.
+//
+// A JetStream request the deployment refuses is answered with an error line on
+// the CONNECTION and nothing at all on the reply subject, so this handler is
+// the only place a refusal can be read. A core publish is refused the same way.
+type acl struct {
+	nc *natsgo.Conn
+	js natsgo.JetStreamContext
+
+	mu  sync.Mutex
+	bad []string
+}
+
+func (a *acl) refusals() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]string(nil), a.bad...)
+}
+
+// connectAs opens one connection as a generated user, through that user's own
+// credential file. The credential's CONTENT never reaches a log or an error.
+func connectAs(t *testing.T, srv *natsserver.Server, home, user string) *acl {
+	t.Helper()
+	a := &acl{}
+	nc, err := natsgo.Connect(srv.ClientURL(),
+		natsgo.UserInfo(user, credential(t, home, user)),
+		natsgo.Timeout(10*time.Second),
+		natsgo.NoReconnect(),
+		natsgo.ErrorHandler(func(_ *natsgo.Conn, _ *natsgo.Subscription, err error) {
+			if err == nil || !strings.Contains(err.Error(), "Permissions Violation") {
+				return
+			}
+			a.mu.Lock()
+			a.bad = append(a.bad, err.Error())
+			a.mu.Unlock()
+		}),
+	)
+	if err != nil {
+		t.Fatalf("connect as the generated %s: %v", user, err)
+	}
+	t.Cleanup(nc.Close)
+	// THE WAIT IS BOUNDED HERE. A refused request never answers, so the
+	// default wait would turn every refusal in these cases into a two-minute
+	// hang rather than a result.
+	js, err := nc.JetStream(natsgo.MaxWait(3 * time.Second))
+	if err != nil {
+		t.Fatalf("%s jetstream: %v", user, err)
+	}
+	a.nc, a.js = nc, js
+	return a
+}
+
+// sawRefusalOf reports whether the server refused something naming subject,
+// waiting a moment because a refusal arrives asynchronously.
+func sawRefusalOf(a *acl, subject string) bool {
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, line := range a.refusals() {
+			if strings.Contains(line, subject) {
+				return true
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return false
+}
+
+// THE SUPERVISOR REAPS AND REMAKES ANY SEAT'S QUEUE.
+//
+// The queue is made BY THE SEAT, through the shipped grants, so what the
+// supervisor finds is a real seat's queue and not a fixture the admin placed.
+func TestSupervisorCanListAndDeleteAnySeatsQueue(t *testing.T) {
+	const seat = "workshop.scribe"
+	home, srv, _, ajs := bootstrapHouse(t, seat)
+
+	t.Setenv("LOC_HOME", home)
+	t.Setenv("LOC_IDENTITY", seat)
+	p := &Provider{}
+	t.Cleanup(p.Close)
+	if err := p.CreateQueue(seat); err != nil {
+		t.Fatalf("the seat could not create its own queue: %v", err)
+	}
+
+	sup := connectAs(t, srv, home, "supervisor")
+
+	var listed []string
+	found := false
+	for n := range sup.js.StreamNames() {
+		listed = append(listed, n)
+		if n == presence.StreamName(seat) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the supervisor listed %v; %s is not among them (refusals: %v)",
+			listed, presence.StreamName(seat), sup.refusals())
+	}
+
+	if err := sup.js.DeleteStream(presence.StreamName(seat)); err != nil {
+		t.Fatalf("the supervisor could not delete the seat's queue: %v (refusals: %v)", err, sup.refusals())
+	}
+	// Asked through the admin, so the answer does not come from the
+	// connection whose grants are the question.
+	if _, err := ajs.StreamInfo(presence.StreamName(seat)); !errors.Is(err, natsgo.ErrStreamNotFound) {
+		t.Errorf("the admin still finds %s: %v", presence.StreamName(seat), err)
+	}
+
+	if _, err := sup.js.AddStream(queueConfig(seat)); err != nil {
+		t.Fatalf("the supervisor could not remake the seat's queue: %v (refusals: %v)", err, sup.refusals())
+	}
+	if _, err := ajs.StreamInfo(presence.StreamName(seat)); err != nil {
+		t.Errorf("the queue the supervisor remade is not there: %v", err)
+	}
+}
+
+// THE SUPERVISOR MAY NOT TOUCH THE TOPIC STORE.
+//
+// The rooms are the house's history. A timer that reaps mailboxes has no
+// business deleting or standing up the one stream everybody reads from.
+func TestSupervisorCannotTouchTheTopicStore(t *testing.T) {
+	const seat = "workshop.scribe"
+	home, srv, _, ajs := bootstrapHouse(t, seat)
+
+	topics := &natsgo.StreamConfig{
+		Name:     "TOPICS",
+		Subjects: []string{"topic.>"},
+		Storage:  natsgo.MemoryStorage,
+		Replicas: 1,
+	}
+	if _, err := ajs.AddStream(topics); err != nil {
+		t.Fatalf("seed the topic store: %v", err)
+	}
+
+	sup := connectAs(t, srv, home, "supervisor")
+	if err := sup.js.DeleteStream("TOPICS"); err == nil {
+		t.Error("the supervisor deleted the topic store")
+	}
+	if _, err := ajs.StreamInfo("TOPICS"); err != nil {
+		t.Fatalf("the topic store did not survive the supervisor's delete: %v", err)
+	}
+
+	// The same boundary from the other side: it may not stand the store up
+	// either, so a deployment cannot acquire a TOPICS of the timer's shape.
+	if err := ajs.DeleteStream("TOPICS"); err != nil {
+		t.Fatalf("clear the topic store: %v", err)
+	}
+	if _, err := sup.js.AddStream(topics); err == nil {
+		t.Error("the supervisor created the topic store")
+	}
+	if _, err := ajs.StreamInfo("TOPICS"); !errors.Is(err, natsgo.ErrStreamNotFound) {
+		t.Errorf("a TOPICS stream exists after the supervisor's create: %v", err)
+	}
+}
+
+// THE SUPERVISOR MAY NOT WRITE ANYBODY'S MAIL.
+//
+// It reaps a seat's mailbox; it never speaks into one. A publish it makes to a
+// seat's queue subject is refused by the deployment.
+func TestSupervisorCannotPublishMail(t *testing.T) {
+	const seat = "workshop.scribe"
+	home, srv, _, _ := bootstrapHouse(t, seat)
+
+	sup := connectAs(t, srv, home, "supervisor")
+	// The client accepts the publish; the SERVER refuses it, and says so on
+	// the connection rather than in the return of this call.
+	if err := sup.nc.Publish("queue."+seat, []byte(`{"body":"not the supervisor's to send"}`)); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if err := sup.nc.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	if !sawRefusalOf(sup, "queue."+seat) {
+		t.Errorf("the deployment accepted a supervisor's publish to queue.%s; refusals seen: %v",
+			seat, sup.refusals())
+	}
+}
+
+// EVERY GENERATED CREDENTIAL, BY NAME AND BY MODE.
+//
+// The set is asserted in both directions: a name that is missing is a broken
+// deployment, and a name nobody asked for is a credential the operator did not
+// know they had.
+func TestBootstrapGeneratesEveryCredentialAt0600(t *testing.T) {
+	const seat = "workshop.scribe"
+	home, _, _, _ := bootstrapHouse(t, seat)
+
+	want := map[string]bool{seat: false, "admin": false, "watch": false, "supervisor": false}
+	entries, err := os.ReadDir(filepath.Join(home, "creds"))
+	if err != nil {
+		t.Fatalf("read the generated creds directory: %v", err)
+	}
+	for _, e := range entries {
+		if _, ok := want[e.Name()]; !ok {
+			t.Errorf("the script generated a credential nobody asked for: %s", e.Name())
+			continue
+		}
+		want[e.Name()] = true
+		fi, err := e.Info()
+		if err != nil {
+			t.Errorf("stat creds/%s: %v", e.Name(), err)
+			continue
+		}
+		if perm := fi.Mode().Perm(); perm != 0o600 {
+			t.Errorf("creds/%s is mode %04o, want 0600", e.Name(), perm)
+		}
+	}
+	for name, seen := range want {
+		if !seen {
+			t.Errorf("the script generated no credential for %s", name)
+		}
+	}
 }

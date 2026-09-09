@@ -21,7 +21,8 @@ and never a particular deployment.
 | **breaker** | `wake_breaker_per_minute` / `_per_hour`: caps wakes; suppression loses nothing | not knocking sixty times |
 | **registry** | `loc registry`: who is attending, read from the medium's monitor (`monitor_url`) | the attendance book |
 | **watch** | a read-only credential (`creds/watch`) and `loc watch` | the silent observer |
-| **admin** | the credential that creates streams (`loc doctor --init`) | the keeper of the keys |
+| **admin** | the unrestricted credential (`creds/admin`); nothing on a timer ever uses it | the keeper of the keys |
+| **supervisor** | the sweep timer's credential (`creds/supervisor`): it may delete and recreate any endpoint's queue, and may not touch `TOPICS` or write anybody's mail | the one who clears the empty chairs |
 | **identity** | `LOC_IDENTITY` or `hooks/identity`; a refusal, never a guess | knowing who is speaking |
 | **say-semantics** | `send_requires_attendance = yes`: a send to an absent endpoint is refused | you cannot speak to an empty chair |
 | **medium** | the transport a provider drives — v1 is `nats-server` with JetStream on loopback | the air in the room |

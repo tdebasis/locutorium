@@ -6,7 +6,7 @@ inside it, so it answers from anywhere and a copy of it is simply `loc`. The ver
 at link time from `VERSION`, which is why a stale binary is worth rebuilding rather than trusting.
 
 `./install.sh` builds it, copies the stamped binary out of the build tree, links it into your PATH
-as `loc`, and puts the medium (a `nats-server`) under launchd.
+as `loc`, and puts the medium (a `nats-server`) and the sweep timer under launchd.
 
 > A bash implementation lived here until 2026-09-07 and was deleted. It was interim, and keeping two
 > implementations meant maintaining the layer between them — which is where its defects turned out
@@ -29,7 +29,7 @@ cases are skipped by name, each printing its reason and where the property IS pr
 
 ## What `./install.sh` writes — the whole list
 
-Three things:
+Four things:
 
 1. `$LIBDIR/loc-<version>-<sha>` — the built binary, **copied** out of `build/`. `$LIBDIR` is
    `lib/locutorium` beside the prefix. **A copy, not a link into `build/`**: a link would make the
@@ -41,6 +41,10 @@ Three things:
 3. `~/Library/LaunchAgents/com.locutorium.nats-server.plist` — rendered from
    `providers/nats/launchd/com.locutorium.nats-server.plist.in` with the `nats-server` path and
    `$LOC_HOME` resolved on your machine, then loaded with `launchctl bootstrap`.
+4. `~/Library/LaunchAgents/com.locutorium.sweep.plist` — the sweep timer, rendered from
+   `providers/nats/launchd/com.locutorium.sweep.plist.in` with the stamped `loc` path, `$LOC_HOME`
+   and the `sweep_interval` config key, then loaded the same way. It runs `loc sweep` as the
+   `supervisor` identity and logs to `$LOC_HOME/sweep.log`. See `OPERATORS.md` §The sweep timer.
 
 It never writes under `$LOC_HOME` (default `~/.locutorium`: credentials, config, endpoints, store),
 never runs `bootstrap.sh` for you, never edits your shell files (it prints the `PATH` line to add
@@ -52,9 +56,9 @@ if needed), and never restarts a loaded agent unless you pass `--restart-service
 |---|---|
 | `--prefix DIR` | where the `loc` link goes; the stamped copy goes in `lib/locutorium` beside it |
 | `--dry-run` | print NEW / CHANGED / UNCHANGED for each artifact (with a diff for the plist); write and load nothing |
-| `--no-service` | install `loc` only; no LaunchAgent (use when the medium runs elsewhere, or on Linux) |
-| `--restart-service` | the only way a running agent is stopped and started again — needed after the plist changes |
-| `--uninstall` | remove the `loc` link (only if it points at a copy this clone made), the stamped copies, and the agent + plist; never `$LOC_HOME` |
+| `--no-service` | install `loc` only; neither LaunchAgent (use when the medium runs elsewhere, or on Linux) |
+| `--restart-service` | the only way a running agent is stopped and started again — needed after either plist changes; it applies to both |
+| `--uninstall` | remove the `loc` link (only if it points at a copy this clone made), the stamped copies, and both agents + plists; never `$LOC_HOME` |
 | `-h`, `--help` | usage |
 
 ## What a run looks like

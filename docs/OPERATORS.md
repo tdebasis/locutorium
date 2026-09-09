@@ -10,12 +10,13 @@ how to undo anything.
 |---|---|---|
 | `config` | `key = value` lines: the provider, URLs, the window, wake policy | bootstrap (once), then you |
 | `endpoints` | the roster, one name per line | bootstrap (once), then you |
-| `creds/<name>` | one credential per endpoint plus `admin` and `watch`, mode 0600 | bootstrap only |
+| `creds/<name>` | one credential per endpoint plus `admin`, `watch` and `supervisor`, mode 0600 | bootstrap only |
 | `nats-server.conf` | the medium's config: loopback listener, JetStream store, one user per credential with a per-endpoint ACL | bootstrap only |
 | `hooks/` | your deployment's five hooks (below) | you |
 | `run/` | live state: listener pidfiles, spools, delivery logs — never edit | `loc` |
 | `store/` | JetStream data | the medium |
 | `server.log` | the medium's stdout/stderr | launchd |
+| `sweep.log` | the sweep timer's stdout/stderr | launchd |
 | `forbidden` | your deployment's vocabulary, for the cleanliness check (below); mode 0600 | you |
 
 ## Your deployment's vocabulary
@@ -60,6 +61,21 @@ the only path that stops a running medium. Logs: `$LOC_HOME/server.log`. State o
 `launchctl list com.locutorium.nats-server`. Endpoints survive a medium restart — queues are
 durable; listeners reconnect.
 
+## The sweep timer
+
+The same run installs a second agent, `com.locutorium.sweep`, rendered from
+`providers/nats/launchd/com.locutorium.sweep.plist.in`. It runs `loc sweep` every `sweep_interval`
+seconds and passes no instance; the sweep finds every instance itself. It runs as the `supervisor`
+credential, which may delete and recreate any endpoint's queue and may not touch the topic store or
+write anybody's mail. The plist names the stamped copy of `loc`, not the `$PREFIX/loc` symlink, so
+what launchd starts cannot be repointed without editing the plist.
+
+Logs: `$LOC_HOME/sweep.log`, beside the medium's. State of the agent:
+`launchctl list com.locutorium.sweep`. Both agents take the same flags: `--no-service` installs
+neither, `--restart-service` restarts both, and `--uninstall` removes both. A `sweep_interval` that
+is not a positive whole number is refused at render time rather than corrected, because launchd
+would take a corrected value and you would never learn your line was ignored.
+
 ## Config keys
 
 | key | default | meaning |
@@ -68,6 +84,7 @@ durable; listeners reconnect.
 | `nats_url` | `nats://127.0.0.1:4222` | where the medium listens |
 | `monitor_url` | — (no default) | the medium's HTTP monitor. `loc registry` asks the instance's host over the bus instead, so this key is optional |
 | `topic_window` | `7d` | how long a topic's messages live |
+| `sweep_interval` | `60` | seconds between runs of the sweep timer. This interval is the bound on how long a dead seat reads as registered. Read when the plist is rendered, so change it and re-run `./install.sh --restart-service` |
 | `send_requires_attendance` | `no` | *say-semantics*: refuse a send to an endpoint that is not attending, so the sender learns at the only moment it can act |
 | `wake_window_seconds` | `5` | the listener's coalescing window before it knocks |
 | `wake_breaker_per_minute` | `6` | max wakes per endpoint per minute; excess is suppressed, loudly, and nothing is lost |
