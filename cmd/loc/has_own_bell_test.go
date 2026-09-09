@@ -2,8 +2,10 @@ package main
 
 import (
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"strconv"
+	"syscall"
 	"testing"
 
 	model "github.com/tdebasis/locutorium/internal/presence"
@@ -80,6 +82,30 @@ func TestHasItsOwnBell(t *testing.T) {
 		write(t, strconv.Itoa(live)+"\nnot-when-this-process-started\n")
 		if hasItsOwnBell(ep) {
 			t.Error("a stale start time claims the seat rings")
+		}
+	})
+
+	t.Run("dead pid", func(t *testing.T) {
+		// THE ORDINARY STALE PIDFILE, and the state a real seat is actually
+		// found in after a crash: the server died, its file stayed, and nothing
+		// took its number. Far more common than the reuse case above, which is
+		// why it is worth an arm of its own rather than being assumed to follow.
+		//
+		// The pid is one we watched exit, not a large constant — a constant is
+		// somebody else's live process on a busy machine, and the arm would go
+		// flaky. If the number is taken again between the exit and the check,
+		// the case cannot be posed and says so instead of passing quietly.
+		c := osexec.Command("/usr/bin/true")
+		if err := c.Run(); err != nil {
+			t.Skipf("could not spawn a process to kill: %v", err)
+		}
+		dead := c.Process.Pid
+		if syscall.Kill(dead, 0) == nil {
+			t.Skipf("pid %d was reused before the check; cannot pose the dead case", dead)
+		}
+		write(t, strconv.Itoa(dead)+"\n"+liveStart+"\n")
+		if hasItsOwnBell(ep) {
+			t.Error("a dead server's leftover pid file claims the seat rings")
 		}
 	})
 
