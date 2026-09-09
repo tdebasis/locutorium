@@ -568,3 +568,87 @@ func TestQueuesIgnoresAnObjectOfAnotherNameOnAQueueSubject(t *testing.T) {
 		t.Errorf("Queues = %v, want exactly [%s]", got, scribe)
 	}
 }
+
+// AN INVALID INSTANCE IS REFUSED BEFORE ANYTHING IS DIALED. The name never
+// reaches a subject, so there is no listing to wait on and no connection to
+// make: the refusal is local and immediate.
+func TestQueuesRefusesAnInvalidInstance(t *testing.T) {
+	_, p := supervisor(t)
+
+	for _, bad := range []string{"bad_name", "a.b"} {
+		_, err := p.Queues(bad)
+		if err == nil {
+			t.Fatalf("Queues(%q) = nil error, want a refusal", bad)
+		}
+		if !strings.Contains(err.Error(), bad) {
+			t.Errorf("Queues(%q) error %q does not name the instance", bad, err)
+		}
+	}
+}
+
+// AN OBJECT WITH TWO SUBJECTS IS SKIPPED, NOT REPORTED. The server matches it
+// into the listing because one of its subjects fits queue.<instance>.*, but a
+// queue this model made never carries a second subject, so the object is
+// somebody else's and is left out rather than named.
+func TestQueuesSkipsAnObjectWithTwoSubjects(t *testing.T) {
+	h, p := supervisor(t)
+	nc, js := h.admin(t)
+	defer nc.Close()
+
+	if _, err := js.AddStream(&natsgo.StreamConfig{
+		Name:      "QUEUE_workshop_pair",
+		Subjects:  []string{"queue.workshop.pair", "queue.workshop.pair-alt"},
+		Retention: natsgo.WorkQueuePolicy,
+		Storage:   natsgo.MemoryStorage,
+		Replicas:  1,
+	}); err != nil {
+		t.Fatalf("add the two-subject stream: %v", err)
+	}
+	if _, err := js.StreamInfo("QUEUE_workshop_pair"); err != nil {
+		t.Fatalf("the two-subject stream is not there to be skipped: %v", err)
+	}
+	if err := p.CreateQueue(scribe); err != nil {
+		t.Fatalf("CreateQueue: %v", err)
+	}
+
+	got, err := p.Queues("workshop")
+	if err != nil {
+		t.Fatalf("Queues: %v", err)
+	}
+	if len(got) != 1 || got[0] != scribe {
+		t.Errorf("Queues = %v, want exactly [%s]", got, scribe)
+	}
+}
+
+// A SUBJECT THAT IS NOT A VALID ENDPOINT IS SKIPPED, NOT REPORTED. The
+// segment carries an uppercase letter, which presence.ValidEndpoint bars, so
+// the object cannot be a queue this model made and is left out of the answer.
+func TestQueuesSkipsASubjectThatIsNotAnEndpoint(t *testing.T) {
+	h, p := supervisor(t)
+	nc, js := h.admin(t)
+	defer nc.Close()
+
+	if _, err := js.AddStream(&natsgo.StreamConfig{
+		Name:      "QUEUE_workshop_Bad",
+		Subjects:  []string{"queue.workshop.Bad"},
+		Retention: natsgo.WorkQueuePolicy,
+		Storage:   natsgo.MemoryStorage,
+		Replicas:  1,
+	}); err != nil {
+		t.Fatalf("add the invalid-endpoint stream: %v", err)
+	}
+	if _, err := js.StreamInfo("QUEUE_workshop_Bad"); err != nil {
+		t.Fatalf("the invalid-endpoint stream is not there to be skipped: %v", err)
+	}
+	if err := p.CreateQueue(scribe); err != nil {
+		t.Fatalf("CreateQueue: %v", err)
+	}
+
+	got, err := p.Queues("workshop")
+	if err != nil {
+		t.Fatalf("Queues: %v", err)
+	}
+	if len(got) != 1 || got[0] != scribe {
+		t.Errorf("Queues = %v, want exactly [%s]", got, scribe)
+	}
+}
