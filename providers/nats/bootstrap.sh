@@ -91,6 +91,12 @@ for name in "${ENDPOINTS[@]}" admin watch supervisor; do
       # UPDATE and PURGE are denied outright. The sweep never reshapes a stream
       # and never empties one, so a grant for either would only be a grant
       # nobody uses.
+      #
+      # THE DENY IS BY EXACT NAME, SO IT MUST BE MAINTAINED BY HAND. The grant
+      # is every stream minus a list. A stream added later that is not a seat's
+      # queue is deletable by the supervisor from the day it exists, until its
+      # name is added below. If you create such a stream, add its deny line here
+      # in the same change.
       users_block+="      { user: supervisor, password: \"$hash\", permissions: {
           publish: { allow: [
             \"\$JS.API.INFO\",
