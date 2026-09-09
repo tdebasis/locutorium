@@ -168,7 +168,10 @@ func (f *fake) events() []string {
 	return append([]string(nil), f.emitted...)
 }
 
-// home lays a scratch deployment and points LOC_HOME at it.
+// home lays a scratch deployment and points LOC_HOME at it. It also fills in
+// the two listener facts every case needs to get past the deployment's own
+// preflight (LOC_LISTENER_TYPE, LOC_LISTENER_ADDRESS) — a case about their
+// absence overrides them itself.
 func home(t *testing.T, config string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -176,6 +179,8 @@ func home(t *testing.T, config string) string {
 		t.Fatalf("write config: %v", err)
 	}
 	t.Setenv("LOC_HOME", dir)
+	t.Setenv("LOC_LISTENER_TYPE", "tmux")
+	t.Setenv("LOC_LISTENER_ADDRESS", "workshop:1.2")
 	return dir
 }
 
@@ -255,6 +260,8 @@ func toolText(t *testing.T, res *mcp.CallToolResult) string {
 
 func TestServe_RegistersTheRuntimesPidAndTheRuntimesName(t *testing.T) {
 	dir := home(t, "provider = none\n")
+	t.Setenv("LOC_LISTENER_TYPE", "tmux")
+	t.Setenv("LOC_LISTENER_ADDRESS", "workshop:1.2")
 	f := &fake{}
 	sess, done := serve(t, f.deps())
 	stop(t, sess, done)
@@ -266,7 +273,8 @@ func TestServe_RegistersTheRuntimesPidAndTheRuntimesName(t *testing.T) {
 	want := []string{
 		seat,
 		"--pid " + fmt.Sprint(os.Getppid()),
-		"--type " + clientName,
+		"--type tmux",
+		"--address workshop:1.2",
 		"--version " + clientVer,
 		"--display scribe",
 		"--cwd /scratch",
@@ -330,6 +338,38 @@ func TestServe_RefusesASeatHeldByAnotherLiveProcess(t *testing.T) {
 	}
 	if len(f.subscribed) != 0 {
 		t.Errorf("a refused server registered anyway: %v", f.subscribed)
+	}
+}
+
+// NO LISTENER FACTS, NO SEAT. The deployment sets LOC_LISTENER_TYPE and
+// LOC_LISTENER_ADDRESS; a server with neither has no default to fall back on
+// and nothing to register the seat as reachable through, so it refuses before
+// it ever touches the handshake or the registry.
+func TestServe_RefusesWithoutListenerEnv(t *testing.T) {
+	dir := home(t, "provider = none\n")
+	t.Setenv("LOC_LISTENER_TYPE", "") // unset, as home's default is overridden
+	f := &fake{}
+	serverT, _ := mcp.NewInMemoryTransports()
+	// Serve must RETURN, with an error, before any client arrives. A Serve that
+	// blocks here has started serving — the exact thing this case exists to
+	// refuse — and on the code before the check it blocked until go test's own
+	// ten-minute timeout. So the wait is bounded, and a timeout is a failure
+	// with its own name rather than a hang that looks like a slow test.
+	done := make(chan error, 1)
+	go func() { done <- Serve(context.Background(), f.deps(), serverT) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("the server started with no LOC_LISTENER_TYPE")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Serve did not return within 3s: it is serving instead of refusing")
+	}
+	if len(f.subscribed) != 0 {
+		t.Errorf("a refused server registered anyway: %v", f.subscribed)
+	}
+	if !strings.Contains(delivery(t, dir), "LOC_LISTENER_TYPE") {
+		t.Errorf("the refusal was not written to the delivery log: %q", delivery(t, dir))
 	}
 }
 

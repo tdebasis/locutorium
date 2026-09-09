@@ -123,6 +123,11 @@ const bellLine = "🔔 %d new → read"
 func Serve(ctx context.Context, d Deps, t mcp.Transport) error {
 	d = d.withDefaults()
 
+	s := &server{d: d}
+	if err := s.requireListenerEnv(); err != nil {
+		return err
+	}
+
 	// THE HANDLER IS INSTALLED BEFORE THERE IS ANYTHING TO GIVE UP.
 	//
 	// Everything below this line — the preflight, the handshake, the
@@ -156,7 +161,6 @@ func Serve(ctx context.Context, d Deps, t mcp.Transport) error {
 		return heldElsewhere(d.Endpoint, held)
 	}
 
-	s := &server{d: d}
 	srv := mcp.NewServer(&mcp.Implementation{Name: "loc", Version: d.Version}, nil)
 	s.addTools(srv)
 
@@ -167,9 +171,11 @@ func Serve(ctx context.Context, d Deps, t mcp.Transport) error {
 
 	// The client names itself in the initialize handshake, which arrives after
 	// the connection is up — so the registration waits for it rather than
-	// guessing. What it learns is what `registry` will show for this seat.
-	name, version := awaitClient(ss)
-	if err := s.register(name, version); err != nil {
+	// guessing. Only the version is still taken from there; the type is the
+	// deployment's own LOC_LISTENER_TYPE (checked above), not whatever the MCP
+	// client calls itself.
+	_, version := awaitClient(ss)
+	if err := s.register(version); err != nil {
 		_ = ss.Close()
 		return err
 	}
@@ -260,7 +266,12 @@ func awaitClient(ss *mcp.ServerSession) (name, version string) {
 // register puts the seat in the registry with the RUNTIME'S pid — our parent,
 // the process that launched this server and whose death ends it. Registering
 // our own pid would record the adapter rather than the agent.
-func (s *server) register(clientType, clientVersion string) error {
+//
+// --type and --address are the deployment's own LOC_LISTENER_TYPE and
+// LOC_LISTENER_ADDRESS (requireListenerEnv already refused to start without
+// them): how this seat is reached and where, neither of which the MCP
+// handshake knows. Only --version comes from the handshake.
+func (s *server) register(clientVersion string) error {
 	if err := s.displaceOrRefuse(); err != nil {
 		return err
 	}
@@ -271,11 +282,34 @@ func (s *server) register(clientType, clientVersion string) error {
 	return s.d.Subscribe([]string{
 		s.d.Endpoint,
 		"--pid", strconv.Itoa(s.d.Ppid()),
-		"--type", clientType,
+		"--type", os.Getenv("LOC_LISTENER_TYPE"),
+		"--address", os.Getenv("LOC_LISTENER_ADDRESS"),
 		"--version", clientVersion,
 		"--display", agentToken(s.d.Endpoint),
 		"--cwd", cwd,
 	})
+}
+
+// requireListenerEnv refuses to serve without the deployment's two listener
+// facts: LOC_LISTENER_TYPE, how this seat is reached, and LOC_LISTENER_ADDRESS,
+// where to reach it. Both are opaque strings the deployment sets; there is no
+// default and no fallback, because a seat registered without them would read
+// as attended while naming nowhere anybody could actually reach it.
+func (s *server) requireListenerEnv() error {
+	var missing []string
+	if os.Getenv("LOC_LISTENER_TYPE") == "" {
+		missing = append(missing, "LOC_LISTENER_TYPE")
+	}
+	if os.Getenv("LOC_LISTENER_ADDRESS") == "" {
+		missing = append(missing, "LOC_LISTENER_ADDRESS")
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	err := fmt.Errorf("%s not set; loc mcp will not start without it, and there is no default",
+		strings.Join(missing, " and "))
+	s.warn(err.Error())
+	return err
 }
 
 // displaceOrRefuse clears whoever holds the seat, or refuses to take it.

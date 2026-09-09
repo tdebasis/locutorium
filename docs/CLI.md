@@ -342,12 +342,20 @@ loc mcp
 Serves this seat to whatever agent runtime launched it, over stdin and stdout, speaking the Model
 Context Protocol. It does not return: it holds the seat for the life of the runtime's session.
 
+**Two environment variables are required, with no default:** `LOC_LISTENER_TYPE` — how this seat is
+reached (values in use: `tmux`, `claude-courier`) — and `LOC_LISTENER_ADDRESS` — where to reach it.
+Both are opaque strings the deployment sets; `loc mcp` never guesses at either. If one is empty or
+unset, the server writes one line to stderr and one to the seat's delivery log, then exits 1 before
+touching the handshake or the registry — there is nothing to serve a seat as reachable through
+nowhere.
+
 **It is the host, in miniature.** `docs/PRESENCE.md` says whoever launches an agent holds its process
 id, which is what makes registration mechanical rather than remembered. A stdio server is launched by
 the runtime and dies with it, so it has that shape at seat scale: before it serves anything it
-registers this endpoint with its PARENT's pid — the runtime's — the client's name and version from
-the initialize handshake, the agent token as the display name and the working directory; when the
-runtime lets go (stdin reaches EOF, or a signal arrives) it unsubscribes and exits 0. A seat held by
+registers this endpoint with its PARENT's pid — the runtime's — `LOC_LISTENER_TYPE` as the agent
+type, `LOC_LISTENER_ADDRESS` as the delivery address, the client's version from the initialize
+handshake, the agent token as the display name and the working directory; when the runtime lets go
+(stdin reaches EOF, or a signal arrives) it unsubscribes and exits 0. A seat held by
 a registration whose process is DEAD is displaced, and the dead pid is written to the delivery log.
 A seat held by a LIVE process that did not launch this server is refused, with the pid named, and the
 server exits 1 — the runtime shows it as failed, which is the truth. **The pid registered is whoever
@@ -432,11 +440,15 @@ and the result is returned afterwards** — so a client that drops between the t
 messages: they are gone from the queue and they never reached the agent, and the `handed=<n>` line
 is all that is left of them. Acknowledging only after delivery is tracked separately, as issue #42.
 
-**Configuring a runtime.** The server needs two things: to be launched, and to be told which endpoint
-it is. For Claude Code, `.mcp.json`:
+**Configuring a runtime.** The server needs three things: to be launched, to be told which endpoint it
+is, and to be told how and where this seat is reached. For Claude Code, `.mcp.json`:
 
 ```json
-{"mcpServers": {"loc": {"command": "loc", "args": ["mcp"], "env": {"LOC_IDENTITY": "<instance>.<agent>"}}}}
+{"mcpServers": {"loc": {"command": "loc", "args": ["mcp"], "env": {
+  "LOC_IDENTITY": "<instance>.<agent>",
+  "LOC_LISTENER_TYPE": "tmux",
+  "LOC_LISTENER_ADDRESS": "<addr>"
+}}}}
 ```
 
 For a runtime configured in TOML, `.codex/config.toml`:
@@ -445,8 +457,11 @@ For a runtime configured in TOML, `.codex/config.toml`:
 [mcp_servers.loc]
 command = "loc"
 args = ["mcp"]
-env = { LOC_IDENTITY = "<instance>.<agent>" }
+env = { LOC_IDENTITY = "<instance>.<agent>", LOC_LISTENER_TYPE = "tmux", LOC_LISTENER_ADDRESS = "<addr>" }
 ```
+
+`LOC_LISTENER_TYPE` and `LOC_LISTENER_ADDRESS` are required; the server refuses to start without
+them (above). Neither is validated or interpreted — see `subscribe`'s `--type` and `--address`.
 
 **The fallback.** A runtime that cannot launch a stdio server uses the command-line verbs directly —
 `loc read`, `loc send`, `loc status`, `loc topics`. What is lost is the automatic registration and
