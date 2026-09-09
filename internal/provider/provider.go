@@ -72,6 +72,11 @@ type Presence interface {
 	// ENDPOINTS, NOT BACKING-OBJECT NAMES. What a medium calls the thing it
 	// stores is the medium's business, and one instance is the whole scope:
 	// nothing outside it is this caller's to see.
+	//
+	// IT LISTS WHAT THIS MODEL MADE, not everything on the subject. An object
+	// of another name or shape sitting on one of these subjects is not ours
+	// and is not listed, so an empty answer means no queue of ours, never an
+	// empty subject.
 	Queues(instance string) ([]string, error)
 
 	// Emit speaks one event in an instance's subject, without waiting for the
