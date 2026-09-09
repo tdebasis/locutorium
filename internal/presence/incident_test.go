@@ -253,3 +253,59 @@ func TestIncidentWithNoEndpoint(t *testing.T) {
 		t.Errorf("reason = %q, want %q", got["reason"], IncidentMediumUnreachable)
 	}
 }
+
+// LogIncident MUST SURVIVE A DIRECTORY IT CANNOT MAKE. run/incidents is a
+// regular file here, so MkdirAll fails and LogIncident returns at that error
+// instead of turning the fault into a panic. This proves the doc comment's
+// claim for the MkdirAll error.
+func TestLogIncidentSurvivesADirectoryItCannotMake(t *testing.T) {
+	home := scratch(t)
+
+	if err := os.MkdirAll(filepath.Join(home, "run"), 0o700); err != nil {
+		t.Fatalf("mkdir run: %v", err)
+	}
+	blocker := filepath.Join(home, "run", "incidents")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatalf("precreate blocker: %v", err)
+	}
+
+	LogIncident(NewIncident("workshop", "workshop.scribe", IncidentLedgerUnreadable, "x"))
+
+	fi, err := os.Stat(blocker)
+	if err != nil {
+		t.Fatalf("stat blocker: %v", err)
+	}
+	if fi.IsDir() {
+		t.Errorf("blocker became a directory; want it unchanged")
+	}
+	if fi.Size() != 0 {
+		t.Errorf("blocker size = %d, want 0 (unchanged)", fi.Size())
+	}
+}
+
+// LogIncident MUST SURVIVE A FILE IT CANNOT OPEN. The day's path is a
+// directory here, so OpenFile with O_WRONLY fails and LogIncident returns at
+// that error instead of turning the fault into a panic. This proves the doc
+// comment's claim for the OpenFile error.
+func TestLogIncidentSurvivesAFileItCannotOpen(t *testing.T) {
+	home := scratch(t)
+
+	dir := filepath.Join(home, "run", "incidents")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	path := incidentPath(home)
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatalf("precreate path as dir: %v", err)
+	}
+
+	LogIncident(NewIncident("workshop", "workshop.scribe", IncidentLedgerUnreadable, "x"))
+
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat path: %v", err)
+	}
+	if !fi.IsDir() {
+		t.Errorf("path is no longer a directory")
+	}
+}
