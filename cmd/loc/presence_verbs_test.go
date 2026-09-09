@@ -6,11 +6,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	model "github.com/tdebasis/locutorium/internal/presence"
 	"github.com/tdebasis/locutorium/internal/provider"
 )
 
@@ -36,6 +38,7 @@ type presenceSpy struct {
 	watched          string
 
 	createErr, deleteErr, existsErr, emitErr, requestErr, watchErr error
+	queuesErr                                                      error
 	reply                                                          []byte
 	watchOut                                                       string
 }
@@ -63,6 +66,23 @@ func (s *presenceSpy) QueueExists(endpoint string) (bool, error) {
 		return false, s.existsErr
 	}
 	return s.exists[endpoint], nil
+}
+
+// Queues answers from the same map QueueExists answers from, filtered to one
+// instance and sorted, so the spy cannot report a listing that disagrees with
+// what it reports one endpoint at a time.
+func (s *presenceSpy) Queues(instance string) ([]string, error) {
+	if s.queuesErr != nil {
+		return nil, s.queuesErr
+	}
+	var out []string
+	for e, ok := range s.exists {
+		if ok && model.Instance(e) == instance {
+			out = append(out, e)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 func (s *presenceSpy) Emit(instance string, event []byte) error {

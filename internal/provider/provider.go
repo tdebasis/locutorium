@@ -62,6 +62,18 @@ type Presence interface {
 	// are different answers, and only one of them justifies refusing a send.
 	QueueExists(endpoint string) (bool, error)
 
+	// Queues lists the ENDPOINTS attended in one instance, sorted. It is the
+	// plural of QueueExists and it carries that method's rule: a listing that
+	// could not be completed is an ERROR, never a short list. Absence and
+	// ignorance are different answers, and a caller reconciling a registry
+	// against the medium would delete every live seat on the strength of a
+	// listing that was merely refused.
+	//
+	// ENDPOINTS, NOT BACKING-OBJECT NAMES. What a medium calls the thing it
+	// stores is the medium's business, and one instance is the whole scope:
+	// nothing outside it is this caller's to see.
+	Queues(instance string) ([]string, error)
+
 	// Emit speaks one event in an instance's subject, without waiting for the
 	// store to acknowledge anything. It is the one path that must be bounded
 	// hard, because the caller is an agent's lifecycle hook.

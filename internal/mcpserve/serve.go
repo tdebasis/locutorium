@@ -409,7 +409,7 @@ func (s *server) depart(reason departReason) {
 // stale one is worse than none: it would send the next reader to a stranger,
 // so its removal is part of departing.
 func (s *server) pidFile() string {
-	return filepath.Join(config.Home(), "run", s.d.Endpoint+".mcp.pid")
+	return model.ServerPIDFile(s.d.Endpoint)
 }
 
 // claimPIDFile records this process: TWO LINES, the pid and the start time the
@@ -431,7 +431,7 @@ func (s *server) claimPIDFile() {
 }
 
 // releasePIDFile removes it on the way out.
-func (s *server) releasePIDFile() { _ = os.Remove(s.pidFile()) }
+func (s *server) releasePIDFile() { _ = model.ReleaseServerPID(s.d.Endpoint) }
 
 // warn is a line that must not be lost: it goes to the delivery log, where a
 // deployment already looks for what was delivered and what was not, AND to the
