@@ -42,24 +42,42 @@ const peekTrailer = "── topics ── (not shown: --peek never consumes, " +
 
 // readVerb reads the arguments and hands the medium to read.
 //
-// EXACTLY --peek OR NOTHING. The shell tool silently ignores anything else and
-// performs a normal, consuming read, so a misspelt `--pekk` destroys the very
-// backlog the flag was typed to leave alone. That trap is documented for the
-// shell tool; this build refuses instead.
+// EXACTLY --peek, EXACTLY --json, OR NOTHING. The shell tool silently ignores
+// anything else and performs a normal, consuming read, so a misspelt `--pekk`
+// destroys the very backlog the flag was typed to leave alone. That trap is
+// documented for the shell tool; this build refuses instead — and the same
+// strictness rules out `--peek --json` together, which would be asked to
+// consume nothing and everything at once.
 func readVerb(w io.Writer, args []string) error {
 	peek := false
+	jsonOut := false
 	switch {
 	case len(args) == 0:
 	case len(args) == 1 && args[0] == "--peek":
 		peek = true
+	case len(args) == 1 && args[0] == "--json":
+		jsonOut = true
 	default:
 		return errUsage
 	}
-	return withProvider(func(p provider.Provider) error { return read(p, w, peek) })
+	return withProvider(func(p provider.Provider) error { return readMode(p, w, peek, jsonOut) })
 }
 
-// read presents the caller's own queue and then the rooms.
+// read presents the caller's own queue and then the rooms, rendered as
+// markdown. It is the form the mcp verb's own Read hook (cmd/loc/mcp.go)
+// calls, which has no `--json` mode of its own to plumb through.
 func read(p provider.Provider, w io.Writer, peek bool) error {
+	return readMode(p, w, peek, false)
+}
+
+// readMode is read's full form, adding the `--json` output.
+//
+// jsonOut consumes exactly as a plain read does — same drains, same
+// presence-event filter, same per-message acknowledgement — but shows each
+// envelope as its raw wire bytes instead of rendered markdown, and omits the
+// `── queue.x ──` / `── topics ──` headings, so the output is JSON Lines and
+// nothing else. A hook parses that; it cannot parse a heading.
+func readMode(p provider.Provider, w io.Writer, peek bool, jsonOut bool) error {
 	me, err := loc.Identity()
 	if err != nil {
 		return err
@@ -84,15 +102,22 @@ func read(p provider.Provider, w io.Writer, peek bool) error {
 		return err
 	}
 
-	if _, err := io.WriteString(w, "── queue."+me+" ──\n"); err != nil {
-		return err
+	show := present
+	if jsonOut {
+		show = presentJSON
+	}
+
+	if !jsonOut {
+		if _, err := io.WriteString(w, "── queue."+me+" ──\n"); err != nil {
+			return err
+		}
 	}
 
 	if peek {
 		// At most one, and nothing acknowledged: the message stays where it is
 		// and the next ordinary read hands it over.
 		if got {
-			if err := present(w, m.Data()); err != nil {
+			if err := show(w, m.Data()); err != nil {
 				return err
 			}
 		}
@@ -103,12 +128,14 @@ func read(p provider.Provider, w io.Writer, peek bool) error {
 	// A queue is never filtered: it carries only mail.
 	if err := drain(w, m, got, func() (provider.Message, bool, error) {
 		return r.NextQueued(me, fetchWait)
-	}, nil); err != nil {
+	}, nil, show); err != nil {
 		return err
 	}
 
-	if _, err := io.WriteString(w, "── topics ──\n"); err != nil {
-		return err
+	if !jsonOut {
+		if _, err := io.WriteString(w, "── topics ──\n"); err != nil {
+			return err
+		}
 	}
 	m, got, err = r.NextTopic(me, fetchWait)
 	if err != nil {
@@ -116,7 +143,7 @@ func read(p provider.Provider, w io.Writer, peek bool) error {
 	}
 	return drain(w, m, got, func() (provider.Message, bool, error) {
 		return r.NextTopic(me, fetchWait)
-	}, isPresenceEvent)
+	}, isPresenceEvent, show)
 }
 
 // isPresenceEvent reports whether a topic payload is a presence event rather
@@ -158,14 +185,18 @@ func isPresenceEvent(raw []byte) bool {
 // reader's copy is touched — not a deletion. Leaving it unacknowledged would
 // hand the same event to this reader on every read for as long as the room
 // keeps it.
-func drain(w io.Writer, m provider.Message, got bool, next func() (provider.Message, bool, error), skip func([]byte) bool) error {
+//
+// show is how one envelope reaches the caller — present's rendered markdown,
+// or presentJSON's raw bytes — so the one loop that drains and acknowledges
+// serves both forms of `read` identically.
+func drain(w io.Writer, m provider.Message, got bool, next func() (provider.Message, bool, error), skip func([]byte) bool, show func(io.Writer, []byte) error) error {
 	var err error
 	for got {
 		// The write, then the ack that deletes what it carried — and a write
 		// that failed returns here at once, with nothing acknowledged, so the
 		// message it never showed is still owed to this reader.
 		if skip == nil || !skip(m.Data()) {
-			if err = present(w, m.Data()); err != nil {
+			if err = show(w, m.Data()); err != nil {
 				return err
 			}
 		}
@@ -190,5 +221,18 @@ func present(w io.Writer, raw []byte) error {
 		return err
 	}
 	_, err := w.Write(b.Bytes())
+	return err
+}
+
+// presentJSON writes one envelope's raw wire bytes followed by a newline, in
+// ONE call — the same whole-or-not-at-all reasoning as present, so a write
+// that fails partway leaves nothing acknowledged rather than half a line.
+// `--json` promises JSON Lines to whatever parses it; this is the one place
+// that promise is kept.
+func presentJSON(w io.Writer, raw []byte) error {
+	line := make([]byte, 0, len(raw)+1)
+	line = append(line, raw...)
+	line = append(line, '\n')
+	_, err := w.Write(line)
 	return err
 }
