@@ -74,6 +74,7 @@ Topics expire at the edge of `topic_window` (default 7 days).
 ```
 loc read
 loc read --peek
+loc read --json
 ```
 
 Without a flag: presents your queue, then topics — and **consumes** all of it. A message is handed
@@ -113,6 +114,12 @@ There is a third loud answer. If the deployment's access control **refuses the r
 > **Trap, in the shell tool only:** there, any argument that isn't exactly `--peek` is silently
 > ignored — so `loc read --pekk` performs a normal, **consuming** read, with no error. The Go build
 > **refuses** it: anything but exactly `--peek` prints the verb list and exits 1.
+
+`--json` consumes exactly as a plain read does — the same backlog, the same topics, the same
+per-message acknowledgement — but prints each envelope's raw wire bytes, one per line, with **no**
+`── queue.x ──` or `── topics ──` headings. The output is JSON Lines and nothing else, for a hook
+to parse. `--peek --json` together is refused, same as any other combination that isn't exactly
+one recognised flag.
 
 The Go build presents the queue and the topics, and **no spools**. `run/<endpoint>.spool` and
 `.wake.spool.raw` belong to the shell tool's listener and to whatever presents what it drained;

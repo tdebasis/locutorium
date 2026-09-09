@@ -286,13 +286,15 @@ func send(p provider.Provider, w io.Writer, to, body string) error {
 			"(say-semantics: a send expects an attending peer; "+
 			"use a durable channel for messages meant to wait)", to)
 	}
-	env, err := loc.NewEnvelope(from, to, "msg", body).Marshal()
+	e := loc.NewEnvelope(from, to, "msg", body)
+	env, err := e.Marshal()
 	if err != nil {
 		return err
 	}
 	if err := p.SendQueue(to, env); err != nil {
 		return err
 	}
+	loc.LogSent(e)
 	// ONE MESSAGE, ONE BELL, AND THE RECIPIENT DECIDES WHOSE.
 	//
 	// A seat whose SERVER IS RUNNING has a listener on this very queue: the
