@@ -189,6 +189,14 @@ func Serve(ctx context.Context, d Deps, t mcp.Transport) error {
 	// is not yet watching, and the message arrives with no bell at all, which
 	// is the one outcome this whole arrangement exists to prevent. The order
 	// makes the file mean what it says.
+	//
+	// THE COST OF THIS ORDER, ACCEPTED: between the registration and the pid
+	// file the seat reads as attended and not yet as ringing, so a send that
+	// lands in that window rings itself, and the bell just started rings too.
+	// Two bells for one arrival, for a few milliseconds at startup. That is
+	// the cheaper of the two windows — the other one is silence — and a
+	// reader who sees a doubled bell at startup is seeing this, not a defect.
+	// A hook that fetches on the second bell finds an empty queue and says so.
 	stopBell := s.startBell()
 	s.claimPIDFile()
 	reason := s.wait(ss, sig)
