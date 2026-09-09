@@ -12,7 +12,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -351,7 +350,7 @@ func send(p provider.Provider, w io.Writer, to, body string) error {
 // being wrong are not equal: one bell too many is a line somebody scrolls
 // past, and one too few is a message nobody was told about.
 func hasItsOwnBell(endpoint string) bool {
-	b, err := os.ReadFile(filepath.Join(config.Home(), "run", endpoint+".mcp.pid"))
+	b, err := os.ReadFile(model.ServerPIDFile(endpoint))
 	if err != nil {
 		return false
 	}
