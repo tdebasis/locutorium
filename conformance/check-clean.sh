@@ -52,7 +52,13 @@ if [[ -z "$pattern" ]]; then
   exit 1
 fi
 
-hits="$(grep -rniIE "$pattern" --exclude-dir=.git --exclude=check-clean.sh . || true)"
+# .idea and .vscode are excluded BY NAME. This is not honouring .gitignore, which
+# the check must never do: it names two folders that hold IDE state and nothing
+# else, so a maintainer's hand run is not red every day for a harmless reason.
+# A guard that is red every day is a guard nobody reads, and then a real hit is
+# waved through with the noise (#54).
+hits="$(grep -rniIE "$pattern" --exclude-dir=.git --exclude-dir=.idea --exclude-dir=.vscode \
+  --exclude=check-clean.sh . || true)"
 
 if [[ -n "$hits" ]]; then
   echo "check-clean: forbidden vocabulary found ($source_note):" >&2

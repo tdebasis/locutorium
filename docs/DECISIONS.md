@@ -24,7 +24,7 @@ courier*). There are two ways to do that, and each needs something the other doe
 
 | shape | how it delivers | what it needs |
 |---|---|---|
-| **mechanical** | writes onto the surface directly, such as a tmux pane | a runtime hosted somewhere you can type into |
+| **mechanical** | writes onto the surface directly, such as a terminal pane | a runtime hosted somewhere you can type into |
 | **agent-native** | pushes through the runtime's own instance-to-instance messaging | a runtime that offers such a feature |
 
 A headless runtime gives mechanical nothing to write into. A runtime without instance-to-instance
@@ -229,8 +229,8 @@ relay appends a second line saying whether it arrived.
 One file per day, append-only, JSON lines. Every line carries the same six fields:
 
 ```json
-{"uid":"01J...","status":"sent","ts":"2026-09-08T17:02:11Z","from":"conclave.steward","to":"conclave.forge","body":"..."}
-{"uid":"01J...","status":"delivered","ts":"2026-09-08T17:02:19Z","from":"conclave.steward","to":"conclave.forge","body":"..."}
+{"uid":"01J...","status":"sent","ts":"2026-09-08T17:02:11Z","from":"workshop.scribe","to":"workshop.clerk","body":"..."}
+{"uid":"01J...","status":"delivered","ts":"2026-09-08T17:02:19Z","from":"workshop.scribe","to":"workshop.clerk","body":"..."}
 ```
 
 `status` is `sent`, `delivered` or `failed`. The lines for one message share its `uid`.
