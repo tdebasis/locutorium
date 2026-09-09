@@ -52,9 +52,13 @@ func TestMCP_TheServerHoldsTheSeatItWasLaunchedFor(t *testing.T) {
 			"a server that registers its own pid records the adapter, not the agent",
 			reg.Process.PID, os.Getpid())
 	}
-	if reg.Agent.Type != testClientName || reg.Agent.Version != testClientVersion {
-		t.Errorf("registered as %s %s; the client introduced itself as %s %s",
-			reg.Agent.Type, reg.Agent.Version, testClientName, testClientVersion)
+	// The type is the deployment's LOC_LISTENER_TYPE — how the seat is reached —
+	// and not what the MCP client called itself in the handshake. The version
+	// still comes from the handshake. Read the expectation from the same
+	// variable the fixture set, so this assertion and newPresence cannot drift.
+	if want := os.Getenv("LOC_LISTENER_TYPE"); reg.Agent.Type != want || reg.Agent.Version != testClientVersion {
+		t.Errorf("registered as %s %s; want type %s from LOC_LISTENER_TYPE and version %s from the handshake",
+			reg.Agent.Type, reg.Agent.Version, want, testClientVersion)
 	}
 
 	// ── the bell: a send from another endpoint rings once ───────────────────

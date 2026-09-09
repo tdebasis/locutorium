@@ -167,6 +167,15 @@ func newPresence(t *testing.T) *presence {
 		loctest.Write(t, filepath.Join(home, "creds", u.Username), presencePassword)
 	}
 	t.Setenv("LOC_HOME", home)
+	// A SPAWNED SERVER MUST BE TOLD HOW THE SEAT IS REACHED, OR IT REFUSES TO
+	// START. Every mcp test here launches `loc mcp` — as a subprocess that
+	// inherits os.Environ(), or in-process through mcpserve.Serve, which reads
+	// os.Getenv — so the two listener facts are set once, here, for all of
+	// them. Without this a launched server exits before the handshake and
+	// the client waits for it until go test's own timeout: measured, one test
+	// hung 9m50s. A case about their absence overrides these itself.
+	t.Setenv("LOC_LISTENER_TYPE", "tmux")
+	t.Setenv("LOC_LISTENER_ADDRESS", "workshop:1.2")
 	// The spy provider from main_test.go is registered under "spy"; this
 	// deployment names "nats", so it is never selected. Cleared defensively.
 	installed = nil

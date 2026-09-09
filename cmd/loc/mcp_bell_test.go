@@ -44,6 +44,17 @@ func serveBell(t *testing.T, p *presence) string {
 	if !waitFor(5*time.Second, func() bool { return registration(t, e1) != nil }) {
 		t.Fatalf("the server did not register %s", e1)
 	}
+	// AND WAIT FOR THE PIDFILE, NOT ONLY THE ROW. The server registers, then
+	// starts its bell, then claims the pidfile — in that order, on purpose
+	// (serve.go: "the bell first, then the file that claims there is one"). A
+	// sender decides whether to ring by the FILE (hasItsOwnBell), so a send
+	// that lands after the row and before the file rings itself, and the
+	// server rings too: two bells for one arrival. Measured on ubuntu CI,
+	// 2026-09-08, passing here by timing alone. The wait uses the sender's own
+	// predicate, so the fixture and send cannot disagree about "up".
+	if !waitFor(5*time.Second, func() bool { return hasItsOwnBell(e1) }) {
+		t.Fatalf("the server registered but never claimed its pidfile")
+	}
 	return spool
 }
 
