@@ -756,6 +756,49 @@ func TestSweepActsOnNothingWhenTheQueuesCannotBeListed(t *testing.T) {
 	}
 }
 
+// A QUEUE LISTING THAT FAILED IS A FAULT OF THE HOUSE, and the house writes it
+// down. The sweep stops at that point, so without a line on disk a timer sees a
+// non-zero exit and never learns what refused it.
+//
+// THE INCIDENT IS RECORDED AND NOT PUBLISHED. The medium is the thing that just
+// failed, so an event about the failure would fail the same way.
+func TestSweepRecordsAnIncidentWhenTheQueuesCannotBeListed(t *testing.T) {
+	d := newPresenceDeployment(t)
+	d.deadRow(t, "workshop.scribe")
+	d.spy.queuesErr = fmt.Errorf("cannot list the queues of 'workshop': permissions violation")
+
+	code, out, _ := exec("sweep", "workshop")
+	if code == 0 || out != "" {
+		t.Errorf("exit %d, stdout %q; want non-zero and nothing", code, out)
+	}
+
+	raw, err := os.ReadFile(d.incidentsFile())
+	if err != nil {
+		t.Fatalf("a failed listing was not written down: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("%d lines in the incident record, want one: %q", len(lines), string(raw))
+	}
+	var got map[string]string
+	if err := json.Unmarshal([]byte(lines[0]), &got); err != nil {
+		t.Fatalf("the line is not one whole event (%v): %q", err, lines[0])
+	}
+	if got["kind"] != "house.incident" {
+		t.Errorf("kind = %q, want house.incident", got["kind"])
+	}
+	if got["reason"] != model.IncidentEnumerationRefused {
+		t.Errorf("reason = %q, want %q", got["reason"], model.IncidentEnumerationRefused)
+	}
+	if !strings.Contains(got["detail"], "permissions violation") {
+		t.Errorf("detail = %q, want the error text from the listing", got["detail"])
+	}
+	if len(d.spy.emitted) != 0 {
+		t.Errorf("the sweep published %d events about a medium that had just failed",
+			len(d.spy.emitted))
+	}
+}
+
 // AN UNREADABLE ROW STOPS PASS 2, AND ONLY PASS 2. The row may hold the
 // endpoint whose queue pass 2 is about to call an orphan, so the queue is left
 // alone. The fault is reported twice, live and durably, and the verb exits
@@ -903,6 +946,178 @@ func TestSweepBareIgnoresTheCallersIdentity(t *testing.T) {
 	}
 	if _, err := os.Stat(d.ledger("atelier.clerk.json")); !os.IsNotExist(err) {
 		t.Error("the bare sweep narrowed to the caller's own instance and left the atelier row")
+	}
+}
+
+// ---------------------------------------- a pass that cannot finish stops here
+
+// A queue the medium will not destroy leaves the dead row ON DISK. The ledger
+// must never say a seat is free while its queue is still there, which is the
+// rule unsubscribe follows and the reason pass 1 stops rather than carries on.
+func TestSweepKeepsTheDeadRowWhenItsQueueSurvives(t *testing.T) {
+	d := newPresenceDeployment(t)
+	d.deadRow(t, "workshop.scribe")
+	d.spy.exists["workshop.scribe"] = true
+	d.spy.deleteErr = fmt.Errorf("cannot reach the medium")
+
+	code, out, errOut := exec("sweep", "workshop")
+	assertResult(t, code, out, errOut, 1, "", "loc: cannot reach the medium\n")
+	if _, err := os.Stat(d.ledger("workshop.scribe.json")); err != nil {
+		t.Error("the row was cleared although its queue survived")
+	}
+	if len(d.spy.emitted) != 0 {
+		t.Error("a departure was announced for a seat whose queue is still there")
+	}
+}
+
+// A queue the medium will not make is not announced as a join. Pass 3 stops at
+// the create, so nothing hears about a seat that has no queue.
+func TestSweepAnnouncesNoJoinWhenTheQueueCannotBeRemade(t *testing.T) {
+	d := newPresenceDeployment(t)
+	if code, _, errOut := exec("subscribe", "workshop.scribe", "--pid", alivePid(),
+		"--type", "acme-cli", "--version", "3.2.0"); code != 0 {
+		t.Fatalf("subscribe exited %d (stderr %q)", code, errOut)
+	}
+	delete(d.spy.exists, "workshop.scribe")
+	d.spy.created, d.spy.emitted, d.spy.emittedOn = nil, nil, nil
+	d.spy.createErr = fmt.Errorf("cannot reach the medium")
+
+	code, out, errOut := exec("sweep", "workshop")
+	assertResult(t, code, out, errOut, 1, "", "loc: cannot reach the medium\n")
+	if len(d.spy.emitted) != 0 {
+		t.Error("a join was announced for a queue that was never made")
+	}
+}
+
+// AN INCIDENT THAT CANNOT BE PUBLISHED STOPS THE SWEEP BEFORE PASS 1. The
+// medium would not take the report of the fault, so it will not take a
+// departure or a join either, and a reconcile that pressed on would act on a
+// medium it cannot speak to. Neither pass touched a queue.
+func TestSweepStopsWhenTheIncidentCannotBePublished(t *testing.T) {
+	d := newPresenceDeployment(t)
+	writeFile(t, d.ledger("workshop.bad.json"), "{ not json")
+	d.deadRow(t, "workshop.scribe")
+	d.spy.exists["workshop.scribe"] = true
+	if code, _, errOut := exec("subscribe", "workshop.clerk", "--pid", alivePid(),
+		"--type", "acme-cli", "--version", "3.2.0"); code != 0 {
+		t.Fatalf("subscribe exited %d (stderr %q)", code, errOut)
+	}
+	delete(d.spy.exists, "workshop.clerk") // a live row whose queue pass 3 would remake
+	d.spy.created, d.spy.deleted, d.spy.emitted, d.spy.emittedOn = nil, nil, nil, nil
+	d.spy.emitErr = fmt.Errorf("cannot reach the medium")
+
+	code, out, errOut := exec("sweep", "workshop")
+	assertResult(t, code, out, errOut, 1, "", "loc: cannot reach the medium\n")
+	if len(d.spy.deleted) != 0 {
+		t.Errorf("pass 1 ran: %v", d.spy.deleted)
+	}
+	if len(d.spy.created) != 0 {
+		t.Errorf("pass 3 ran: %v", d.spy.created)
+	}
+	if _, err := os.Stat(d.ledger("workshop.scribe.json")); err != nil {
+		t.Error("the dead row was reaped although the incident could not be published")
+	}
+}
+
+// TWO UNREADABLE ROWS ARE NAMED TOGETHER, in the plural. One message is what a
+// person reads, and a message that names one of two faults sends them back for
+// the other.
+func TestSweepNamesEveryUnreadableRow(t *testing.T) {
+	d := newPresenceDeployment(t)
+	writeFile(t, d.ledger("workshop.bad-one.json"), "{ not json")
+	writeFile(t, d.ledger("workshop.bad-two.json"), "{ not json either")
+
+	code, out, errOut := exec("sweep", "workshop")
+	if code == 0 || out != "" {
+		t.Errorf("exit %d, stdout %q; want non-zero and nothing", code, out)
+	}
+	for _, want := range []string{"the registrations for", "'workshop.bad-one'", "'workshop.bad-two'"} {
+		if !strings.Contains(errOut, want) {
+			t.Errorf("stderr %q does not carry %q", errOut, want)
+		}
+	}
+	raw, err := os.ReadFile(d.incidentsFile())
+	if err != nil {
+		t.Fatalf("read incidents: %v", err)
+	}
+	if lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n"); len(lines) != 2 {
+		t.Errorf("%d lines in the incident record, want one per bad row", len(lines))
+	}
+}
+
+// A SERVER PIDFILE THAT WILL NOT GO STOPS PASS 1. The seat would otherwise have
+// no registration and still name a server, which is the half-cleared state pass
+// 1 exists to avoid. A directory with something in it is a path os.Remove
+// refuses, which is how the failure is arranged here.
+func TestSweepStopsWhenTheServerPIDFileWillNotGo(t *testing.T) {
+	d := newPresenceDeployment(t)
+	d.deadRow(t, "workshop.scribe")
+	writeFile(t, filepath.Join(d.serverPIDFile("workshop.scribe"), "inside"), "x")
+
+	code, out, _ := exec("sweep", "workshop")
+	if code == 0 || out != "" {
+		t.Errorf("exit %d, stdout %q; want non-zero and nothing", code, out)
+	}
+	if len(d.spy.emitted) != 0 {
+		t.Error("a departure was announced although the seat still names a server")
+	}
+}
+
+// The remaining places a pass can stop. Each one is a medium that took one call
+// and refused the next, and in every one the verb reports the refusal rather
+// than finishing the pass on a medium that is not answering.
+func TestSweepStopsAtEveryFailedCallInAPass(t *testing.T) {
+	cases := []struct {
+		name  string
+		seed  func(d *presenceDeployment, t *testing.T)
+		spoil func(s *presenceSpy)
+	}{
+		{
+			name: "pass 1 cannot announce the departure",
+			seed: func(d *presenceDeployment, t *testing.T) {
+				d.deadRow(t, "workshop.scribe")
+				d.spy.exists["workshop.scribe"] = true
+			},
+			spoil: func(s *presenceSpy) { s.emitErr = fmt.Errorf("cannot reach the medium") },
+		},
+		{
+			name:  "pass 2 cannot destroy the orphan queue",
+			seed:  func(d *presenceDeployment, t *testing.T) { d.spy.exists["workshop.ghost"] = true },
+			spoil: func(s *presenceSpy) { s.deleteErr = fmt.Errorf("cannot reach the medium") },
+		},
+		{
+			name:  "pass 2 cannot announce the orphan's departure",
+			seed:  func(d *presenceDeployment, t *testing.T) { d.spy.exists["workshop.ghost"] = true },
+			spoil: func(s *presenceSpy) { s.emitErr = fmt.Errorf("cannot reach the medium") },
+		},
+		{
+			// The row is written by subscribe rather than by hand: a
+			// registration is alive only when its recorded start time matches
+			// what the operating system says now, so a hand-written start time
+			// reads as DEAD and pass 3 would never see the row.
+			name: "pass 3 cannot announce the join",
+			seed: func(d *presenceDeployment, t *testing.T) {
+				if code, _, errOut := exec("subscribe", "workshop.scribe", "--pid", alivePid(),
+					"--type", "acme-cli", "--version", "3.2.0"); code != 0 {
+					t.Fatalf("subscribe exited %d (stderr %q)", code, errOut)
+				}
+				delete(d.spy.exists, "workshop.scribe")
+				d.spy.created, d.spy.emitted, d.spy.emittedOn = nil, nil, nil
+			},
+			spoil: func(s *presenceSpy) { s.emitErr = fmt.Errorf("cannot reach the medium") },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newPresenceDeployment(t)
+			tc.seed(d, t)
+			tc.spoil(d.spy)
+
+			code, _, errOut := exec("sweep", "workshop")
+			if code != 1 || errOut != "loc: cannot reach the medium\n" {
+				t.Errorf("exit %d, stderr %q; want the refusal reported", code, errOut)
+			}
+		})
 	}
 }
 

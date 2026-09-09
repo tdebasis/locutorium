@@ -152,16 +152,16 @@ func (p *Provider) Queues(instance string) ([]string, error) {
 			return nil, err
 		}
 	}
-	scope := "queue.*.*"
+	scope, what := "queue.*.*", "every instance"
 	if instance != "" {
-		scope = "queue." + instance + ".*"
+		scope, what = "queue."+instance+".*", "'"+instance+"'"
 	}
 	if err := p.connect(); err != nil {
 		return nil, err
 	}
 	js, err := jetstream.New(p.nc)
 	if err != nil {
-		return nil, fmt.Errorf("cannot list the queues of '%s': %v", instance, err)
+		return nil, fmt.Errorf("cannot list the queues of %s: %v", what, err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), listBound)
 	defer cancel()
@@ -174,7 +174,7 @@ func (p *Provider) Queues(instance string) ([]string, error) {
 		}
 	}
 	if err := lister.Err(); err != nil {
-		return nil, fmt.Errorf("cannot list the queues of '%s': %v", instance, err)
+		return nil, fmt.Errorf("cannot list the queues of %s: %v", what, err)
 	}
 	sort.Strings(out)
 	return out, nil

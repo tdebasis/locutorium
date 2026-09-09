@@ -321,10 +321,13 @@ func unsubscribeVerb(args []string) error {
 // seat, and pass 1 then has to destroy the queue pass 3 just made.
 //
 // The broker is asked for its listing ONCE, before any pass changes anything,
-// so all three passes compare against one picture taken at one moment. A
-// listing that failed stops the verb before any pass runs. Ignorance is not an
-// empty listing: a sweep that read a refusal as "no queues" would destroy every
-// live seat's queue.
+// so all three passes compare against one picture taken at one moment.
+//
+// A LISTING THAT FAILED STOPS THE WHOLE SWEEP, every instance, and that is
+// deliberate. Ignorance is not an empty listing: a sweep that read a refusal as
+// "no queues" would destroy every live seat's queue. The incident it records at
+// that point is what makes the stop visible on a timer, which sees an exit code
+// and nothing else.
 func sweepVerb(w io.Writer, args []string) error {
 	instance, rest := leadingWord(args)
 	if len(rest) > 0 {
@@ -343,6 +346,21 @@ func sweepVerb(w io.Writer, args []string) error {
 	if err := withPresence(func(pr provider.Presence) error {
 		queued, err := pr.Queues(instance)
 		if err != nil {
+			// The sweep stops here, so this record is the only place a timer
+			// can learn what refused the listing.
+			//
+			// ONE REASON FOR BOTH FAULTS. A dial that never connected and a
+			// listing that connected and then failed arrive here as the same
+			// kind of value: internal/provider/nats keeps its
+			// unreachable-medium sentinel unexported, and it wraps its listing
+			// errors with %v rather than %w, so neither errors.Is nor a type
+			// assertion can tell the two apart from this package. The detail
+			// text carries the difference verbatim.
+			//
+			// IT IS RECORDED AND NOT PUBLISHED. The medium is the thing that
+			// just failed, so an event about the failure would fail the same
+			// way.
+			model.LogIncident(model.NewIncident(instance, "", model.IncidentEnumerationRefused, err.Error()))
 			return err
 		}
 		attended := make(map[string]bool, len(queued))
