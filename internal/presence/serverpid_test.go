@@ -18,6 +18,33 @@ func TestReleaseServerPIDOnAnAbsentFileIsSuccess(t *testing.T) {
 	}
 }
 
+// Line 32 of serverpid.go returns any error that is not IsNotExist. Absence
+// is the only failure Release treats as success; a non-empty directory at
+// the path is a real failure, and it must reach the caller unchanged.
+func TestReleaseServerPIDReportsAFailureThatIsNotAbsence(t *testing.T) {
+	scratch(t)
+
+	p := ServerPIDFile("workshop.scribe")
+	if err := os.MkdirAll(p, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(p, "child"), nil, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	if err := ReleaseServerPID("workshop.scribe"); err == nil {
+		t.Fatalf("release of a non-empty directory: nil, want an error")
+	}
+
+	info, err := os.Stat(p)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("the path is no longer a directory")
+	}
+}
+
 func TestReleaseServerPIDRemovesThePresentFile(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("LOC_HOME", home)
