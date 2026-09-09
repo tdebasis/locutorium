@@ -34,6 +34,7 @@ type presenceSpy struct {
 	created, deleted []string
 	exists           map[string]bool
 	emitted          [][]byte
+	emittedOn        []string
 	requested        []string
 	watched          string
 
@@ -70,14 +71,15 @@ func (s *presenceSpy) QueueExists(endpoint string) (bool, error) {
 
 // Queues answers from the same map QueueExists answers from, filtered to one
 // instance and sorted, so the spy cannot report a listing that disagrees with
-// what it reports one endpoint at a time.
+// what it reports one endpoint at a time. An empty instance is every queue the
+// spy has, which is what the real provider's widened subject filter gives.
 func (s *presenceSpy) Queues(instance string) ([]string, error) {
 	if s.queuesErr != nil {
 		return nil, s.queuesErr
 	}
 	var out []string
 	for e, ok := range s.exists {
-		if ok && model.Instance(e) == instance {
+		if ok && (instance == "" || model.Instance(e) == instance) {
 			out = append(out, e)
 		}
 	}
@@ -85,8 +87,12 @@ func (s *presenceSpy) Queues(instance string) ([]string, error) {
 	return out, nil
 }
 
+// Emit records the instance it was asked to speak in alongside the event, so a
+// case can hold that an event went out on ITS OWN instance's subject and not
+// on the one the verb was called about.
 func (s *presenceSpy) Emit(instance string, event []byte) error {
 	s.emitted = append(s.emitted, event)
+	s.emittedOn = append(s.emittedOn, instance)
 	return s.emitErr
 }
 
@@ -274,14 +280,19 @@ func TestPresenceVerbsRefusals(t *testing.T) {
 	}
 }
 
-// With the instance left out, these verbs mean the caller's own — and a caller
-// whose identity is not an endpoint has no instance to take one from. It is
-// refused rather than guessed: there is no "every instance".
+// With the instance left out, registry and watch mean the caller's own — and a
+// caller whose identity is not an endpoint has no instance to take one from. It
+// is refused rather than guessed: each instance is a separate subject with its
+// own host, so asking one question of all of them is undefined.
+//
+// SWEEP IS NOT IN THIS LIST. A sweep reads the ledger and the broker rather
+// than asking one instance's host a question, so its bare form covers every
+// instance it finds and takes nothing from the caller's identity.
 func TestAnInstanceOmittedComesFromTheCallersIdentity(t *testing.T) {
 	d := newPresenceDeployment(t)
 	d.spy.reply = []byte(`{"agents":[]}`)
 
-	for _, verb := range []string{"sweep", "registry", "watch"} {
+	for _, verb := range []string{"registry", "watch"} {
 		t.Run(verb+" takes the caller's instance", func(t *testing.T) {
 			if code, _, errOut := exec(verb); code != 0 {
 				t.Errorf("%s exited %d (stderr %q), want the caller's own instance to serve", verb, code, errOut)
@@ -296,7 +307,7 @@ func TestAnInstanceOmittedComesFromTheCallersIdentity(t *testing.T) {
 	}
 
 	t.Setenv("LOC_IDENTITY", "scribe")
-	for _, verb := range []string{"sweep", "registry", "watch"} {
+	for _, verb := range []string{"registry", "watch"} {
 		t.Run(verb+" with an unqualified identity", func(t *testing.T) {
 			code, out, errOut := exec(verb)
 			want := "loc: no instance given, and the caller's identity 'scribe' is not " +
@@ -306,7 +317,7 @@ func TestAnInstanceOmittedComesFromTheCallersIdentity(t *testing.T) {
 	}
 
 	t.Setenv("LOC_IDENTITY", "")
-	for _, verb := range []string{"sweep", "registry", "watch"} {
+	for _, verb := range []string{"registry", "watch"} {
 		t.Run(verb+" with no identity at all", func(t *testing.T) {
 			_, _, errOut := exec(verb)
 			if !strings.Contains(errOut, "cannot determine sender identity") {
@@ -353,13 +364,49 @@ func TestSubscribeRefusesAHeldEndpointNamingTheIncumbent(t *testing.T) {
 	if code != 1 || out != "" {
 		t.Errorf("exit %d, stdout %q; want 1 and nothing", code, out)
 	}
-	for _, want := range []string{"is held by", "pid " + pid, "loc unsubscribe workshop.scribe"} {
+	for _, want := range []string{
+		"is held by", "pid " + pid,
+		"loc unsubscribe workshop.scribe",
+		"loc subscribe workshop.scribe --force",
+	} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("refusal %q does not carry %q", errOut, want)
 		}
 	}
 	if len(d.spy.created) != 1 {
 		t.Errorf("a refused subscribe created a queue: %v", d.spy.created)
+	}
+}
+
+// --force takes a held endpoint deliberately, the way unsubscribe --force
+// frees one. The row afterwards names the new process, so a caller can tell
+// the take happened.
+func TestSubscribeForceTakesAHeldEndpoint(t *testing.T) {
+	d := newPresenceDeployment(t)
+
+	if code, _, errOut := exec("subscribe", "workshop.scribe", "--pid", alivePid(),
+		"--type", "acme-cli", "--version", "3.2.0"); code != 0 {
+		t.Fatalf("first subscribe exited %d (stderr %q)", code, errOut)
+	}
+
+	code, out, errOut := exec("subscribe", "workshop.scribe", "--pid", "4242",
+		"--type", "acme-cli", "--version", "3.2.0", "--force")
+	assertResult(t, code, out, errOut, 0, "", "")
+
+	var reg model.Registration
+	b, err := os.ReadFile(d.ledger("workshop.scribe.json"))
+	if err != nil {
+		t.Fatalf("read the row: %v", err)
+	}
+	if err := json.Unmarshal(b, &reg); err != nil {
+		t.Fatalf("unmarshal the row: %v", err)
+	}
+	if reg.Process.PID != 4242 {
+		t.Errorf("the row names pid %d, want the taking process 4242", reg.Process.PID)
+	}
+	ev := decodeEvent(t, d.spy.emitted, "agent.subscribe")
+	if ev["endpoint"] != "workshop.scribe" {
+		t.Errorf("the join event names %v, want workshop.scribe", ev["endpoint"])
 	}
 }
 
@@ -533,15 +580,346 @@ func TestSweepReapsOnlyTheDead(t *testing.T) {
 	}
 }
 
-// With nothing dead the sweep opens no medium at all: it is safe on a timer
-// precisely because it does nothing when there is nothing to do.
-func TestSweepWithNothingDeadDoesNothing(t *testing.T) {
+// With nothing to reconcile the sweep changes nothing and says nothing. It
+// still asks the broker, because a reconcile cannot know there is nothing to do
+// until it has compared the two pictures. What makes it safe on a timer is that
+// it creates nothing, destroys nothing and publishes nothing when the two
+// pictures already agree.
+func TestSweepWithNothingToReconcileChangesNothing(t *testing.T) {
 	d := newPresenceDeployment(t)
 
 	code, out, errOut := exec("sweep", "workshop")
 	assertResult(t, code, out, errOut, 0, "", "")
-	if d.spy.closed != 0 {
-		t.Error("a sweep with nothing to reap opened the medium")
+	if len(d.spy.created)+len(d.spy.deleted)+len(d.spy.emitted) != 0 {
+		t.Errorf("a sweep with nothing to do acted: created=%v deleted=%v emitted=%d",
+			d.spy.created, d.spy.deleted, len(d.spy.emitted))
+	}
+}
+
+// ------------------------------------------------------- sweep as a reconcile
+
+// deadRow writes a registration whose process is gone, without going through
+// subscribe: the pid is the file's dead-pid literal.
+func (d *presenceDeployment) deadRow(t *testing.T, endpoint string) {
+	t.Helper()
+	writeFile(t, d.ledger(endpoint+".json"),
+		`{"endpoint":"`+endpoint+`","instance":"`+model.Instance(endpoint)+`",`+
+			`"process":{"pid":4242,"started":""},"registered":"2026-01-14T09:12:04.318Z"}`)
+}
+
+// serverPIDFile is where the process serving a seat writes its own pid, spelled
+// here as internal/presence spells it.
+func (d *presenceDeployment) serverPIDFile(endpoint string) string {
+	return filepath.Join(d.home, "run", endpoint+".mcp.pid")
+}
+
+// incidentsFile is the day's incident record under this deployment's home.
+func (d *presenceDeployment) incidentsFile() string {
+	return filepath.Join(d.home, "run", "incidents", time.Now().UTC().Format("2006-01-02")+".jsonl")
+}
+
+// Pass 1. A dead row loses all three things that named it: the queue, the
+// registration, and the server pidfile. One departure goes out, by expiry.
+func TestSweepPass1ClearsEverythingADeadRowNamed(t *testing.T) {
+	d := newPresenceDeployment(t)
+	d.deadRow(t, "workshop.scribe")
+	d.spy.exists["workshop.scribe"] = true
+	writeFile(t, d.serverPIDFile("workshop.scribe"), "4242\n")
+
+	code, out, errOut := exec("sweep", "workshop")
+	if code != 0 || errOut != "" {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+	if want := "reaped workshop.scribe: pid 4242 is gone\n"; out != want {
+		t.Errorf("stdout %q, want %q", out, want)
+	}
+	if d.spy.exists["workshop.scribe"] {
+		t.Error("the dead seat's queue is still there")
+	}
+	if _, err := os.Stat(d.ledger("workshop.scribe.json")); !os.IsNotExist(err) {
+		t.Error("the dead seat's registration is still there")
+	}
+	if _, err := os.Stat(d.serverPIDFile("workshop.scribe")); !os.IsNotExist(err) {
+		t.Error("the dead seat's server pidfile is still there")
+	}
+	if len(d.spy.emitted) != 1 {
+		t.Fatalf("%d events emitted, want exactly one", len(d.spy.emitted))
+	}
+	ev := decodeEvent(t, d.spy.emitted, "agent.unsubscribe")
+	if ev["reason"] != "expiry" || ev["endpoint"] != "workshop.scribe" {
+		t.Errorf("departure = %v, want workshop.scribe by expiry", ev)
+	}
+}
+
+// Pass 2. A queue no registration holds is destroyed, and its departure is
+// announced: something is draining mail that nobody is answering.
+func TestSweepPass2DestroysAQueueNoRowHolds(t *testing.T) {
+	d := newPresenceDeployment(t)
+	d.spy.exists["workshop.ghost"] = true
+
+	code, out, errOut := exec("sweep", "workshop")
+	if code != 0 || errOut != "" {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+	if want := "destroyed the queue for workshop.ghost: no registration holds it\n"; out != want {
+		t.Errorf("stdout %q, want %q", out, want)
+	}
+	if len(d.spy.deleted) != 1 || d.spy.deleted[0] != "workshop.ghost" {
+		t.Errorf("DeleteQueue calls: %v, want only the orphan", d.spy.deleted)
+	}
+	if len(d.spy.emitted) != 1 {
+		t.Fatalf("%d events emitted, want exactly one", len(d.spy.emitted))
+	}
+	decodeEvent(t, d.spy.emitted, "agent.unsubscribe")
+}
+
+// Pass 3. A live row whose queue is gone gets its queue back, and the join is
+// announced again. THE ROW IS NOT REWRITTEN: the agent has been registered
+// since it subscribed, and a reconcile that restamped Registered would make
+// every sweep look like a new arrival.
+func TestSweepPass3RemakesAQueueAndLeavesTheRowAlone(t *testing.T) {
+	d := newPresenceDeployment(t)
+	if code, _, errOut := exec("subscribe", "workshop.scribe", "--pid", alivePid(),
+		"--type", "acme-cli", "--version", "3.2.0"); code != 0 {
+		t.Fatalf("subscribe exited %d (stderr %q)", code, errOut)
+	}
+	before, err := os.ReadFile(d.ledger("workshop.scribe.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The broker lost the queue; the ledger still holds the seat.
+	delete(d.spy.exists, "workshop.scribe")
+	d.spy.created, d.spy.deleted, d.spy.emitted = nil, nil, nil
+
+	code, out, errOut := exec("sweep", "workshop")
+	if code != 0 || errOut != "" {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+	if want := "remade the queue for workshop.scribe\n"; out != want {
+		t.Errorf("stdout %q, want %q", out, want)
+	}
+	if len(d.spy.created) != 1 || d.spy.created[0] != "workshop.scribe" {
+		t.Errorf("CreateQueue calls: %v, want the one live seat", d.spy.created)
+	}
+	if len(d.spy.emitted) != 1 {
+		t.Fatalf("%d events emitted, want exactly one", len(d.spy.emitted))
+	}
+	decodeEvent(t, d.spy.emitted, "agent.subscribe")
+
+	after, err := os.ReadFile(d.ledger("workshop.scribe.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Errorf("the registration was rewritten:\n before %s\n  after %s", before, after)
+	}
+}
+
+// THE ORDER OF THE PASSES. A dead row with no queue must end with no queue.
+// Pass 1 removes the row, so pass 3 never sees it. Run pass 3 first and the
+// sweep makes a queue for a seat that is not running.
+func TestSweepMakesNoQueueForADeadRow(t *testing.T) {
+	d := newPresenceDeployment(t)
+	d.deadRow(t, "workshop.scribe")
+
+	code, _, errOut := exec("sweep", "workshop")
+	if code != 0 || errOut != "" {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+	if len(d.spy.created) != 0 {
+		t.Errorf("the sweep made a queue for a dead seat: %v", d.spy.created)
+	}
+	if _, err := os.Stat(d.ledger("workshop.scribe.json")); !os.IsNotExist(err) {
+		t.Error("the dead row is still there")
+	}
+}
+
+// A LISTING THAT FAILED IS NOT AN EMPTY LISTING. The broker could not say which
+// queues it has, so the sweep changes nothing at all: acting on ignorance here
+// destroys every live seat's queue.
+func TestSweepActsOnNothingWhenTheQueuesCannotBeListed(t *testing.T) {
+	d := newPresenceDeployment(t)
+	d.deadRow(t, "workshop.scribe")
+	d.spy.exists["workshop.ghost"] = true
+	d.spy.queuesErr = fmt.Errorf("cannot reach the medium")
+
+	code, out, _ := exec("sweep", "workshop")
+	if code == 0 || out != "" {
+		t.Errorf("exit %d, stdout %q; want non-zero and nothing", code, out)
+	}
+	if len(d.spy.created)+len(d.spy.deleted)+len(d.spy.emitted) != 0 {
+		t.Errorf("the sweep acted on a listing it never got: created=%v deleted=%v emitted=%d",
+			d.spy.created, d.spy.deleted, len(d.spy.emitted))
+	}
+	if _, err := os.Stat(d.ledger("workshop.scribe.json")); err != nil {
+		t.Error("the sweep reaped a row although it could not list the queues")
+	}
+}
+
+// AN UNREADABLE ROW STOPS PASS 2, AND ONLY PASS 2. The row may hold the
+// endpoint whose queue pass 2 is about to call an orphan, so the queue is left
+// alone. The fault is reported twice, live and durably, and the verb exits
+// non-zero so a timer sees it.
+func TestSweepReportsAnUnreadableRowAndSkipsPass2(t *testing.T) {
+	d := newPresenceDeployment(t)
+	writeFile(t, d.ledger("workshop.bad.json"), "{ not json")
+	d.spy.exists["workshop.bad"] = true
+
+	code, out, errOut := exec("sweep", "workshop")
+	if code == 0 {
+		t.Errorf("exit 0 on an unreadable row; stdout %q stderr %q", out, errOut)
+	}
+	if len(d.spy.deleted) != 0 {
+		t.Errorf("pass 2 ran with an unreadable row in the ledger: %v", d.spy.deleted)
+	}
+	ev := decodeEvent(t, d.spy.emitted, "house.incident")
+	if ev["reason"] != "ledger.unreadable" {
+		t.Errorf("incident reason = %v, want ledger.unreadable", ev["reason"])
+	}
+	if ev["endpoint"] != "workshop.bad" {
+		t.Errorf("incident endpoint = %v, want workshop.bad", ev["endpoint"])
+	}
+	raw, err := os.ReadFile(d.incidentsFile())
+	if err != nil {
+		t.Fatalf("no incident was written down: %v", err)
+	}
+	if lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n"); len(lines) != 1 {
+		t.Errorf("%d lines in the incident record, want one", len(lines))
+	}
+	if !strings.Contains(errOut, "workshop.bad") {
+		t.Errorf("stderr %q does not name the unreadable row", errOut)
+	}
+	if !strings.Contains(errOut, "pass 2") {
+		t.Errorf("stderr %q does not say which pass was skipped", errOut)
+	}
+}
+
+// emittedInstance is the instance an event naming endpoint was published in.
+// It reads the spy's parallel record, so a case can hold that a departure went
+// out on its own instance's subject.
+func emittedInstance(t *testing.T, d *presenceDeployment, kind, endpoint string) string {
+	t.Helper()
+	for i, raw := range d.spy.emitted {
+		var m map[string]any
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatalf("the medium was handed something that is not an event (%v): %s", err, raw)
+		}
+		if m["kind"] == kind && m["endpoint"] == endpoint {
+			return d.spy.emittedOn[i]
+		}
+	}
+	t.Fatalf("no %s for %s among %d emitted", kind, endpoint, len(d.spy.emitted))
+	return ""
+}
+
+// THE BARE FORM KNOWS NOTHING IN ADVANCE. It reads every row on this machine
+// and reconciles all of them in one run. Each departure goes out on its OWN
+// instance's subject, because the subject is derived from the endpoint and not
+// from what the verb was called about.
+func TestSweepBareReapsTheDeadInEveryInstance(t *testing.T) {
+	d := newPresenceDeployment(t)
+	d.deadRow(t, "workshop.scribe")
+	d.deadRow(t, "atelier.clerk")
+	d.spy.exists["workshop.scribe"] = true
+	d.spy.exists["atelier.clerk"] = true
+
+	code, out, errOut := exec("sweep")
+	if code != 0 || errOut != "" {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+	want := "reaped atelier.clerk: pid 4242 is gone\n" +
+		"reaped workshop.scribe: pid 4242 is gone\n"
+	if out != want {
+		t.Errorf("stdout %q, want %q", out, want)
+	}
+	for _, e := range []string{"workshop.scribe", "atelier.clerk"} {
+		if _, err := os.Stat(d.ledger(e + ".json")); !os.IsNotExist(err) {
+			t.Errorf("the row for %s is still there", e)
+		}
+		if d.spy.exists[e] {
+			t.Errorf("the queue for %s is still there", e)
+		}
+	}
+	if len(d.spy.emitted) != 2 {
+		t.Fatalf("%d events emitted, want one departure per dead seat", len(d.spy.emitted))
+	}
+	if got := emittedInstance(t, d, "agent.unsubscribe", "workshop.scribe"); got != "workshop" {
+		t.Errorf("workshop.scribe's departure went out on %q, want workshop", got)
+	}
+	if got := emittedInstance(t, d, "agent.unsubscribe", "atelier.clerk"); got != "atelier" {
+		t.Errorf("atelier.clerk's departure went out on %q, want atelier", got)
+	}
+}
+
+// The bare form runs every pass across every instance in one go: an orphan
+// queue in one instance is destroyed while a lost queue in another is remade.
+func TestSweepBareReconcilesBothWaysAcrossInstances(t *testing.T) {
+	d := newPresenceDeployment(t)
+	if code, _, errOut := exec("subscribe", "workshop.scribe", "--pid", alivePid(),
+		"--type", "acme-cli", "--version", "3.2.0"); code != 0 {
+		t.Fatalf("subscribe exited %d (stderr %q)", code, errOut)
+	}
+	delete(d.spy.exists, "workshop.scribe") // the broker lost it
+	d.spy.exists["atelier.ghost"] = true    // and holds one no row claims
+	d.spy.created, d.spy.deleted, d.spy.emitted, d.spy.emittedOn = nil, nil, nil, nil
+
+	code, out, errOut := exec("sweep")
+	if code != 0 || errOut != "" {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+	want := "destroyed the queue for atelier.ghost: no registration holds it\n" +
+		"remade the queue for workshop.scribe\n"
+	if out != want {
+		t.Errorf("stdout %q, want %q", out, want)
+	}
+	if len(d.spy.deleted) != 1 || d.spy.deleted[0] != "atelier.ghost" {
+		t.Errorf("DeleteQueue calls: %v, want only the orphan", d.spy.deleted)
+	}
+	if len(d.spy.created) != 1 || d.spy.created[0] != "workshop.scribe" {
+		t.Errorf("CreateQueue calls: %v, want only the lost queue", d.spy.created)
+	}
+	if got := emittedInstance(t, d, "agent.unsubscribe", "atelier.ghost"); got != "atelier" {
+		t.Errorf("the orphan's departure went out on %q, want atelier", got)
+	}
+	if got := emittedInstance(t, d, "agent.subscribe", "workshop.scribe"); got != "workshop" {
+		t.Errorf("the remade seat's join went out on %q, want workshop", got)
+	}
+}
+
+// THE BARE FORM DOES NOT NARROW TO THE CALLER'S OWN INSTANCE. The caller here
+// speaks as workshop.scribe and the only dead row is in atelier; the row is
+// reaped all the same. This is the removed default, held so it cannot return.
+func TestSweepBareIgnoresTheCallersIdentity(t *testing.T) {
+	d := newPresenceDeployment(t)
+	t.Setenv("LOC_IDENTITY", "workshop.scribe")
+	d.deadRow(t, "atelier.clerk")
+
+	code, out, errOut := exec("sweep")
+	if code != 0 || errOut != "" {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+	if want := "reaped atelier.clerk: pid 4242 is gone\n"; out != want {
+		t.Errorf("stdout %q, want %q", out, want)
+	}
+	if _, err := os.Stat(d.ledger("atelier.clerk.json")); !os.IsNotExist(err) {
+		t.Error("the bare sweep narrowed to the caller's own instance and left the atelier row")
+	}
+}
+
+// THE NAMED FORM IS NARROW. `sweep <instance>` is scoped to that instance, so a
+// queue in another one is not its to destroy, however orphaned it looks from
+// here. The bare form is the wide one; it is held below.
+func TestSweepNamedIsScopedToThatInstanceAlone(t *testing.T) {
+	d := newPresenceDeployment(t)
+	d.spy.exists["atelier.ghost"] = true
+
+	code, out, errOut := exec("sweep", "workshop")
+	assertResult(t, code, out, errOut, 0, "", "")
+	if len(d.spy.deleted) != 0 {
+		t.Errorf("sweep workshop destroyed %v", d.spy.deleted)
+	}
+	if !d.spy.exists["atelier.ghost"] {
+		t.Error("the other instance's queue is gone")
 	}
 }
 

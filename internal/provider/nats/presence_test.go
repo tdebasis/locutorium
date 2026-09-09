@@ -433,6 +433,52 @@ func TestQueuesListsOnlyOneInstancesQueues(t *testing.T) {
 	}
 }
 
+// AN EMPTY INSTANCE MEANS EVERY NAMESPACED QUEUE. The sweep's bare form knows
+// nothing in advance, so it asks the store for the objects behind
+// `queue.*.*`. The scope is still applied by the server, and it is still only
+// this model's own queues: the topic store and the flat pre-namespace
+// endpoints of an older deployment stay out.
+func TestQueuesWithNoInstanceListsEveryNamespacedQueue(t *testing.T) {
+	h, p := supervisor(t)
+	nc, js := h.admin(t)
+	defer nc.Close()
+
+	for _, e := range []string{scribe, clerk, "atelier.scribe"} {
+		if err := p.CreateQueue(e); err != nil {
+			t.Fatalf("CreateQueue %s: %v", e, err)
+		}
+	}
+	// Asserted present so that its absence from the listing below means the
+	// subject filter excluded it, and not that there was nothing to exclude.
+	if _, err := js.StreamInfo("QUEUE_host"); err != nil {
+		t.Fatalf("the harness's flat endpoint is not there to be excluded: %v", err)
+	}
+	if _, err := js.StreamInfo("TOPICS"); err != nil {
+		t.Fatalf("the topic store is not there to be excluded: %v", err)
+	}
+
+	got, err := p.Queues("")
+	if err != nil {
+		t.Fatalf("Queues(\"\"): %v", err)
+	}
+	want := []string{"atelier.scribe", clerk, scribe}
+	if len(got) != len(want) {
+		t.Fatalf("Queues(\"\") = %v, want exactly %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Queues(\"\") = %v, want exactly %v (sorted)", got, want)
+		}
+	}
+	for _, unwanted := range []string{"TOPICS", "QUEUE_host", "host"} {
+		for _, e := range got {
+			if e == unwanted {
+				t.Errorf("the listing carried %q, which is not a queue of this model", unwanted)
+			}
+		}
+	}
+}
+
 // AN INSTANCE WITH NOTHING ATTENDED IS AN ANSWER, not a failure. Empty and
 // unreachable are the two readings this method exists to keep apart, so the
 // empty one must be clean.

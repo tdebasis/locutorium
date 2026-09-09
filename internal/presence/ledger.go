@@ -90,35 +90,62 @@ func Remove(endpoint string) error {
 	return nil
 }
 
-// List returns every registration in one instance, ordered by endpoint. An
-// unreadable file is skipped rather than failing the whole listing: a sweep
-// that stops at the first bad record leaves the rest of the dead in place.
-func List(instance string) ([]*Registration, error) {
+// Unreadable is one row List could not read, with the error that stopped it.
+//
+// The error text travels with the endpoint because List already has it. A
+// caller that wants to say what was wrong with the row would otherwise have to
+// call Load a second time for an answer List has just thrown away, and the
+// second read can disagree with the first: one read, one answer.
+type Unreadable struct {
+	Endpoint string
+	Err      string
+}
+
+// List returns every registration in one instance, ordered by endpoint, and
+// every row it could not read, ordered the same way.
+//
+// List does not stop at a bad row, and it does not hide one either. The caller
+// decides what an unreadable row means. A sweep that stops at the first bad
+// record leaves the rest of the dead in place; a sweep that never hears about
+// the bad record treats the endpoint as free.
+//
+// A row whose file vanished between the directory listing and the read is not
+// unreadable. It is gone, which is the same answer as never having been there,
+// so it is skipped.
+//
+// AN EMPTY INSTANCE MEANS EVERY ROW, whatever instance it belongs to.
+func List(instance string) ([]*Registration, []Unreadable, error) {
 	entries, err := os.ReadDir(Dir())
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	var out []*Registration
+	var bad []Unreadable
 	for _, e := range entries {
 		name := e.Name()
 		if !strings.HasSuffix(name, ".json") || strings.HasSuffix(name, ".activity.json") {
 			continue
 		}
 		endpoint := strings.TrimSuffix(name, ".json")
-		if Instance(endpoint) != instance {
+		if instance != "" && Instance(endpoint) != instance {
 			continue
 		}
 		r, err := Load(endpoint)
-		if err != nil || r == nil {
+		if err != nil {
+			bad = append(bad, Unreadable{Endpoint: endpoint, Err: err.Error()})
+			continue
+		}
+		if r == nil {
 			continue
 		}
 		out = append(out, r)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Endpoint < out[j].Endpoint })
-	return out, nil
+	sort.Slice(bad, func(i, j int) bool { return bad[i].Endpoint < bad[j].Endpoint })
+	return out, bad, nil
 }
 
 // LoadActivity returns the last applied event for an endpoint, or nil when

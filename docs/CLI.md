@@ -15,7 +15,7 @@ Errors print `loc: <message>` on stderr and exit **1**. Everything else exits **
 | `loc unsub` | stop your listener |
 | `loc subscribe <endpoint> ...` | register an agent instance and create its queue |
 | `loc unsubscribe <endpoint> [--force]` | free the endpoint and destroy its queue |
-| `loc sweep [<instance>]` | unsubscribe registrations whose process is gone |
+| `loc sweep [<instance>]` | reconcile the ledger with the broker — every instance, or one: reap dead rows, destroy orphan queues, remake lost ones |
 | `loc emit <kind> <endpoint> ...` | publish one lifecycle or activity event |
 | `loc status` | unread count per endpoint |
 | `loc status <endpoint>` | one agent's three facts, each with its reason |
@@ -149,6 +149,7 @@ well as the queue.
 ```
 loc subscribe <endpoint> --pid <n> --type <t> --version <v>
               [--display <name>] [--role <role>] [--cwd <dir>] [--address <addr>]
+              [--force]
 ```
 
 Registers one agent instance, creates its queue, and publishes `agent.subscribe` — the one heavy
@@ -185,6 +186,10 @@ An endpoint holds **one instance at a time, and a held one is refused** (non-zer
 incumbent's process — displacing it is a deliberate act by whoever knows the old process is
 finished, not a side effect of somebody else subscribing (PRESENCE.md §One agent per endpoint).
 
+`--force` is that deliberate act, the way `unsubscribe --force` is. It takes a held endpoint and
+records the new process against it. It does not create the queue differently, so the mail already in
+the queue is kept: the new holder reads what the old one left.
+
 A pid that is already gone is registered anyway, with no start time. The caller is reporting what it
 launched; noticing that it did not survive is `sweep`'s job.
 
@@ -210,14 +215,39 @@ and it is a separate word because it is a separate decision (PRESENCE.md §How a
 loc sweep [<instance>]
 ```
 
-Checks every registration in the namespace against its recorded process and unsubscribes the ones
-whose process is gone, with reason `expiry`. An agent that crashes cannot announce its own
-departure, so something has to do it on the agent's behalf.
+Reconciles every instance it finds, or one when it is named. The ledger says who is here. The broker
+says which queues exist. `sweep` makes the two agree, in three passes:
 
-**It must run on the machine holding the processes** — a process id means nothing anywhere else.
-With `<instance>` omitted it means the caller's own, taken from its identity; an identity that is
-not of the form `<instance>.<agent>` is refused, because there is nothing to take one from. A sweep
-with nothing to reap publishes nothing, and that silence is what makes it safe to run on a timer.
+1. **Dead rows.** A registration whose process is gone loses its queue, its registration and its
+   server pidfile, and `agent.unsubscribe` goes out with reason `expiry`. An agent that crashes
+   cannot announce its own departure, so something has to do it on the agent's behalf.
+2. **Orphan queues.** A queue no registration holds is destroyed, and its departure is announced. It
+   would otherwise take mail nobody will ever read.
+3. **Lost queues.** A live registration whose queue the broker no longer has gets the queue back, and
+   `agent.subscribe` goes out again. The registration itself is not rewritten, so the seat does not
+   look like a new arrival.
+
+**Pass 1 runs before pass 3, and the order matters.** A dead seat's row has to be gone before pass 3
+looks for rows without queues. In the other order pass 3 makes a queue for a dead seat, and pass 1
+then has to destroy the queue pass 3 just made.
+
+The broker is asked for its queue listing once, before any pass changes anything. A listing that
+failed stops the verb: ignorance is not an empty listing, and a sweep that read a refusal as "no
+queues" would destroy every live seat's queue.
+
+**A registration that cannot be read skips pass 2 and only pass 2.** That row may hold the very
+endpoint pass 2 is about to call an orphan. The fault is written to `run/incidents` and published as
+`house.incident` with reason `ledger.unreadable`, passes 1 and 3 still run, and the verb exits
+non-zero so a timer sees it.
+
+**The bare form covers every instance on the machine; `sweep <instance>` covers that one.** The bare
+form takes nothing from the caller's identity, because a sweep reads two records rather than asking
+one instance's host a question. **This is what the timer runs**, as the `supervisor` seat.
+
+**It must run on the machine holding the processes** — a process id means nothing anywhere else. A
+sweep always asks the broker, because it cannot know the two pictures agree until it has compared
+them. What makes it safe to run on a timer is that it creates nothing, destroys nothing and
+publishes nothing when they do agree.
 
 ## emit
 

@@ -41,10 +41,12 @@ messages
 presence — called by whoever launches agents
   subscribe <endpoint> --pid <n> --type <t> --version <v>
                             [--display <name>] [--role <role>] [--cwd <dir>]
+                            [--force]
                             register an agent instance and create its queue
   unsubscribe <endpoint> [--reason clean|expiry] [--force]
                             free the endpoint and destroy its queue
-  sweep [<instance>]        unsubscribe registrations whose process is gone
+  sweep [<instance>]        reconcile the ledger with the broker: every
+                            instance, or one
 
 presence — called by adapters
   emit <kind> <endpoint> [--ts <t>] [--tool <name>] [--refs <ids>]
@@ -192,7 +194,7 @@ func dispatch(args []string, w io.Writer) error {
 		return unsubscribeVerb(rest)
 
 	case "sweep":
-		return sweepVerb(rest)
+		return sweepVerb(w, rest)
 
 	case "emit":
 		return emitVerb(rest)

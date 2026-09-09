@@ -131,21 +131,30 @@ func (p *Provider) QueueExists(endpoint string) (bool, error) {
 // rather than a hang, which is the only reading a caller can act on.
 const listBound = 5 * time.Second
 
-// Queues lists the endpoints attended in one instance, sorted.
+// Queues lists the endpoints attended in one instance, sorted. An empty
+// instance lists every namespaced queue, on the subject filter `queue.*.*`.
 //
 // THE SCOPE IS APPLIED BY THE SERVER, BY SUBJECT. The store is asked for the
 // objects behind `queue.<instance>.*` and for nothing else, so the topic
 // store, the other instances, and the flat pre-namespace endpoints of an older
 // deployment are never in the answer to begin with. Filtering a whole listing
-// here instead would need the right to ask for a whole listing.
+// here instead would need the right to ask for a whole listing. The empty
+// instance widens the filter by one token and no further, so the topic store
+// and the flat endpoints stay out of that answer too.
 //
 // THE LISTING IS DRAINED IN FULL BEFORE ANYTHING IS RETURNED, and the lister's
 // own error is read after the drain. A listing that broke halfway looks
 // exactly like a small instance, and the caller of this method acts on
 // absence: a partial list is worse than no list.
 func (p *Provider) Queues(instance string) ([]string, error) {
-	if err := presence.ValidInstance(instance); err != nil {
-		return nil, err
+	if instance != "" {
+		if err := presence.ValidInstance(instance); err != nil {
+			return nil, err
+		}
+	}
+	scope := "queue.*.*"
+	if instance != "" {
+		scope = "queue." + instance + ".*"
 	}
 	if err := p.connect(); err != nil {
 		return nil, err
@@ -157,7 +166,7 @@ func (p *Provider) Queues(instance string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), listBound)
 	defer cancel()
 
-	lister := js.ListStreams(ctx, jetstream.WithStreamListSubject("queue."+instance+".*"))
+	lister := js.ListStreams(ctx, jetstream.WithStreamListSubject(scope))
 	var out []string
 	for info := range lister.Info() {
 		if endpoint, ours := queueEndpoint(info); ours {

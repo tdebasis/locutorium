@@ -251,7 +251,7 @@ func TestAnUnreadableRecordIsReported(t *testing.T) {
 	if err := os.WriteFile(Dir(), []byte("not a directory"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := List("workshop"); err == nil {
+	if _, _, err := List("workshop"); err == nil {
 		t.Error("a record area that is not a directory listed cleanly")
 	}
 	if err := Save(reg("workshop.scribe", 1, "")); err == nil {
@@ -286,14 +286,14 @@ func TestARecordThatCannotBeOpenedIsReported(t *testing.T) {
 	}
 }
 
-// A listing is per instance, in order, and a record it cannot read is skipped
-// rather than stopping it — a sweep that halts at the first bad file leaves
-// the rest of the dead in place.
+// A listing is per instance and in order. A record it cannot read does not stop
+// the listing, and it is not dropped from the answer either: it comes back in
+// the second return value, so the caller can decide what a bad row means.
 func TestListIsPerInstanceAndOrdered(t *testing.T) {
 	scratch(t)
 
-	if got, err := List("workshop"); err != nil || got != nil {
-		t.Fatalf("with no ledger at all: (%v, %v), want nothing and no error", got, err)
+	if got, bad, err := List("workshop"); err != nil || got != nil || bad != nil {
+		t.Fatalf("with no ledger at all: (%v, %v, %v), want nothing, nothing and no error", got, bad, err)
 	}
 	for _, e := range []string{"workshop.scribe", "workshop.clerk", "atelier.scribe"} {
 		if err := Save(reg(e, 4242, "")); err != nil {
@@ -310,7 +310,7 @@ func TestListIsPerInstanceAndOrdered(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := List("workshop")
+	got, bad, err := List("workshop")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -321,6 +321,75 @@ func TestListIsPerInstanceAndOrdered(t *testing.T) {
 	want := []string{"workshop.clerk", "workshop.scribe"}
 	if strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Errorf("List = %v, want %v — one instance, in order, activity records and rubbish left out", names, want)
+	}
+	// The bad row is REPORTED, not skipped. A sweep that never hears about it
+	// would treat the endpoint as free and destroy a queue that is still held.
+	if len(bad) != 1 || bad[0].Endpoint != "workshop.broken" {
+		t.Fatalf("unreadable = %v, want the one bad row workshop.broken", bad)
+	}
+	if bad[0].Err == "" {
+		t.Error("the bad row came back with no error text to say what was wrong with it")
+	}
+}
+
+// AN EMPTY INSTANCE MEANS EVERY ROW. The sweep's bare form reconciles whatever
+// it finds, across every instance on this machine, so it asks for the whole
+// ledger rather than for one namespace.
+func TestListWithNoInstanceReturnsEveryRow(t *testing.T) {
+	scratch(t)
+
+	for _, e := range []string{"workshop.scribe", "atelier.clerk"} {
+		if err := Save(reg(e, 4242, "")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	all, _, err := List("")
+	if err != nil {
+		t.Fatalf("List(\"\"): %v", err)
+	}
+	var names []string
+	for _, r := range all {
+		names = append(names, r.Endpoint)
+	}
+	if strings.Join(names, ",") != "atelier.clerk,workshop.scribe" {
+		t.Errorf("List(\"\") = %v, want both instances in order", names)
+	}
+
+	one, _, err := List("workshop")
+	if err != nil {
+		t.Fatalf("List(\"workshop\"): %v", err)
+	}
+	if len(one) != 1 || one[0].Endpoint != "workshop.scribe" {
+		t.Errorf("List(\"workshop\") = %v, want only the one workshop row", one)
+	}
+}
+
+// The two answers List gives about one directory are separate. A row it could
+// read is in the first return value, a row it could not is in the second, and
+// neither one hides the other.
+func TestListReportsTheRowsItCannotRead(t *testing.T) {
+	scratch(t)
+
+	if err := Save(reg("workshop.scribe", 4242, "")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(Dir(), "workshop.bad.json"), []byte("{ not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, bad, err := List("workshop")
+	if err != nil {
+		t.Fatalf("List returned an error for one bad row: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Endpoint != "workshop.scribe" {
+		t.Errorf("rows = %v, want the one readable row workshop.scribe", rows)
+	}
+	if len(bad) != 1 || bad[0].Endpoint != "workshop.bad" {
+		t.Fatalf("unreadable = %v, want [workshop.bad]", bad)
+	}
+	if !strings.Contains(bad[0].Err, "not readable") {
+		t.Errorf("unreadable error text = %q, want the Load error", bad[0].Err)
 	}
 }
 

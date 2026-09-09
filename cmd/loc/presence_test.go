@@ -653,6 +653,53 @@ func TestPresence_Sweep_SecondSweepEmitsNoUnsubscribe(t *testing.T) {
 	}
 }
 
+// A QUEUE THE BROKER HAS LOST IS REMADE, and the seat is reachable again with
+// no restart of anything. The ledger still holds the seat, so the sweep's third
+// pass puts the queue back; the send and the read afterwards are what prove the
+// queue is a working queue and not merely an object with the right name.
+func TestPresence_Sweep_RemakesALostQueueAndTheSeatReadsAgain(t *testing.T) {
+	p := newPresence(t)
+	p.as(t, "host")
+	if code, _, errOut := exec("subscribe", e2, "--pid", pidStr(livePid(t)),
+		"--type", "acme-cli", "--version", "3.2.0"); code != 0 {
+		t.Fatalf("subscribe exited %d (stderr %q)", code, errOut)
+	}
+	if !p.qexists(q2) {
+		t.Fatalf("precondition: subscribe did not create %s", q2)
+	}
+	// The broker loses the queue. Nothing tells the ledger, which still holds
+	// the seat: this is the divergence the reconcile exists to close.
+	if err := p.adminJS.DeleteStream(q2); err != nil {
+		t.Fatalf("delete %s through the admin handle: %v", q2, err)
+	}
+	if p.qexists(q2) {
+		t.Fatalf("precondition: %s survived the delete", q2)
+	}
+
+	code, out, errOut := exec("sweep", "workshop")
+	if code != 0 {
+		t.Fatalf("sweep exited %d (stderr %q)", code, errOut)
+	}
+	if !strings.Contains(out, "remade the queue for "+e2) {
+		t.Errorf("sweep said %q, which does not report remaking %s", out, e2)
+	}
+	if !p.qexists(q2) {
+		t.Fatalf("the sweep did not remake %s", q2)
+	}
+
+	if code, _, errOut := exec("send", e2, "after-the-sweep"); code != 0 {
+		t.Fatalf("send exited %d (stderr %q)", code, errOut)
+	}
+	p.as(t, e2)
+	code, out, errOut = exec("read")
+	if code != 0 {
+		t.Fatalf("read exited %d (stderr %q)", code, errOut)
+	}
+	if !strings.Contains(out, "after-the-sweep") {
+		t.Errorf("the seat read %q; the message sent after the sweep is not in it", out)
+	}
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // 5. Ephemeral queues; a send to an absent endpoint is REFUSED for ABSENCE
 //    PRESENCE.md §Queue lifetime; §Inner and outer parlors ("Send is refused —

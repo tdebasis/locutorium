@@ -501,6 +501,11 @@ The same request is what a person's tooling uses to list registered agents with 
 connected, and checking each recorded process. Agents outlive their host, so a restarted host must
 rediscover them rather than assume it has none.
 
+**`sweep` is what rebuilds the broker's picture.** Its three passes reap the registrations whose
+process is gone, destroy the queues no registration holds, and remake the queues live registrations
+have lost. A broker that lost its queues and a host that lost its ledger are the two ways the two
+pictures come apart, and one verb closes both.
+
 ## Command-line operations
 
 The operations this model requires, grouped by who calls them. Message send and receive are outside
@@ -512,7 +517,7 @@ this document's scope and are not listed.
 |---|---|
 | `subscribe <endpoint> --pid <n> --type <t> --version <v> [--display …] [--cwd …]` | Registers an agent instance, creates its queue, publishes `agent.subscribe`. **Refused (non-zero) if the endpoint already holds a registration** — free it with `unsubscribe` first. |
 | `unsubscribe <endpoint> [--reason clean\|expiry] [--force]` | Removes the registration, destroys the queue, publishes `agent.unsubscribe`. Defaults to `clean`. Succeeds on an empty endpoint (no-op) or a **dead** incumbent, and **refuses a live incumbent** (non-zero, naming its process) unless **`--force`** is given. An unconditional `unsubscribe`-then-`subscribe` restart is therefore always safe. |
-| `sweep [<instance>]` | Checks every registration in the namespace against its recorded process and unsubscribes those whose process is gone, with `--reason expiry`. **Must run on the machine holding the processes.** Idempotent; safe to run on a timer. |
+| `sweep [<instance>]` | Reconciles the ledger against the broker. **Bare it covers every instance on the machine; named it covers that one**, and the bare form is what a timer runs. It takes no instance from the caller's identity. Three passes: **(1)** unsubscribes registrations whose process is gone, with `--reason expiry`; **(2)** destroys queues no registration holds; **(3)** remakes the queues live registrations have lost, without rewriting the registration. Pass 1 runs before pass 3, or pass 3 makes a queue for a dead seat. A queue listing that failed stops the verb; an unreadable registration skips pass 2 alone, is recorded as `house.incident` with reason `ledger.unreadable`, and exits non-zero. **Must run on the machine holding the processes.** Idempotent; safe to run on a timer. |
 
 ### Called by adapters
 

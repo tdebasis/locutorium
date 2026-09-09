@@ -132,6 +132,11 @@ func incumbent(reg *model.Registration) string {
 // knows the old process is finished, not a side effect of somebody else
 // subscribing. What must not persist is two instances draining one queue, each
 // receiving part of the mail.
+//
+// --force takes a held endpoint deliberately, the way unsubscribe --force
+// frees one. It is a separate word because it is a separate decision. It does
+// not create the queue differently, so mail already in the queue is kept: the
+// new holder reads what the old one left.
 func subscribeVerb(args []string) error {
 	if len(args) == 0 {
 		return errUsage
@@ -141,10 +146,11 @@ func subscribeVerb(args []string) error {
 		return err
 	}
 	var pidArg, agentType, version, display, role, cwd, address string
+	force := false
 	if err := parseFlags(args[1:], map[string]*string{
 		"--pid": &pidArg, "--type": &agentType, "--version": &version,
 		"--display": &display, "--role": &role, "--cwd": &cwd, "--address": &address,
-	}, nil); err != nil {
+	}, map[string]*bool{"--force": &force}); err != nil {
 		return err
 	}
 	if pidArg == "" || agentType == "" || version == "" {
@@ -159,9 +165,10 @@ func subscribeVerb(args []string) error {
 	if err != nil {
 		return err
 	}
-	if held != nil {
-		return fmt.Errorf("endpoint '%s' is held by %s; free it with 'loc unsubscribe %s'",
-			endpoint, incumbent(held), endpoint)
+	if held != nil && !force {
+		return fmt.Errorf("endpoint '%s' is held by %s; free it with 'loc unsubscribe %s', "+
+			"or take it with 'loc subscribe %s --force'",
+			endpoint, incumbent(held), endpoint, endpoint)
 	}
 
 	// A pid that is ALREADY GONE is registered anyway, with no start time. The
@@ -287,54 +294,181 @@ func unsubscribeVerb(args []string) error {
 
 // ---------------------------------------------------------------------- sweep
 
-// sweepVerb unsubscribes every registration whose process is gone.
+// sweepVerb RECONCILES every instance it finds, or one when it is named. The
+// ledger says who is here. The broker says which queues exist. This verb makes
+// the two agree.
 //
-// An agent that crashes cannot announce its own departure, so something must
-// do it on its behalf — and because the registration carries the pid, this
-// needs no detection, only a periodic look. It MUST RUN ON THE MACHINE HOLDING
-// THE PROCESSES: a process id means nothing anywhere else.
-func sweepVerb(args []string) error {
+// THE BARE FORM KNOWS NOTHING IN ADVANCE. It reads every row on this machine
+// and lists every namespaced queue on the broker. It does not take an instance
+// from the caller's identity: a sweep reads two records rather than asking one
+// instance's host a question, so there is nothing for one instance's name to
+// scope. `sweep <instance>` is the narrow form, and it is the only form that
+// takes a name.
+//
+// An agent that crashes cannot announce its own departure, so something must do
+// it on the agent's behalf. The registration carries the pid, so this needs no
+// detection, only a periodic look. It MUST RUN ON THE MACHINE HOLDING THE
+// PROCESSES: a process id means nothing anywhere else.
+//
+// There are three passes and THEIR ORDER MATTERS.
+//
+//  1. Reap the rows whose process is gone.
+//  2. Destroy the queues no row holds.
+//  3. Remake the queues live rows have lost.
+//
+// Pass 1 runs before pass 3. A dead seat's row must be gone before pass 3 looks
+// for rows without queues. In the other order pass 3 makes a queue for a dead
+// seat, and pass 1 then has to destroy the queue pass 3 just made.
+//
+// The broker is asked for its listing ONCE, before any pass changes anything,
+// so all three passes compare against one picture taken at one moment. A
+// listing that failed stops the verb before any pass runs. Ignorance is not an
+// empty listing: a sweep that read a refusal as "no queues" would destroy every
+// live seat's queue.
+func sweepVerb(w io.Writer, args []string) error {
 	instance, rest := leadingWord(args)
 	if len(rest) > 0 {
 		return errUsage
 	}
-	instance, err := instanceOf(instance)
-	if err != nil {
-		return err
-	}
-	if err := model.ValidInstance(instance); err != nil {
-		return err
-	}
-	regs, err := model.List(instance)
-	if err != nil {
-		return err
-	}
-	var gone []*model.Registration
-	for _, r := range regs {
-		if !r.Alive() {
-			gone = append(gone, r)
+	if instance != "" {
+		if err := model.ValidInstance(instance); err != nil {
+			return err
 		}
 	}
-	if len(gone) == 0 {
-		// Idempotent, and audibly so: a sweep with nothing to reap publishes
-		// NOTHING. The absence of a second departure is what makes it safe to
-		// run on a timer.
-		return nil
+	rows, unreadable, err := model.List(instance)
+	if err != nil {
+		return err
 	}
-	return withPresence(func(pr provider.Presence) error {
-		for _, r := range gone {
+
+	if err := withPresence(func(pr provider.Presence) error {
+		queued, err := pr.Queues(instance)
+		if err != nil {
+			return err
+		}
+		attended := make(map[string]bool, len(queued))
+		for _, e := range queued {
+			attended[e] = true
+		}
+		held := make(map[string]bool, len(rows))
+		for _, r := range rows {
+			held[r.Endpoint] = true
+		}
+		if err := reportUnreadableRows(pr, unreadable); err != nil {
+			return err
+		}
+
+		// Pass 1. The process is gone, so everything that named it goes: the
+		// queue, the registration, and the pidfile of the server that held the
+		// seat.
+		reaped := map[string]bool{}
+		for _, r := range rows {
+			if r.Alive() {
+				continue
+			}
 			if err := pr.DeleteQueue(r.Endpoint); err != nil {
 				return err
 			}
 			if err := model.Remove(r.Endpoint); err != nil {
 				return err
 			}
+			if err := model.ReleaseServerPID(r.Endpoint); err != nil {
+				return err
+			}
 			if err := emitDeparture(pr, r.Endpoint, "expiry"); err != nil {
 				return err
 			}
+			reaped[r.Endpoint] = true
+			fmt.Fprintf(w, "reaped %s: pid %d is gone\n", r.Endpoint, r.Process.PID)
+		}
+
+		// Pass 2. A queue no registration holds takes mail nobody will ever
+		// read. It is destroyed, and the departure is announced, because a
+		// consumer that saw the join must be told the seat is empty.
+		//
+		// AN UNREADABLE ROW SKIPS THIS WHOLE PASS. The row that could not be
+		// read may be the row that holds one of these endpoints, and destroying
+		// a live seat's queue on the strength of a row nobody could read is the
+		// one outcome this pass must never produce.
+		//
+		// A row pass 1 reaped is still a row here, so a queue pass 1 destroyed
+		// is not destroyed a second time.
+		if len(unreadable) == 0 {
+			for _, e := range queued {
+				if held[e] {
+					continue
+				}
+				if err := pr.DeleteQueue(e); err != nil {
+					return err
+				}
+				if err := emitDeparture(pr, e, "expiry"); err != nil {
+					return err
+				}
+				fmt.Fprintf(w, "destroyed the queue for %s: no registration holds it\n", e)
+			}
+		}
+
+		// Pass 3. A live seat whose queue the broker has lost gets its queue
+		// back, and the join is announced again so a consumer can hear it.
+		//
+		// THE ROW IS NOT REWRITTEN. The agent has been registered since it
+		// subscribed, and a reconcile that restamped Registered would make
+		// every sweep look like a new arrival.
+		for _, r := range rows {
+			if reaped[r.Endpoint] || attended[r.Endpoint] {
+				continue
+			}
+			if err := pr.CreateQueue(r.Endpoint); err != nil {
+				return err
+			}
+			if err := emitJoin(pr, r); err != nil {
+				return err
+			}
+			fmt.Fprintf(w, "remade the queue for %s\n", r.Endpoint)
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+
+	if len(unreadable) > 0 {
+		return unreadableRowError(unreadable)
+	}
+	return nil
+}
+
+// reportUnreadableRows records and announces one incident for each row the
+// ledger could not read. The house detected the fault, so the house reports it
+// both ways: a line in run/incidents for whoever looks later, and an event for
+// whoever is watching now. The event goes out through emitEvent, which is how
+// emitJoin publishes.
+//
+// The instance comes from the ROW, not from the verb's argument. A bare sweep
+// has no instance of its own, and an incident belongs to the house that owns
+// the row it is about.
+func reportUnreadableRows(pr provider.Presence, unreadable []model.Unreadable) error {
+	for _, u := range unreadable {
+		ev := model.NewIncident(model.Instance(u.Endpoint), u.Endpoint, model.IncidentLedgerUnreadable, u.Err)
+		model.LogIncident(ev)
+		if err := emitEvent(pr, *ev); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// unreadableRowError is what a sweep that skipped pass 2 exits with. The sweep
+// did not finish, so it must not report success: a timer reads the exit code
+// and nothing else.
+func unreadableRowError(unreadable []model.Unreadable) error {
+	names := make([]string, 0, len(unreadable))
+	for _, u := range unreadable {
+		names = append(names, "'"+u.Endpoint+"'")
+	}
+	if len(names) == 1 {
+		return fmt.Errorf("the registration for %s is not readable; pass 2 (orphan queues) skipped", names[0])
+	}
+	return fmt.Errorf("the registrations for %s are not readable; pass 2 (orphan queues) skipped",
+		strings.Join(names, ", "))
 }
 
 // ----------------------------------------------------------------------- emit

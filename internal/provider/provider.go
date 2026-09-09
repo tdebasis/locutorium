@@ -62,7 +62,9 @@ type Presence interface {
 	// are different answers, and only one of them justifies refusing a send.
 	QueueExists(endpoint string) (bool, error)
 
-	// Queues lists the ENDPOINTS attended in one instance, sorted. It is the
+	// Queues lists the ENDPOINTS attended in one instance, sorted. AN EMPTY
+	// INSTANCE LISTS EVERY NAMESPACED QUEUE, which is what a reconcile that
+	// knows nothing in advance asks for. It is the
 	// plural of QueueExists and it carries that method's rule: a listing that
 	// could not be completed is an ERROR, never a short list. Absence and
 	// ignorance are different answers, and a caller reconciling a registry

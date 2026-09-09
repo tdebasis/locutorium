@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -307,5 +309,47 @@ func TestLogIncidentSurvivesAFileItCannotOpen(t *testing.T) {
 	}
 	if !fi.IsDir() {
 		t.Errorf("path is no longer a directory")
+	}
+}
+
+// MANY PROCESSES APPEND TO THE DAY'S FILE AT ONCE, and this holds the claim
+// LogIncident's doc comment makes about that: the line is handed to Write once,
+// so no other writer's line can land between two halves of it.
+//
+// 64 goroutines share one open-append-close cycle each, against one scratch
+// home. The file must end with 64 lines and every line must be a whole event.
+// A version that writes the bytes and the newline in two calls fails here: the
+// interleaving splits records and the count comes out wrong.
+func TestLogIncidentSurvivesConcurrentCallers(t *testing.T) {
+	home := scratch(t)
+
+	const callers = 64
+	var wg sync.WaitGroup
+	wg.Add(callers)
+	for i := 0; i < callers; i++ {
+		go func(n int) {
+			defer wg.Done()
+			LogIncident(NewIncident("workshop", "workshop.scribe", IncidentLedgerUnreadable,
+				"caller "+strconv.Itoa(n)))
+		}(i)
+	}
+	wg.Wait()
+
+	raw, err := os.ReadFile(incidentPath(home))
+	if err != nil {
+		t.Fatalf("read incidents: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	if len(lines) != callers {
+		t.Fatalf("want exactly %d lines, got %d", callers, len(lines))
+	}
+	for i, line := range lines {
+		var got map[string]string
+		if err := json.Unmarshal([]byte(line), &got); err != nil {
+			t.Fatalf("line %d is not one whole event (%v): %q", i, err, line)
+		}
+		if got["kind"] != KindIncident {
+			t.Errorf("line %d kind = %q, want %q", i, got["kind"], KindIncident)
+		}
 	}
 }
