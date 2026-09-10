@@ -269,8 +269,15 @@ func (p *Provider) topicSubjects() map[string]uint64 {
 	return info.State.Subjects
 }
 
-// Status writes one line per endpoint in the registry: how many messages that
-// endpoint has not yet taken.
+// Status writes one line per REGISTERED SEAT: how many messages that seat has
+// not yet taken.
+//
+// THE LEDGER IS THE ROSTER, NOT THE `endpoints` FILE. A seat exists because it
+// subscribed, and the ledger is the record of that; the static file was a list
+// somebody maintained by hand, so it reported seats that had gone and omitted
+// seats that had arrived. A row the ledger cannot read is left out of the
+// counts and reported by the caller, which knows what an unreadable row means
+// for the rest of the report.
 //
 // A count that cannot be obtained prints "?" rather than failing the verb. A
 // status report is most wanted exactly when something is wrong, and a report
@@ -280,12 +287,16 @@ func (p *Provider) Status(w io.Writer) error {
 	if connected != nil && connected != errConnect {
 		return connected
 	}
-	for _, e := range loc.Endpoints() {
+	rows, _, err := presence.ListAll()
+	if err != nil {
+		return err
+	}
+	for _, r := range rows {
 		pending := "?"
 		if connected == nil {
-			pending = p.unread(e)
+			pending = p.unread(r.Endpoint)
 		}
-		if _, err := io.WriteString(w, formatStatus(e, pending)); err != nil {
+		if _, err := io.WriteString(w, formatStatus(r.Endpoint, pending)); err != nil {
 			return err
 		}
 	}

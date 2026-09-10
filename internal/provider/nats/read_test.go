@@ -45,6 +45,7 @@ func nsHarness(t *testing.T, endpoints ...string) *harness {
 	h := &harness{srv: srv, home: home, url: srv.URL, endpoints: endpoints}
 	write(t, filepath.Join(home, "config"), "nats_url = "+h.url+"\n")
 	write(t, filepath.Join(home, "endpoints"), strings.Join(endpoints, "\n")+"\n")
+	seedLedger(t, home, endpoints...)
 	for _, u := range users {
 		write(t, filepath.Join(home, "creds", u), testPassword)
 	}
@@ -334,6 +335,7 @@ func TestNextTopicIsDryWhenTheApiRefuses(t *testing.T) {
 	}, false)
 	write(t, filepath.Join(home, "config"), "nats_url = "+srv.URL+"\n")
 	write(t, filepath.Join(home, "endpoints"), "ada\n")
+	seedLedger(t, home, "ada")
 	write(t, filepath.Join(home, "creds", "ada"), testPassword)
 	write(t, filepath.Join(home, "creds", "admin"), testPassword)
 	t.Setenv("LOC_HOME", home)

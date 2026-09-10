@@ -48,6 +48,7 @@ func newNamespaced(t *testing.T, endpoints []string, withQueues []string) *names
 
 	write(t, filepath.Join(home, "config"), "nats_url = "+srv.URL+"\n")
 	write(t, filepath.Join(home, "endpoints"), strings.Join(endpoints, "\n")+"\n")
+	seedLedger(t, home, endpoints...)
 	for _, u := range users {
 		write(t, filepath.Join(home, "creds", u.Username), testPassword)
 	}
@@ -116,7 +117,10 @@ func TestStatusPrintsAQuestionMarkForANamespacedEndpointWithNoQueue(t *testing.T
 	if err := p.Status(&out); err != nil {
 		t.Fatalf("Status: %v", err)
 	}
-	want := "workshop.scribe unread: 1\nworkshop.clerk unread: ?\n"
+	// ENDPOINT ORDER, NOT FILE ORDER. The roster is the ledger, and a ledger
+	// is a directory, so the report is sorted rather than left in whatever
+	// order a hand-maintained file happened to list.
+	want := "workshop.clerk unread: ?\nworkshop.scribe unread: 1\n"
 	if out.String() != want {
 		t.Errorf("got:\n%q\nwant:\n%q", out.String(), want)
 	}

@@ -110,6 +110,7 @@ func newACLHarness(t *testing.T, seat *natsserver.User) *aclHarness {
 
 	loctest.Write(t, filepath.Join(home, "config"), "provider = nats\nnats_url = "+srv.URL+"\n")
 	loctest.Write(t, filepath.Join(home, "endpoints"), seat.Username+"\n")
+	seedLedger(t, home, seat.Username)
 	for _, u := range users {
 		loctest.Write(t, filepath.Join(home, "creds", u.Username), aclPassword)
 	}

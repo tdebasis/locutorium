@@ -1,12 +1,16 @@
 package nats
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"sort"
+	"strings"
 	"time"
 
 	natsgo "github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/tdebasis/locutorium/internal/presence"
 )
@@ -183,4 +187,59 @@ func (p *Provider) Watch(instance string, w io.Writer) error {
 		// stream to follow; it has not failed at anything.
 		return nil
 	}
+}
+
+// queueListTimeout bounds the enumeration. A listing is a paged conversation
+// with the store, so it needs a deadline of its own: the reconciler must fail
+// rather than wait, because it acts on what the list said.
+const queueListTimeout = 5 * time.Second
+
+// endpointOfStream reads a backing-object name back as the endpoint it was
+// derived from, and says whether it is one of ours.
+//
+// The reverse of StreamName's substitution is unambiguous because the endpoint
+// character set bars the underscore (endpoint.go §segment), so every
+// underscore in the name was a dot. Anything that is not a queue object —
+// TOPICS, or whatever else shares the store — is not ours and is not returned.
+func endpointOfStream(name string) (string, bool) {
+	const prefix = "QUEUE_"
+	if !strings.HasPrefix(name, prefix) {
+		return "", false
+	}
+	endpoint := strings.ReplaceAll(strings.TrimPrefix(name, prefix), "_", ".")
+	if presence.ValidEndpoint(endpoint) != nil {
+		return "", false
+	}
+	return endpoint, true
+}
+
+// Queues lists every endpoint that has a queue here.
+//
+// THE ERROR IS CHECKED AFTER THE CHANNEL DRAINS, WHICH IS THE WHOLE POINT. The
+// lister pages through the store and closes its channel both when it has
+// finished and when it has failed, so a caller that ranges and returns what it
+// collected reports a partial listing as a complete one. Reading Err after the
+// range is what makes "I could not finish" different from "there are no more".
+func (p *Provider) Queues() ([]string, error) {
+	if err := p.connect(); err != nil {
+		return nil, err
+	}
+	js, err := jetstream.New(p.nc)
+	if err != nil {
+		return nil, fmt.Errorf("cannot list the queues: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), queueListTimeout)
+	defer cancel()
+	lister := js.ListStreams(ctx)
+	var out []string
+	for info := range lister.Info() {
+		if endpoint, ok := endpointOfStream(info.Config.Name); ok {
+			out = append(out, endpoint)
+		}
+	}
+	if err := lister.Err(); err != nil {
+		return nil, fmt.Errorf("cannot list the queues: %v", err)
+	}
+	sort.Strings(out)
+	return out, nil
 }

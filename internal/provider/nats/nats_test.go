@@ -13,6 +13,7 @@ import (
 
 	"github.com/tdebasis/locutorium/internal/loc"
 	"github.com/tdebasis/locutorium/internal/loctest"
+	"github.com/tdebasis/locutorium/internal/presence"
 	"github.com/tdebasis/locutorium/internal/provider"
 )
 
@@ -63,6 +64,7 @@ func newHarness(t *testing.T, endpoints ...string) *harness {
 
 	write(t, filepath.Join(home, "config"), "nats_url = "+h.url+"\n")
 	write(t, filepath.Join(home, "endpoints"), strings.Join(endpoints, "\n")+"\n")
+	seedLedger(t, home, endpoints...)
 	for _, u := range users {
 		write(t, filepath.Join(home, "creds", u), testPassword)
 	}
@@ -629,9 +631,35 @@ func TestStatusCountsPendingPerEndpoint(t *testing.T) {
 	}
 }
 
+// seedLedger writes one registration per endpoint, which is what a subscribe
+// would have left behind. STATUS READS THE LEDGER, not the `endpoints` file
+// (#27): the roster is the record of who subscribed, so a harness that names
+// endpoints has to leave that record.
+func seedLedger(t *testing.T, home string, endpoints ...string) {
+	t.Helper()
+	dir := filepath.Join(home, "run", "presence")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("make the ledger dir: %v", err)
+	}
+	for _, e := range endpoints {
+		row := fmt.Sprintf(`{"endpoint":%q,"instance":%q,"process":{"pid":%d,"started":""},"registered":"2026-01-14T09:12:04.318Z"}`,
+			e, presence.Instance(e), os.Getpid())
+		write(t, filepath.Join(dir, e+".json"), row)
+	}
+}
+
+// clearLedger empties the roster, which is what "nobody has subscribed" is.
+func clearLedger(t *testing.T, home string) {
+	t.Helper()
+	if err := os.RemoveAll(filepath.Join(home, "run", "presence")); err != nil {
+		t.Fatalf("clear the ledger: %v", err)
+	}
+}
+
 func TestStatusWithAnEmptyRegistryPrintsNothing(t *testing.T) {
 	h := newHarness(t)
 	write(t, filepath.Join(h.home, "endpoints"), "")
+	clearLedger(t, h.home)
 	p := h.as(t, "admin")
 
 	var out strings.Builder
