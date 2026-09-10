@@ -159,9 +159,9 @@ func readMode(p provider.Provider, w io.Writer, peek bool, jsonOut bool) error {
 // written to them. It costs one JSON probe per room message and it is the only
 // thing standing between an existing deployment and that.
 //
-// A payload is an event IFF it is a JSON OBJECT WHOSE `kind` IS ONE OF THE
+// A payload is an event IFF it is a JSON OBJECT WHOSE `kind` IS ONE OF THE SIX
 // PRESENCE KINDS, and the taxonomy is asked for rather than restated, so a
-// new kind is filtered the day it is added. Unmarshalling into a struct is
+// seventh kind is filtered the day it is added. Unmarshalling into a struct is
 // what makes "object" part of the test: a JSON string, number or array is a
 // type error and is therefore mail. The predicate is deliberately narrow —
 // everything it does not recognise is mail, which fails towards showing a

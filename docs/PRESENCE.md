@@ -191,8 +191,7 @@ why endpoint names are restricted to a character set that makes it so.
 
 ### Taxonomy
 
-Event kinds are `<subject>.<verb>`. Three subjects today: the agent's membership, its work, and the
-house's own health.
+Event kinds are `<subject>.<verb>`. Two subjects today — the agent's membership, and its work.
 
 | `kind` | Meaning | Emitted by |
 |---|---|---|
@@ -202,15 +201,9 @@ house's own health.
 | `activity.end` | It finished | adapter |
 | `tool.pre` | A tool call is beginning | adapter |
 | `tool.post` | A tool call has finished | adapter |
-| `house.incident` | The house found a fault in itself; carries `reason` and `detail` | host, or whatever detected it |
 
 A new subject is added when a genuinely different *thing* is being reported. A new **reason** or
 field is added when the same thing happens for a different cause. See *Naming rule* below.
-
-**The house is the third subject.** A fault the house detects is about the house, not about any
-agent, so it is a different thing being reported and it takes its own kind. Without it such a fault
-is swallowed: an unreadable ledger row is skipped, a denied listing expires quietly, and nothing
-records either.
 
 ### Common envelope
 
@@ -221,7 +214,7 @@ Every event is a bus message. These fields are always present:
 | `id` | string | Unique per event. Used for exact deduplication and for `refs` to point at. |
 | `ts` | RFC 3339, UTC, millisecond precision | **When the thing happened**, stamped by the emitter — not when it was published, and not the broker's receipt time. |
 | `kind` | string | From the taxonomy above. |
-| `endpoint` | string | Which agent this concerns. **Empty on a `house.incident` that concerns no one agent.** |
+| `endpoint` | string | Which agent this concerns. |
 | `refs` | array of `id` | Optional. Relates this event to earlier ones. |
 
 ### Payloads
@@ -285,41 +278,6 @@ which finish belongs to which start.
   "kind": "tool.post", "endpoint": "workshop.scribe", "tool": "shell",
   "refs": ["ev_15c8ff40"] }
 ```
-
-**`house.incident`** — `reason` says which fault; `detail` is free text naming the row, the object or
-the call that failed.
-
-```json
-{ "id": "ev_3d90ac71", "ts": "2026-01-14T09:40:11.507Z",
-  "kind": "house.incident", "endpoint": "workshop.scribe", "instance": "workshop",
-  "reason": "ledger.unreadable",
-  "detail": "scribe.json: unexpected end of JSON input" }
-```
-
-`reason` is one of:
-
-| `reason` | Meaning |
-|---|---|
-| `ledger.unreadable` | A registration row could not be parsed. |
-| `medium.unreachable` | The medium could not be asked. |
-| `queue.wrong-shape` | A queue's backing object exists but is not the shape the endpoint needs. |
-| `enumeration.refused` | A listing the deployment denied. |
-
-Further faults are added as **values here**, the way `agent.unsubscribe` adds causes.
-
-An incident has **two outputs**, and they answer different questions:
-
-- the event on `presence.<instance>`, for whoever is watching now
-- one line appended to `run/incidents/<YYYY-MM-DD>.jsonl`, for whoever looks later
-
-The second exists because the event plane is not retained. A fault nobody was watching would
-otherwise leave no trace at all. The file is written the way the message log is written: one JSON
-object per line, one `write` per line, directory `0700` and file `0600` at creation.
-
-`endpoint` is **empty** when the fault belongs to no one agent. A medium the house cannot reach is
-a fault of the house. An unreadable ledger row does name an agent, so the field carries it.
-
-Nothing parses `detail`. A consumer that needs a value out of it wants a new field instead.
 
 ### Notes on the fields
 

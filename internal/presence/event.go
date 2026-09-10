@@ -13,14 +13,10 @@ import (
 // which renders fractional seconds only when the clock happens to have them.
 const TSLayout = "2006-01-02T15:04:05.000Z"
 
-// The taxonomy. Event kinds are <subject>.<verb>, and there are three
-// subjects: an agent's membership, its work, and the house's own health. A
-// genuinely different thing being reported earns a new kind; the same thing
-// happening for a different cause earns a new reason instead.
-//
-// The house is a subject because a fault the house detects is about the house,
-// not about any agent. It is therefore a different thing being reported, and
-// it takes a kind rather than a reason on an existing one.
+// The taxonomy. Event kinds are <subject>.<verb>, and there are two subjects:
+// an agent's membership, and its work. A genuinely different thing being
+// reported earns a new kind; the same thing happening for a different cause
+// earns a new reason instead.
 const (
 	KindSubscribe     = "agent.subscribe"
 	KindUnsubscribe   = "agent.unsubscribe"
@@ -28,16 +24,11 @@ const (
 	KindActivityEnd   = "activity.end"
 	KindToolPre       = "tool.pre"
 	KindToolPost      = "tool.post"
-	KindIncident      = "house.incident"
 )
 
 // Kinds is the whole taxonomy, in the order the schema lists it.
-//
-// A NEW KIND IS APPENDED. A consumer that reads this list positionally would
-// see every earlier kind move if a new one went in the middle, and the order
-// is also the order the document lists them in.
 func Kinds() []string {
-	return []string{KindSubscribe, KindUnsubscribe, KindActivityStart, KindActivityEnd, KindToolPre, KindToolPost, KindIncident}
+	return []string{KindSubscribe, KindUnsubscribe, KindActivityStart, KindActivityEnd, KindToolPre, KindToolPost}
 }
 
 // ValidKind reports whether kind is one this build knows.
@@ -52,43 +43,11 @@ func ValidKind(kind string) bool {
 
 // RecordsActivity reports whether an event of this kind moves an agent's
 // activity state. Membership events do not: leaving is a registration fact,
-// not a working one. Incidents do not either: the house reporting its own
-// fault says nothing about whether any agent is working, and an incident that
-// named an endpoint would otherwise make that agent look busy.
+// not a working one.
 func RecordsActivity(kind string) bool {
 	switch kind {
 	case KindActivityStart, KindActivityEnd, KindToolPre, KindToolPost:
 		return true
-	}
-	return false
-}
-
-// The incident reasons. house.incident reports one thing. The house found a
-// fault. The reason says which fault, the way agent.unsubscribe uses clean and
-// expiry. A NEW FAULT OF THE SAME SHAPE EARNS A VALUE HERE, NEVER A NEW KIND.
-const (
-	IncidentLedgerUnreadable   = "ledger.unreadable"   // a registration Load could not parse
-	IncidentMediumUnreachable  = "medium.unreachable"  // the medium could not be asked
-	IncidentQueueWrongShape    = "queue.wrong-shape"   // AddStream refused an existing object
-	IncidentEnumerationRefused = "enumeration.refused" // a listing the deployment denied
-)
-
-// IncidentReasons is every reason this build knows, in the order the document
-// lists them.
-func IncidentReasons() []string {
-	return []string{IncidentLedgerUnreadable, IncidentMediumUnreachable, IncidentQueueWrongShape, IncidentEnumerationRefused}
-}
-
-// ValidIncidentReason reports whether reason is one this build knows.
-//
-// The reasons of other kinds are not incident reasons. Clean and expiry belong
-// to agent.unsubscribe. An incident carrying one is a bug at the caller, not a
-// variety of fault.
-func ValidIncidentReason(reason string) bool {
-	for _, r := range IncidentReasons() {
-		if r == reason {
-			return true
-		}
 	}
 	return false
 }
@@ -123,11 +82,6 @@ type Display struct {
 // endpoint — ahead of everything a particular kind adds. Do not tidy these
 // lines. Everything after the envelope is omitted when empty, because only the
 // join event carries the full picture and every later event is four fields.
-//
-// Detail is free text and sits beside Reason, which it qualifies. Reason is a
-// closed set a consumer switches on; Detail is the one sentence a person needs
-// to find the row, the object or the call that failed. NOTHING MAY PARSE
-// DETAIL: a consumer that needs a value out of it wants a new field instead.
 type Event struct {
 	ID       string   `json:"id"`
 	TS       string   `json:"ts"`
@@ -140,7 +94,6 @@ type Event struct {
 	Cwd      string   `json:"cwd,omitempty"`
 	Address  string   `json:"address,omitempty"`
 	Reason   string   `json:"reason,omitempty"`
-	Detail   string   `json:"detail,omitempty"`
 	Tool     string   `json:"tool,omitempty"`
 	Refs     []string `json:"refs,omitempty"`
 }

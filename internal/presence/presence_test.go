@@ -5,6 +5,7 @@ import (
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -77,8 +78,20 @@ func TestBackingNamesAreInjective(t *testing.T) {
 // ------------------------------------------------------------------ events
 
 func TestTheTaxonomy(t *testing.T) {
-	if len(Kinds()) != 7 {
-		t.Errorf("the taxonomy has %d kinds, want the schema's seven", len(Kinds()))
+	// The names are written out, not built from the constants. A count lets a
+	// kind be added and another dropped without a failure, and the constants
+	// let a name change without one. The wire values are what the schema
+	// fixes, so the test holds the wire values.
+	want := []string{
+		"agent.subscribe",
+		"agent.unsubscribe",
+		"activity.start",
+		"activity.end",
+		"tool.pre",
+		"tool.post",
+	}
+	if got := Kinds(); !reflect.DeepEqual(got, want) {
+		t.Errorf("the taxonomy is %q, want %q", got, want)
 	}
 	for _, k := range Kinds() {
 		if !ValidKind(k) {
@@ -99,11 +112,6 @@ func TestTheTaxonomy(t *testing.T) {
 		if RecordsActivity(k) {
 			t.Errorf("%q moves the activity state, but it is membership", k)
 		}
-	}
-	// The third subject is the house's own health. It is not work either, and
-	// its own tests are in incident_test.go.
-	if RecordsActivity(KindIncident) {
-		t.Errorf("%q moves the activity state, but it is the house", KindIncident)
 	}
 }
 
