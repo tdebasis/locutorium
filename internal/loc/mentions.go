@@ -1,48 +1,10 @@
 package loc
 
 import (
-	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
-
-	"github.com/tdebasis/locutorium/internal/config"
 )
-
-// Nudge rings an endpoint's doorbell. Advisory: its failure never loses a
-// message, because the message is already in the queue by the time this runs.
-func Nudge(endpoint, line string) { _ = NudgeErr(endpoint, line) }
-
-// NudgeErr rings, and SAYS WHY IT COULD NOT.
-//
-// The hook is the one part of a wake that lives outside this binary, and so
-// the part most likely to be absent or broken: an unconfigured deployment, a
-// file without its execute bit, a script that exits non-zero. A wake lost that
-// way looks exactly like a wake that was never due, which is why the reason is
-// returned rather than dropped — a caller that watches a pane for a living has
-// somewhere to put it, and Nudge stays for the callers that do not.
-func NudgeErr(endpoint, line string) error {
-	hook := filepath.Join(config.Home(), "hooks", "nudge")
-	if !isExecutable(hook) {
-		return fmt.Errorf("no executable nudge hook at %s", hook)
-	}
-	if err := exec.Command(hook, endpoint, line).Run(); err != nil {
-		return fmt.Errorf("%s: %w", hook, err)
-	}
-	return nil
-}
-
-// isExecutable reports whether a path is a file this process may run.
-func isExecutable(path string) bool {
-	fi, err := os.Stat(path)
-	if err != nil || fi.IsDir() {
-		return false
-	}
-	return fi.Mode().Perm()&0o111 != 0
-}
 
 // mentionRe matches an @name, which under namespaced endpoints may carry one
 // dotted segment: @workshop.scribe is one mention, not @workshop followed by

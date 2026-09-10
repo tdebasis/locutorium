@@ -111,17 +111,14 @@ refused before anything is sent.
 
 - **Body limit is 4000 characters, not bytes.** Counted in codepoints, so emoji cost one each. An
   over-long body is refused *before* it reaches the medium — nothing is partially sent.
-- Prints `sent → queue.<endpoint>`, with a parenthetical when it holds its own bell back (below).
-- **The doorbell rings unless the recipient's server is running.** A seat whose server is up is
-  watching that queue and will ring for the same arrival — coalesced and breaker-capped — so `send`
-  stays quiet rather than putting two lines in one pane for one message, and says so on its own
-  stdout: `sent → queue.<endpoint> (the seat's server rings)`. Running means a live process, asked
-  of `run/<endpoint>.mcp.pid` and judged on **both** of its lines, the pid and that process's start
-  time — a registration is not the question, because a host can register a seat whose server never
-  started or has since died, and a pid whose start time no longer matches is a recycled number, not
-  the server. Where `send` does ring, the line is the plain `sent → queue.<endpoint>` and the
-  doorbell reads `[LOC] 1 new → loc read`, naming the CLI verb, because a seat with no server is a
-  seat that reads with the command line.
+- Prints `sent → queue.<endpoint>`. There is one form of that line and it does not vary with what is
+  running at the far end.
+- **`loc send` puts the message in the queue and rings nothing.** The seat's own server is the one
+  thing that notifies, through the notifier its registered type names: `tmux` types the bell into the
+  seat's pane, `claude` sends it through a one-shot courier, and `none` rings nothing at all — a seat
+  registered as `none` finds its mail on its next `read`. A sender that rang as well would be a
+  second bell for one message, and it is the one that knows least: it cannot coalesce, it is not
+  capped, and it does not know what else is waiting for that seat.
 - If the house sets `send_requires_attendance = yes`, a send to an endpoint with no listener is
   **refused**. Off by default.
 
@@ -132,7 +129,9 @@ loc publish <topic> <body>
 ```
 
 Speaks in a topic. Everyone attending reads it from their own position, so no one consumes it from
-anyone else. `@name` in the body rings that endpoint's doorbell; nobody else is rung.
+anyone else. **A `@name` mention is delivered to the topic and announced to nobody.** The named
+endpoint reads the topic from its own position and finds the mention there. No bell is rung for a
+mention, and its absence is the design rather than a defect.
 
 Topic names allow dots: `[a-z0-9][a-z0-9._-]*`. Endpoint names do not: `[a-z0-9_-]+`.
 
@@ -519,15 +518,14 @@ runtime exits and its descriptors close — the seat is given up within the two-
 A signal that IS delivered (`TERM`, `INT`, `HUP`) is forwarded down and waited on. The registration
 still names the RUNTIME'S pid, not the launched process's and not the server's; which process is
 actually serving is recorded separately in `run/<endpoint>.mcp.pid`, written once the listener is up
-— a sender reads this file to decide it need not ring, so it must not exist before there is a bell —
 and removed at departure. **That file is two lines — the pid, then that process's start time
 in the presence model's stamp** — because the pid alone starts naming a stranger the moment the
 kernel reuses the number, and a reader asking "is this seat's server running" would then get a
 confident yes about somebody else. Both lines are compared, by the same liveness the presence model
 uses on the pids it records. **A server ended by SIGKILL leaves the file behind**, since removing it
-is part of departing and a kill runs nothing: `send` then reads the two lines, asks the presence
-model whether that pid started at that time is alive, finds it is not, and treats the file as stale
-— so it rings the pane itself rather than staying quiet for a server that is gone.
+is part of departing and a kill runs nothing. A reader asking whether this seat's server is running
+compares both lines against the presence model's liveness and finds the file stale. No send depends
+on the answer: a send only queues.
 
 **It is also the listener.** It holds a core subscription on this endpoint's own queue subject, which
 sees every arrival and consumes nothing, and asks how much is waiting at start and after every
@@ -542,7 +540,7 @@ reads. Each wake hands the seat's notifier ONE LINE and no body:
 and appends `wake <endpoint> count=3` to `run/<endpoint>.delivery.log`. A tripped breaker says so
 once. Nothing is lost to a suppressed wake: the queue keeps the truth.
 
-**A bell that could not ring says so.** If the hook is missing, not executable, or exits non-zero,
+**A bell that could not ring says so.** If the notifier refuses or fails,
 `bell failed <endpoint>: <reason>` goes to `run/<endpoint>.delivery.log` *and* to stderr, which is
 the runtime's own log — stdout is the protocol's. No `wake` line is written for it: a failed bell is
 not a wake, and a log saying the pane was woken when it was not is worse than no log at all.

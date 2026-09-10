@@ -90,10 +90,15 @@ func newDeployment(t *testing.T, endpoints ...string) *deployment {
 	home := t.TempDir()
 	writeFile(t, filepath.Join(home, "config"), "provider = spy\n")
 	writeFile(t, filepath.Join(home, "endpoints"), strings.Join(endpoints, "\n")+"\n")
+	// A TRAP, NOT A FIXTURE. A send only queues (R36), so nothing in this
+	// deployment should execute anything at the notification boundary. This
+	// executable sits where the retired doorbell used to be looked for and
+	// records every call, so a sender that starts ringing again is caught by
+	// the cases below rather than by a pane.
 	writeFile(t, filepath.Join(home, "hooks", "nudge"),
 		"#!/bin/sh\necho \"$1 $2\" >> \""+home+"/nudges.log\"\n")
 	if err := os.Chmod(filepath.Join(home, "hooks", "nudge"), 0o700); err != nil {
-		t.Fatalf("chmod nudge hook: %v", err)
+		t.Fatalf("chmod the trap: %v", err)
 	}
 
 	t.Setenv("LOC_HOME", home)
@@ -424,25 +429,36 @@ func parseEnvelope(t *testing.T, b []byte) loc.Envelope {
 
 // ------------------------------------------------------------------ nudges
 
-func TestSendRingsTheRecipient(t *testing.T) {
+// THE SENDER ONLY QUEUES (R36, 2026-09-10). The seat's own server notifies,
+// through the notifier its registered type names, so a send rings nobody and
+// runs nothing.
+func TestSendRingsNobody(t *testing.T) {
 	d := newDeployment(t, "ada", "bob")
 
 	if code, _, errOut := exec("send", "bob", "message-one"); code != 0 {
 		t.Fatalf("exit %d, stderr %q", code, errOut)
 	}
-	if got, want := d.nudges(t), "bob [LOC] 1 new → loc read\n"; got != want {
-		t.Errorf("nudges: got %q, want %q", got, want)
+	if got := d.nudges(t); got != "" {
+		t.Errorf("send rang: %q. A send puts the message in the queue and notifies nobody", got)
+	}
+	if len(d.spy.sends) != 1 {
+		t.Errorf("send put %d messages on the medium; want 1", len(d.spy.sends))
 	}
 }
 
-func TestPublishRingsOnlyMentionedEndpointsThatExist(t *testing.T) {
+// A MENTION IS DELIVERED TO THE TOPIC AND ANNOUNCED TO NOBODY. The named
+// endpoint reads the topic from its own position and finds it there.
+func TestPublishRingsNobodyForAMention(t *testing.T) {
 	d := newDeployment(t, "ada", "bob")
 
 	if code, _, errOut := exec("publish", "standup", "@bob and @mallory, and @bob again"); code != 0 {
 		t.Fatalf("exit %d, stderr %q", code, errOut)
 	}
-	if got, want := d.nudges(t), "bob [LOC] 1 new in #standup → loc read\n"; got != want {
-		t.Errorf("nudges: got %q, want %q", got, want)
+	if got := d.nudges(t); got != "" {
+		t.Errorf("publish rang: %q. A mention is found on read, never announced", got)
+	}
+	if len(d.spy.publishes) != 1 {
+		t.Errorf("publish put %d messages on the medium; want 1", len(d.spy.publishes))
 	}
 }
 

@@ -58,20 +58,6 @@ exit 0
 	return spool
 }
 
-// nudgeSpool installs a hooks/nudge that appends the LINE it was given (its
-// second argument) to a file, and returns that file's path. It is the pane, as
-// far as these cases are concerned.
-func nudgeSpool(t *testing.T, home string) string {
-	t.Helper()
-	spool := filepath.Join(home, "nudge.log")
-	hook := filepath.Join(home, "hooks", "nudge")
-	loctest.Write(t, hook, "#!/bin/sh\nprintf '%s\\n' \"$2\" >> "+spool+"\n")
-	if err := os.Chmod(hook, 0o700); err != nil {
-		t.Fatalf("make the nudge hook executable: %v", err)
-	}
-	return spool
-}
-
 // bells returns the bell lines the hook has recorded so far. The SENDER's own
 // nudge lands in the same file — `send` rings the doorbell itself, and that is
 // the shell delivery path doing its job — so the seat's own bell is picked out
