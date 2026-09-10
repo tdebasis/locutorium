@@ -58,7 +58,10 @@ func TestMCP_ASignalBeforeTheFirstDialIsAnOrdinaryEnding(t *testing.T) {
 
 	// TO THIS PROCESS, because the server under test is in it. mcpServe
 	// installed the handler before it reached the seam, so the signal is held
-	// in its buffered channel rather than ending the test binary.
+	// in its buffered channel rather than ending the test binary. If that
+	// handler is ever installed after the seam instead, this signal ends the
+	// whole test binary rather than failing this case, so a package that dies
+	// on SIGTERM should be read as this case's regression.
 	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
 		t.Fatalf("signal this process: %v", err)
 	}

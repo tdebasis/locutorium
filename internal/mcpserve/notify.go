@@ -104,6 +104,20 @@ type tmuxNotifier struct{ log func(string) }
 // prompt check and is not a prompt, which was measured on 2026-09-08. The
 // second is the prompt marker pair, which is what tells a Claude input box
 // from a shell.
+//
+// THE COPY-MODE CHECK RUNS FIRST ON PURPOSE. Copy mode is how a person reads a
+// seat's pane: they scroll back through it. It is therefore the one signal
+// this notifier has that a human is reading the pane right now, and the guard
+// refuses rather than types over their reading.
+//
+// WHAT THE GUARD DOES NOT ESTABLISH. Both prompt markers are present while
+// Claude is mid-turn, measured 2026-09-05 and recorded in the deployment's
+// HOUSE-RULES. The guard therefore cannot see a human who is mid-sentence in
+// the input box, and a collision with a half-typed line is accepted by the
+// PLAYBOOK's standing ruling rather than prevented here.
+//
+// THE 30-SECOND THROTTLE BELOW IS THE COURIER'S ALONE. This path is
+// unthrottled, by that same ruling.
 func (n *tmuxNotifier) Ring(endpoint, address, bell string) error {
 	if address == "" {
 		return n.refuse(endpoint, "no pane address")

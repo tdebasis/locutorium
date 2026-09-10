@@ -245,6 +245,11 @@ func mcpServe(runtimePID int) error {
 	// during startup is still waiting when the server looks.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	// The subscription is stopped on the way out, as at mcp.go's other Notify
+	// site and daemon.go's. It used to die with the subprocess; a case that
+	// calls this function in the test binary leaves it installed otherwise,
+	// and it would then swallow signals for every case after it.
+	defer signal.Stop(sig)
 
 	d, release, err := mcpDeps()
 	if err != nil {
@@ -261,6 +266,11 @@ func mcpServe(runtimePID int) error {
 // the first provider dial. R29 removed the identity hook, which is what a test
 // used to hold that window with, and the claim it held open is still a claim.
 // The zero value does nothing.
+//
+// It is one variable for the whole package, as refuseListen is. A case that
+// sets it must not run in parallel with a case that opens a provider, because
+// the second case would then block in this seam. Do not add t.Parallel to
+// either.
 var beforeDial = func() {}
 
 // mcpDeps resolves the seat and wires the server to THIS BINARY'S OWN VERBS.
