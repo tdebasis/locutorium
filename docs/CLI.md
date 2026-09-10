@@ -595,7 +595,7 @@ the bell; something else must then run `subscribe` and `unsubscribe` around the 
 | `nats_url` | `nats://127.0.0.1:4222` | where the medium is |
 | `idle_window` | `10m` | how long after an event `status <endpoint>` still reads *active* |
 | `send_requires_attendance` | `no` | refuse sends to endpoints that are not attending. With the NATS provider the key is satisfied by the live queue: a subscribed peer attends, and an unsubscribed one has no queue, so its send is refused for absence. |
-| `monitor_url` | `http://127.0.0.1:8222` | the broker's HTTP monitoring endpoint; no verb reads it, and `loc start` opens no such port |
+| `monitor_url` | none | the broker's HTTP monitoring endpoint; no verb reads it, and `loc start` opens no such port |
 | `topic_window` | `7d` | how long topic messages live; `loc start` gives the `TOPICS` stream this age limit |
 | `heartbeat_log_retention_days` | `7` | heartbeat log files older than this are deleted when loc starts |
 | `wake_window_seconds` | `5` | wakes are coalesced across this window (`loc mcp`) |
