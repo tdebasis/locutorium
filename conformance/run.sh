@@ -175,9 +175,13 @@ sleep 1
     nats stream add TOPICS --subjects 'topic.>' --retention limits \
       --max-age "$window" --storage file --replicas 1 --defaults >/dev/null \
     || { bad "stream init (TOPICS)"; exit 1; }
+  # THE TYPE IS none, BECAUSE THIS SUITE HAS NO BELL. A registered type picks
+  # the notifier that rings a seat, and the set is closed to tmux, claude and
+  # none. There is no pane here and no runtime to carry a courier, so a seat in
+  # this suite finds its mail on its next read, which is what none means.
   for _s in $(ep alice) $(ep bob) $(ep carol); do
     LOC_IDENTITY=$_s "$LOC_BIN_DIR/loc" subscribe "$_s" \
-      --pid $$ --type conformance --version 0 >/dev/null \
+      --pid $$ --type none --version 0 >/dev/null \
       || { bad "stream init (subscribe $_s)"; exit 1; }
   done
 
