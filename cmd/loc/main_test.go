@@ -569,8 +569,7 @@ func TestUnattributableCallerIsRefused(t *testing.T) {
 			if code != 1 || out != "" {
 				t.Errorf("exit %d, stdout %q; want 1 and nothing", code, out)
 			}
-			want := "loc: cannot determine sender identity: set LOC_IDENTITY or provide an executable " +
-				filepath.Join(d.home, "hooks", "identity") + "\n"
+			want := "loc: cannot determine sender identity: set LOC_IDENTITY\n"
 			if errOut != want {
 				t.Errorf("stderr:\n got %q\nwant %q", errOut, want)
 			}

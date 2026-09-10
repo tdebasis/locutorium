@@ -2,6 +2,7 @@ package loc
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -32,6 +33,15 @@ func NudgeErr(endpoint, line string) error {
 		return fmt.Errorf("%s: %w", hook, err)
 	}
 	return nil
+}
+
+// isExecutable reports whether a path is a file this process may run.
+func isExecutable(path string) bool {
+	fi, err := os.Stat(path)
+	if err != nil || fi.IsDir() {
+		return false
+	}
+	return fi.Mode().Perm()&0o111 != 0
 }
 
 // mentionRe matches an @name, which under namespaced endpoints may carry one
