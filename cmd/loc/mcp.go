@@ -256,6 +256,13 @@ func mcpServe(runtimePID int) error {
 	return mcpserve.Serve(context.Background(), d, &mcp.StdioTransport{})
 }
 
+// beforeDial is the seam a test replaces to hold the startup open at the one
+// moment it cannot otherwise reach: after the handler is installed and before
+// the first provider dial. R29 removed the identity hook, which is what a test
+// used to hold that window with, and the claim it held open is still a claim.
+// The zero value does nothing.
+var beforeDial = func() {}
+
 // mcpDeps resolves the seat and wires the server to THIS BINARY'S OWN VERBS.
 // It is separate from mcpVerb so a test can drive the same wiring over an
 // in-memory transport, and so that everything fallible about starting up
@@ -277,6 +284,8 @@ func mcpDeps() (mcpserve.Deps, func(), error) {
 	if err != nil {
 		return mcpserve.Deps{}, none, err
 	}
+
+	beforeDial()
 
 	// ONE LONG-LIVED PROVIDER, FOR THE LISTENER ONLY. The tools open and close
 	// their own exactly as the command line does, so a tool call is the verb
