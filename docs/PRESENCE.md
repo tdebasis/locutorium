@@ -482,7 +482,10 @@ this document's scope and are not listed.
 queue. A message sent to a seat after its process died and before the next heartbeat reaches it is
 therefore deleted with that queue. The heartbeat's log records that the queue was deleted. The
 message log at `run/log/<date>.jsonl` holds the message's body, its sender and its recipient, so the
-message can be found there even though it is off the bus. This is an accepted cost in V0.
+message can be found there even though it is off the bus. **Nothing announces the deletion.** The
+sender never notifies, and the recipient is gone, so a lost message produces no signal to anyone.
+Recovery from the message log begins only when somebody already suspects a loss. This is an accepted
+cost in V0.
 
 ### Called by adapters
 

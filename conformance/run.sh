@@ -315,13 +315,15 @@ check "topic appears in the active list" \
   bash -c "LOC_IDENTITY=$(ep alice) loc topics | grep -q standup"
 # AN @MENTION IS DELIVERED TO THE TOPIC AND ANNOUNCED TO NOBODY (R36). The
 # mentioned endpoint finds it on read, at its own cursor, like every other
-# reader. The peek is deliberate: an ordinary read here would advance carol's
-# cursor and the independent-cursors case below would then find nothing.
+# reader.
 check_not "@mention rings nobody, read finds it (nobody rung)" \
   grep -q "#standup" "$LOC_HOME/nudges.log"
-check "@mention rings nobody, read finds it (read finds it)" \
-  bash -c "LOC_IDENTITY=$(ep carol) loc read --peek | grep -q 'please look'"
 c="$(LOC_IDENTITY=$(ep carol) loc read 2>/dev/null)"; b="$(LOC_IDENTITY=$(ep bob) loc read 2>/dev/null)"
+# ONE READ, TWO CLAIMS. The mentioned endpoint's read is taken once and both
+# cases assert against it, because a second read would move the same cursor.
+if grep -q "please look" <<<"$c"; then
+  ok "@mention rings nobody, read finds it (read finds it)"
+else bad "@mention rings nobody, read finds it (read finds it)"; fi
 if grep -q "please look" <<<"$c" && grep -q "please look" <<<"$b"; then
   ok "every reader's cursor sees the conversation independently"
 else bad "every reader's cursor sees the conversation independently"; fi
