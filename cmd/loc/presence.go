@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -183,11 +186,21 @@ func subscribeVerb(args []string) error {
 		reg.Display = &model.Display{Name: display, Role: role}
 	}
 
+	// THE ROW IS WRITTEN FIRST, AND THE ORDER IS THE WHOLE SAFETY ARGUMENT.
+	// Two writes make a subscribe, and a beat can land between them. Create
+	// the queue first and the gap is a queue with no row, which is precisely
+	// what the sweep's orphan pass destroys: a seat that subscribed during a
+	// beat would be registered and unreachable until the next beat rebuilt it.
+	// Write the row first and the gap is a row with no queue, which the
+	// sweep's third pass repairs. The rule is general — order the two writes
+	// so the gap falls where the reconciler's action matches the caller's
+	// intent — and here the row's presence is what "arrived" means.
 	return withPresence(func(pr provider.Presence) error {
-		if err := pr.CreateQueue(endpoint); err != nil {
+		if err := model.Save(reg); err != nil {
 			return err
 		}
-		if err := model.Save(reg); err != nil {
+		betweenSubscribeWrites()
+		if err := pr.CreateQueue(endpoint); err != nil {
 			return err
 		}
 		return emitJoin(pr, reg)
@@ -275,10 +288,17 @@ func unsubscribeVerb(args []string) error {
 			// there was no departure to report.
 			return nil
 		}
-		if err := pr.DeleteQueue(endpoint); err != nil {
+		// The row goes first, for subscribe's reason read backwards. Delete
+		// the queue first and the gap is a row with no queue, which the sweep
+		// repairs — the daemon rebuilding a queue the caller just asked to be
+		// destroyed, and undoing its own work on the next beat. Remove the row
+		// first and the gap is a queue with no row, which the sweep's orphan
+		// pass finishes on the caller's behalf.
+		if err := model.Remove(endpoint); err != nil {
 			return err
 		}
-		if err := model.Remove(endpoint); err != nil {
+		betweenUnsubscribeWrites()
+		if err := pr.DeleteQueue(endpoint); err != nil {
 			return err
 		}
 		return emitDeparture(pr, endpoint, reason)
@@ -287,54 +307,107 @@ func unsubscribeVerb(args []string) error {
 
 // ---------------------------------------------------------------------- sweep
 
-// sweepVerb unsubscribes every registration whose process is gone.
+// betweenSubscribeWrites and betweenUnsubscribeWrites are the seam the F1
+// cases need. A subscribe and an unsubscribe are each two writes with a gap
+// between them, and the gap is where a beat does damage if the writes are
+// ordered wrongly; a test cannot land a beat in a gap it cannot reach. They do
+// nothing in the shipped binary.
+var (
+	betweenSubscribeWrites   = func() {}
+	betweenUnsubscribeWrites = func() {}
+)
+
+// sweepVerb reconciles the three records a seat has: its ledger row, its queue
+// and its process.
 //
-// An agent that crashes cannot announce its own departure, so something must
-// do it on its behalf — and because the registration carries the pid, this
-// needs no detection, only a periodic look. It MUST RUN ON THE MACHINE HOLDING
-// THE PROCESSES: a process id means nothing anywhere else.
-func sweepVerb(args []string) error {
-	instance, rest := leadingWord(args)
-	if len(rest) > 0 {
-		return errUsage
+// IT TAKES NO ARGUMENT. A process id means something only on the machine that
+// holds it, so a sweep is a machine-wide act by nature; an instance name would
+// let a caller reconcile half of a store and leave the other half's queues
+// looking like orphans. It returns the number of changes it made so the daemon
+// can write that number in its heartbeat log.
+//
+// IT PUBLISHES NOTHING. A departure event says an agent left; a reap says a
+// record was wrong. Emitting one for the other told every listener that an
+// agent had just gone at the moment a stale record was tidied, which is a
+// different fact and, for a queue that had been orphaned for a day, a false
+// one.
+//
+// It is silent when it changes nothing, which is what makes it safe to run
+// every five minutes.
+func sweepVerb(w io.Writer, args []string) (changes int, err error) {
+	if len(args) > 0 {
+		return 0, errUsage
 	}
-	instance, err := instanceOf(instance)
+	rows, unreadable, err := model.ListAll()
 	if err != nil {
-		return err
+		return 0, err
 	}
-	if err := model.ValidInstance(instance); err != nil {
-		return err
-	}
-	regs, err := model.List(instance)
-	if err != nil {
-		return err
-	}
-	var gone []*model.Registration
-	for _, r := range regs {
-		if !r.Alive() {
-			gone = append(gone, r)
+	err = withPresence(func(pr provider.Presence) error {
+		queues, err := pr.Queues()
+		if err != nil {
+			return err
 		}
-	}
-	if len(gone) == 0 {
-		// Idempotent, and audibly so: a sweep with nothing to reap publishes
-		// NOTHING. The absence of a second departure is what makes it safe to
-		// run on a timer.
-		return nil
-	}
-	return withPresence(func(pr provider.Presence) error {
-		for _, r := range gone {
-			if err := pr.DeleteQueue(r.Endpoint); err != nil {
-				return err
+		findings := model.Findings(rows, unreadable, queues)
+		// THE ORPHAN PASS IS SKIPPED ENTIRELY, NOT ROW BY ROW. An unreadable
+		// row may be the one that claims a queue this pass would destroy, and
+		// there is no way to ask which. Skipping only the rows in question is
+		// impossible for exactly the same reason it is unsafe to proceed.
+		blocked := false
+		for _, f := range findings {
+			if f.Kind == model.UnreadableRow {
+				blocked = true
 			}
-			if err := model.Remove(r.Endpoint); err != nil {
-				return err
+		}
+		for _, f := range findings {
+			switch f.Kind {
+			case model.DeadPID:
+				if err := pr.DeleteQueue(f.Endpoint); err != nil {
+					return err
+				}
+				if err := model.Remove(f.Endpoint); err != nil {
+					return err
+				}
+				if err := model.ReleaseServerPID(f.Endpoint); err != nil {
+					return err
+				}
+				changes++
+				if _, err := fmt.Fprintf(w, "%s: reaped, the process is gone\n", f.Endpoint); err != nil {
+					return err
+				}
+			case model.OrphanQueue:
+				if blocked {
+					continue
+				}
+				if err := pr.DeleteQueue(f.Endpoint); err != nil {
+					return err
+				}
+				changes++
+				if _, err := fmt.Fprintf(w, "%s: queue deleted, no row holds it\n", f.Endpoint); err != nil {
+					return err
+				}
+			case model.MissingQueue:
+				// The row is not rewritten. The row was right; the medium had
+				// lost the queue, and the repair is the queue alone.
+				if err := pr.CreateQueue(f.Endpoint); err != nil {
+					return err
+				}
+				changes++
+				if _, err := fmt.Fprintf(w, "%s: queue recreated\n", f.Endpoint); err != nil {
+					return err
+				}
+			case model.UnreadableRow:
+				if _, err := fmt.Fprintf(w, "%s: row unreadable: %v\n", f.Endpoint, f.Err); err != nil {
+					return err
+				}
 			}
-			if err := emitDeparture(pr, r.Endpoint, "expiry"); err != nil {
-				return err
-			}
+		}
+		if blocked {
+			return fmt.Errorf("a ledger row could not be read, so no queue was deleted as an orphan; " +
+				"repair or remove the row named above and sweep again")
 		}
 		return nil
 	})
+	return changes, err
 }
 
 // ----------------------------------------------------------------------- emit
@@ -501,4 +574,151 @@ func statusEndpoint(w io.Writer, endpoint string) error {
 	// failure: the caller asked whether anyone is there, and nobody is.
 	_, err = io.WriteString(w, model.Derive(endpoint, reg, act, time.Now(), window))
 	return err
+}
+
+// --------------------------------------------------------------- bare status
+
+// statusVerb is the deployment's report: the daemon, then every seat, then the
+// mail waiting for each of them.
+//
+// IT IS A DRY RUN OF THE NEXT BEAT, and it performs none of it. It reads the
+// same findings the sweep acts on, so the two can never disagree about what is
+// wrong, and it writes nothing at all — no queue created, no row removed, no
+// sweep triggered. A read that repairs what it reports is an instrument that
+// destroys its own evidence: the operator asks twice and gets two different
+// answers, neither of which is the state that was there when they asked.
+func statusVerb(w io.Writer) error {
+	// THE REPORT IS COMPOSED BEFORE ANY OF IT IS PRINTED. A verb that fails
+	// writes nothing to standard out — the rule every other verb here keeps —
+	// and a status report is three sections deep, so streaming it would leave
+	// a caller holding the first section of a report that failed at the third.
+	var report strings.Builder
+	if _, err := io.WriteString(&report, daemonLine()); err != nil {
+		return err
+	}
+	if err := statusBody(&report); err != nil {
+		return err
+	}
+	_, err := io.WriteString(w, report.String())
+	return err
+}
+
+// statusBody writes the two sections that need the medium: what the next beat
+// would repair, and what mail is waiting.
+func statusBody(w io.Writer) error {
+	name := config.Get("provider", "")
+	p, err := provider.Open(name)
+	if err != nil {
+		return err
+	}
+	defer p.Close()
+	// A medium that carries mail without carrying presence has no queues to
+	// compare the rows against, so the per-seat findings are simply absent.
+	// The unread report below is the message plane's and does not need them.
+	if pr, ok := p.(provider.Presence); ok {
+		if err := seatLines(w, pr); err != nil {
+			return err
+		}
+	}
+	return p.Status(w)
+}
+
+// daemonLine is the first line of the report: whether the Locutorium's own
+// daemon is running, and when it last beat.
+//
+// BOTH FILES MAY BE ABSENT AND NEITHER ABSENCE IS AN ERROR. The daemon writes
+// them; on a deployment where it has never run there is nothing to read, and
+// "not running" is the true answer rather than a failure to look.
+func daemonLine() string {
+	pid, started, ok := readDaemonPID()
+	if !ok || !model.Alive(pid, started) {
+		return "daemon: not running\n"
+	}
+	return fmt.Sprintf("daemon: running, pid %d, last beat %s\n", pid, lastBeat())
+}
+
+// readDaemonPID reads the two lines the daemon's pidfile holds: its pid and
+// its start time, the same shape a seat's server pidfile has.
+func readDaemonPID() (pid int, started string, ok bool) {
+	b, err := os.ReadFile(model.DaemonPIDFile())
+	if err != nil {
+		return 0, "", false
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	pid, err = strconv.Atoi(strings.TrimSpace(lines[0]))
+	if err != nil || pid <= 0 {
+		return 0, "", false
+	}
+	if len(lines) > 1 {
+		started = strings.TrimSpace(lines[1])
+	}
+	return pid, started, true
+}
+
+// lastBeat is the final line of today's heartbeat log, or a plain statement
+// that there is not one yet. A daemon that has started and not yet beaten is a
+// real state, and it is not the same as a daemon that is not running.
+func lastBeat() string {
+	path := filepath.Join(config.Home(), "run", "heartbeat", time.Now().Format("2006-01-02")+".log")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "no beat yet"
+	}
+	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+	last := strings.TrimSpace(lines[len(lines)-1])
+	if last == "" {
+		return "no beat yet"
+	}
+	return last
+}
+
+// seatLines prints one line per seat, and one per queue that no seat claims,
+// saying what the next beat would do about it.
+func seatLines(w io.Writer, pr provider.Presence) error {
+	rows, unreadable, err := model.ListAll()
+	if err != nil {
+		return err
+	}
+	queues, err := pr.Queues()
+	if err != nil {
+		return err
+	}
+	trouble := map[string]string{}
+	var orphans []string
+	for _, f := range model.Findings(rows, unreadable, queues) {
+		switch f.Kind {
+		case model.DeadPID:
+			trouble[f.Endpoint] = "pid dead, next beat reaps it"
+		case model.MissingQueue:
+			trouble[f.Endpoint] = "queue missing, next beat repairs it"
+		case model.UnreadableRow:
+			trouble[f.Endpoint] = fmt.Sprintf("row unreadable: %v", f.Err)
+		case model.OrphanQueue:
+			orphans = append(orphans, f.Endpoint)
+		}
+	}
+	// Every seat the ledger names, readable or not, in one order.
+	seats := make([]string, 0, len(rows)+len(unreadable))
+	for _, r := range rows {
+		seats = append(seats, r.Endpoint)
+	}
+	for _, u := range unreadable {
+		seats = append(seats, u.Endpoint)
+	}
+	sort.Strings(seats)
+	for _, e := range seats {
+		state, wrong := trouble[e]
+		if !wrong {
+			state = "row ok, queue ok"
+		}
+		if _, err := fmt.Fprintf(w, "%s: %s\n", e, state); err != nil {
+			return err
+		}
+	}
+	for _, q := range orphans {
+		if _, err := fmt.Fprintf(w, "%s: queue with no row, next beat removes it\n", q); err != nil {
+			return err
+		}
+	}
+	return nil
 }

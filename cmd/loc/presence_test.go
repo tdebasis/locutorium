@@ -605,51 +605,50 @@ func TestPresence_Unsubscribe_DestroysQueueAndEmitsClean(t *testing.T) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 4. sweep unsubscribes dead pids with reason=expiry, and is idempotent
-//    PRESENCE.md §How an agent leaves (reason: expiry); §CLI → sweep. Same-
-//    machine is a precondition the harness cannot violate on one host; see the
-//    notes.
+// 4. sweep reaps dead pids and PUBLISHES NOTHING, and is idempotent
+//    PRESENCE.md §How an agent leaves; §CLI → sweep. #27 removed the event:
+//    a departure event says an agent left, a reap says a record was wrong, and
+//    a reap may be tidying a record that went stale hours earlier. Same-machine
+//    is a precondition the harness cannot violate on one host; see the notes.
 // ════════════════════════════════════════════════════════════════════════════
 
-func TestPresence_Sweep_UnsubscribesDeadPidWithExpiry(t *testing.T) {
+func TestPresence_Sweep_ReapsADeadPidWithoutAnnouncingIt(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
 	// A registration whose process is already gone is what sweep exists to reap.
 	exec("subscribe", e2, "--pid", pidStr(deadPid(t)), "--type", "acme-cli", "--version", "3.2.0")
 	sub := p.witness(t, "presence.workshop")
 
-	code, _, errOut := exec("sweep", "workshop")
+	code, out, errOut := exec("sweep")
 	if code != 0 {
 		t.Errorf("sweep exited %d (stderr %q), want 0", code, errOut)
 	}
-	m, ok := findEvent(t, collect(sub, 2*time.Second), "agent.unsubscribe")
-	if !ok {
-		t.Fatalf("sweep published no agent.unsubscribe for the dead-pid registration")
+	if !strings.Contains(out, e2+": reaped") {
+		t.Errorf("sweep printed %q, want a line naming the reap of %s", out, e2)
 	}
-	if m["reason"] != "expiry" {
-		t.Errorf("sweep's agent.unsubscribe reason = %v, want %q", m["reason"], "expiry")
+	if _, err := os.Stat(filepath.Join(p.home, "run", "presence", e2+".json")); !os.IsNotExist(err) {
+		t.Error("the dead registration survived the sweep")
 	}
-	if m["endpoint"] != e2 {
-		t.Errorf("sweep's agent.unsubscribe endpoint = %v, want the qualified %q", m["endpoint"], e2)
+	if m, ok := findEvent(t, collect(sub, 1*time.Second), "agent.unsubscribe"); ok {
+		t.Errorf("the sweep published an agent.unsubscribe (%v); a reap announces nothing", m["endpoint"])
 	}
 }
 
-// Idempotent (refinement): a second sweep with nothing dead left produces NO
-// second unsubscribe event — not merely exit 0. The event's absence is the
-// real proof it did nothing, safe to run on a timer.
-func TestPresence_Sweep_SecondSweepEmitsNoUnsubscribe(t *testing.T) {
+// Idempotent: a second sweep with nothing left to reap prints nothing, exits 0
+// and publishes nothing. Silence is what makes it safe to run on a timer.
+func TestPresence_Sweep_SecondSweepIsSilent(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
 	exec("subscribe", e2, "--pid", pidStr(deadPid(t)), "--type", "acme-cli", "--version", "3.2.0")
-	exec("sweep", "workshop") // first sweep reaps the dead pid
+	exec("sweep") // first sweep reaps the dead pid
 
 	sub := p.witness(t, "presence.workshop")
-	code, _, errOut := exec("sweep", "workshop") // second sweep: nothing dead left
-	if code != 0 {
-		t.Errorf("second sweep exited %d (stderr %q), want a clean no-op 0", code, errOut)
+	code, out, errOut := exec("sweep") // second sweep: nothing left to do
+	if code != 0 || out != "" {
+		t.Errorf("second sweep exit=%d stdout=%q (stderr %q), want a silent 0", code, out, errOut)
 	}
 	if m, ok := findEvent(t, collect(sub, 1*time.Second), "agent.unsubscribe"); ok {
-		t.Errorf("a second sweep emitted a second agent.unsubscribe (%v); it must be a silent no-op", m["endpoint"])
+		t.Errorf("a second sweep emitted an agent.unsubscribe (%v); it must be a silent no-op", m["endpoint"])
 	}
 }
 

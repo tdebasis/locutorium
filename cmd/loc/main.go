@@ -44,7 +44,7 @@ presence — called by whoever launches agents
                             register an agent instance and create its queue
   unsubscribe <endpoint> [--reason clean|expiry] [--force]
                             free the endpoint and destroy its queue
-  sweep [<instance>]        unsubscribe registrations whose process is gone
+  sweep                     reconcile every row, queue and process
 
 presence — called by adapters
   emit <kind> <endpoint> [--ts <t>] [--tool <name>] [--refs <ids>]
@@ -53,7 +53,7 @@ presence — called by adapters
 presence — called by a person, or by a consumer
   registry [<instance>] [--json]
                             who is registered, asked of the instance's host
-  status [<endpoint>]       one agent's three facts; bare, unread counts
+  status [<endpoint>]       one agent's three facts; bare, the whole deployment
   watch [<instance>]        follow the event stream, read-only (^C to stop)
 
 other
@@ -183,7 +183,7 @@ func dispatch(args []string, w io.Writer) error {
 		if len(rest) > 0 {
 			return statusEndpoint(w, rest[0])
 		}
-		return withProvider(func(p provider.Provider) error { return p.Status(w) })
+		return statusVerb(w)
 
 	case "subscribe":
 		return subscribeVerb(rest)
@@ -192,7 +192,10 @@ func dispatch(args []string, w io.Writer) error {
 		return unsubscribeVerb(rest)
 
 	case "sweep":
-		return sweepVerb(rest)
+		// The change count is the daemon's to log. A caller at a terminal has
+		// the lines the sweep printed, which say the same thing in words.
+		_, err := sweepVerb(w, rest)
+		return err
 
 	case "emit":
 		return emitVerb(rest)

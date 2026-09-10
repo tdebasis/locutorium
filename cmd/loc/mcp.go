@@ -317,10 +317,10 @@ func mcpDeps() (mcpserve.Deps, func(), error) {
 }
 
 // statusTool picks between the two status reports exactly as dispatch does:
-// with an endpoint it is the presence report, bare it is the unread counts.
+// with an endpoint it is the presence report, bare it is the deployment's.
 func statusTool(w io.Writer, endpoint string) error {
 	if endpoint != "" {
 		return statusEndpoint(w, endpoint)
 	}
-	return withProvider(func(p provider.Provider) error { return p.Status(w) })
+	return statusVerb(w)
 }
