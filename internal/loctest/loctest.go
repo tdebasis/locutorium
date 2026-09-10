@@ -14,16 +14,16 @@
 // an ordinary package that imports testing. Nothing outside a test imports it,
 // so the shipped binary never grows by it; `go build ./...` only compiles it.
 //
-// It is deployment-neutral on purpose. The caller supplies the user set (and
-// therefore the ACLs), so the same boot serves the nats package's flat
-// single-password users and the presence suite's per-role, per-endpoint
-// access-control block.
+// THE HARNESS BOOTS THE PRODUCT'S SERVER. Its options come from
+// internal/broker, the same builder cmd/loc/daemon.go calls, so a provider
+// suite that passes here has been asked its questions of the server `loc start`
+// actually runs. V0 puts no authentication on the loopback listener (R12,
+// 2026-09-09), so the default boot authorises nobody and refuses nothing.
 //
-// V0 HAS NO AUTHENTICATION, so `loc` connects with no user name. The caller
-// names one user that an unauthenticated connection is mapped to, which is
-// how a test still asks what the tool does against a broker that refuses it
-// something: the user set carries the permissions, and the tool arrives as
-// that user without holding a credential.
+// WithRefusals is the opt-in for the other shape: a user set, and one user an
+// unauthenticated client is mapped to. It exists ONLY so a test can manufacture
+// a refusal and ask what the client does with one. It is NOT the product's
+// shape, and a test that does not assert refusal handling must not use it.
 package loctest
 
 import (
@@ -36,6 +36,8 @@ import (
 
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	natsgo "github.com/nats-io/nats.go"
+
+	"github.com/tdebasis/locutorium/internal/broker"
 )
 
 // Server is one scratch broker: a running nats-server and the URLs a client
@@ -50,35 +52,47 @@ type Server struct {
 	MonitorURL string
 }
 
-// Boot starts an in-process nats-server with JetStream, bound to loopback on a
-// kernel-chosen port, authorising exactly the supplied users. asUser names the
-// one of them an unauthenticated client is taken to be; an empty asUser with a
-// non-empty user set refuses every connection loc makes, which no test wants.
-// When monitor is true it also opens a kernel-chosen HTTP monitoring port and
-// records its URL.
+// Option changes the scratch server away from the product's shape.
+type Option func(*natsserver.Options)
+
+// WithRefusals boots an AUTHENTICATED server: users carrying the permissions
+// the case needs, and asUser naming the one an unauthenticated client is taken
+// to be.
 //
-// Storage is on disk in a temp dir the test framework removes; the retention
-// semantics under test are identical to a real deployment's, and nothing
-// survives the test.
-func Boot(t *testing.T, users []*natsserver.User, asUser string, monitor bool) *Server {
+// THE PRODUCT DOES NOT BOOT THIS. V0 has no authorization block at all, so this
+// shape exists for one purpose: to make the medium answer NO, so a test can ask
+// what the client does with a refusal. Use it only in a case that asserts
+// refusal handling.
+func WithRefusals(users []*natsserver.User, asUser string) Option {
+	return func(o *natsserver.Options) {
+		o.Users = users
+		o.NoAuthUser = asUser
+	}
+}
+
+// WithMonitor opens a kernel-chosen HTTP monitoring port and records its URL.
+func WithMonitor() Option {
+	return func(o *natsserver.Options) {
+		o.HTTPHost = "127.0.0.1"
+		o.HTTPPort = -1 // ephemeral, like the client port
+	}
+}
+
+// Boot starts the product's in-process broker, bound to loopback on a
+// kernel-chosen port, with a store the test framework removes.
+//
+// Storage is on disk; the retention semantics under test are identical to a
+// real deployment's, and nothing survives the test.
+func Boot(t *testing.T, opts ...Option) *Server {
 	t.Helper()
 
-	opts := &natsserver.Options{
-		Host:       "127.0.0.1",
-		Port:       -1, // ephemeral: the kernel picks, we ask afterwards
-		JetStream:  true,
-		StoreDir:   t.TempDir(),
-		NoLog:      true,
-		NoSigs:     true,
-		Users:      users,
-		NoAuthUser: asUser,
+	o := broker.Options("127.0.0.1", -1 /* ephemeral: the kernel picks */, t.TempDir())
+	for _, opt := range opts {
+		opt(o)
 	}
-	if monitor {
-		opts.HTTPHost = "127.0.0.1"
-		opts.HTTPPort = -1 // ephemeral, like the client port
-	}
+	monitor := o.HTTPPort != 0
 
-	srv, err := natsserver.NewServer(opts)
+	srv, err := natsserver.NewServer(o)
 	if err != nil {
 		t.Fatalf("start scratch server: %v", err)
 	}

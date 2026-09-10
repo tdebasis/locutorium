@@ -89,7 +89,9 @@ func TestQueuesReportsAListingTheDeploymentRefuses(t *testing.T) {
 			Subscribe: &natsserver.SubjectPermission{Allow: []string{"queue.>", "_INBOX.>"}},
 		}},
 	}
-	srv := loctest.Boot(t, users, seat, false)
+	// OPT-IN: this case needs the medium to REFUSE a stream listing, so it
+	// boots the authenticated shape the product does not have.
+	srv := loctest.Boot(t, loctest.WithRefusals(users, seat))
 	write(t, filepath.Join(home, "config"), "nats_url = "+srv.URL+"\n")
 	t.Setenv("LOC_HOME", home)
 	nc, js := srv.Admin(t, "admin", testPassword)

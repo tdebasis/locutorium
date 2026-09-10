@@ -52,7 +52,6 @@ import (
 	"testing"
 	"time"
 
-	natsserver "github.com/nats-io/nats-server/v2/server"
 	natsgo "github.com/nats-io/nats.go"
 
 	"github.com/tdebasis/locutorium/internal/loctest"
@@ -91,71 +90,13 @@ type presence struct {
 	adminJS    natsgo.JetStreamContext
 }
 
-// presenceUsers is the access-control block this harness boots its broker
-// with. V0 authenticates nobody, so `loc` arrives as `admin` through the
-// broker's no-auth mapping and the per-seat blocks below constrain only what
-// the test's own assertion connections may do. The shape is the presence
-// model's: endpoints are namespaced, backing-object names substitute dots for
-// underscores, a `host` supervisor exists alongside the read-only `watch`, and
-// each endpoint may create and delete its own queue stream because subscribe
-// creates the queue and unsubscribe destroys it.
-func presenceUsers() []*natsserver.User {
-	users := []*natsserver.User{
-		// admin: full rights, and the identity every assertion observes through.
-		{Username: "admin", Password: presencePassword},
-		// host: the supervisor. It launches agents (so it holds their pids),
-		// subscribes and unsubscribes them, sweeps, answers the registry and
-		// sends on their behalf. Broad rights, because it is trusted
-		// (PRESENCE.md §Trust, in the inner parlor).
-		{Username: "host", Password: presencePassword, Permissions: &natsserver.Permissions{
-			Publish:   &natsserver.SubjectPermission{Allow: []string{"queue.>", "topic.>", "presence.>", "registry.>", "$JS.>"}},
-			Subscribe: &natsserver.SubjectPermission{Allow: []string{"queue.>", "topic.>", "presence.>", "registry.>", "_INBOX.>"}},
-		}},
-		// watch: read-only. It may follow every queue and event stream and may
-		// publish nothing at all (PRESENCE.md §Command-line operations → watch,
-		// §Trust — the watch role publishes nothing).
-		{Username: "watch", Password: presencePassword, Permissions: &natsserver.Permissions{
-			Subscribe: &natsserver.SubjectPermission{Allow: []string{"queue.>", "topic.>", "presence.>", "registry.>", "_INBOX.>"}},
-			Publish:   &natsserver.SubjectPermission{Deny: []string{">"}},
-		}},
-	}
-	for _, e := range []string{e1, e2, e3, eOld} {
-		s := strings.ReplaceAll(e, ".", "_") // workshop.scribe -> workshop_scribe
-		inst := strings.SplitN(e, ".", 2)[0] // workshop.scribe -> workshop
-		// THE EVENTS PLANE, AND ONE SEAT THAT NEVER GOT IT. A seat emits its
-		// own events, so its block grants it its instance's events subject.
-		// eOld is left with the pre-split grant alone, which is what makes the
-		// refused-publish case a real refusal rather than a mock.
-		events := "presence." + inst
-		if e == eOld {
-			events = "topic." + inst
-		}
-		users = append(users, &natsserver.User{Username: e, Password: presencePassword, Permissions: &natsserver.Permissions{
-			Publish: &natsserver.SubjectPermission{Allow: []string{
-				"queue.>", "topic.>", "registry.>", events,
-				"$JS.API.INFO",
-				"$JS.API.STREAM.CREATE.QUEUE_" + s, "$JS.API.STREAM.DELETE.QUEUE_" + s,
-				"$JS.API.STREAM.INFO.QUEUE_" + s, "$JS.API.STREAM.NAMES", "$JS.API.STREAM.LIST",
-				"$JS.API.CONSUMER.DURABLE.CREATE.QUEUE_" + s + "." + s,
-				"$JS.API.CONSUMER.CREATE.QUEUE_" + s, "$JS.API.CONSUMER.CREATE.QUEUE_" + s + ".>",
-				"$JS.API.CONSUMER.INFO.QUEUE_" + s + "." + s,
-				"$JS.API.CONSUMER.MSG.NEXT.QUEUE_" + s + "." + s,
-				"$JS.ACK.QUEUE_" + s + ".>",
-			}},
-			Subscribe: &natsserver.SubjectPermission{Allow: []string{"queue." + e, "topic." + inst, events, "registry." + inst, "_INBOX.>"}},
-		}})
-	}
-	return users
-}
-
 // newPresence boots a presence deployment for one test and returns it wired up.
 // No host process is run: the registry is host-held (PRESENCE.md §Who is here
 // right now), and its absence is one of the things under test.
 func newPresence(t *testing.T) *presence {
 	t.Helper()
 	home := t.TempDir()
-	users := presenceUsers()
-	srv := loctest.Boot(t, users, "admin", true /* monitor: registry/status read connection state from it */)
+	srv := loctest.Boot(t, loctest.WithMonitor() /* registry/status read connection state from it */)
 
 	loctest.Write(t, filepath.Join(home, "config"),
 		"provider = nats\nnats_url = "+srv.URL+"\nmonitor_url = "+srv.MonitorURL+"\ntopic_window = 7d\n")

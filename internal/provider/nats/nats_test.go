@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	natsserver "github.com/nats-io/nats-server/v2/server"
 	natsgo "github.com/nats-io/nats.go"
 
 	"github.com/tdebasis/locutorium/internal/loc"
@@ -49,16 +48,12 @@ func newHarness(t *testing.T, endpoints ...string) *harness {
 	t.Helper()
 
 	home := t.TempDir()
-	users := append([]string{"admin"}, endpoints...)
 
 	// The server boot, the admin observer, closedPort and write are shared with
 	// the CLI-level presence suite through internal/loctest; the stream shapes
-	// and the flat single-password user set are this package's own.
-	uu := make([]*natsserver.User, 0, len(users))
-	for _, u := range users {
-		uu = append(uu, &natsserver.User{Username: u, Password: testPassword})
-	}
-	srv := loctest.Boot(t, uu, "admin", false)
+	// are this package's own. The boot is the product's: no users, no
+	// authorization block, exactly what `loc start` runs.
+	srv := loctest.Boot(t)
 
 	h := &harness{srv: srv, home: home, url: srv.URL, endpoints: endpoints}
 

@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	natsserver "github.com/nats-io/nats-server/v2/server"
 	natsgo "github.com/nats-io/nats.go"
 
 	"github.com/tdebasis/locutorium/internal/loctest"
@@ -40,11 +39,7 @@ func newNamespaced(t *testing.T, endpoints []string, withQueues []string) *names
 	t.Helper()
 
 	home := t.TempDir()
-	users := []*natsserver.User{{Username: "admin", Password: testPassword}}
-	for _, e := range endpoints {
-		users = append(users, &natsserver.User{Username: e, Password: testPassword})
-	}
-	srv := loctest.Boot(t, users, "admin", false)
+	srv := loctest.Boot(t)
 
 	write(t, filepath.Join(home, "config"), "nats_url = "+srv.URL+"\n")
 	seedLedger(t, home, endpoints...)
