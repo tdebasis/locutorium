@@ -201,12 +201,12 @@ jobs:
           check internal/loc           88
           check internal/mcpserve      85
           check internal/provider      95
-          # LOWERED 90 FROM 94 BY THE REMOVALS PR (#74). V0 has no
-          # authentication (R12), so the credential and access-list cases in
-          # this package were removed with the feature they tested. See
-          # docs/DECISIONS.md entry 12. The ratchet is re-set here rather than
-          # waived, so the next accidental loss still trips it.
-          check internal/provider/nats 90
+          # HELD AT 94 THROUGH THE REMOVALS PR (#74). V0 has no authentication
+          # (R12), so the credential and access-list cases in this package went
+          # with the feature they tested — see docs/DECISIONS.md entry 12. The
+          # code that READS a refusal is still shipped, and refusal_test.go now
+          # covers it directly instead. 94.9% measured.
+          check internal/provider/nats 94
           exit $fail
 
       - name: keep the coverage report
