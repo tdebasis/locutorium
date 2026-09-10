@@ -853,3 +853,35 @@ func TestStartReportsADaemonItCannotLaunch(t *testing.T) {
 		t.Errorf("exit %d, stderr %q; want 1 and the failure", code, errOut)
 	}
 }
+
+// The floor refuses a scratch home that would bind the product's default port.
+//
+// THE HOME IS NOT THE WHOLE ISOLATION. A case can have a home of its own and
+// still resolve nats_url to nats://127.0.0.1:4222, which is a live broker's
+// address on the machine running the tests.
+func TestTheFloorRefusesTheDefaultPort(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		config string
+		want   bool
+	}{
+		{"no config at all", "", true},
+		{"the default written out", "nats_url = " + config.Default(config.NATSURL) + "\n", true},
+		{"a port of its own", "nats_url = nats://127.0.0.1:14999\n", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("LOC_HOME", home)
+			if c.config != "" {
+				writeFile(t, filepath.Join(home, "config"), c.config)
+			}
+			refusal := unsafePort()
+			if c.want && !strings.Contains(refusal, "the product's default") {
+				t.Errorf("the floor said %q, want a refusal naming the default", refusal)
+			}
+			if !c.want && refusal != "" {
+				t.Errorf("the floor refused a scratch port: %q", refusal)
+			}
+		})
+	}
+}
