@@ -788,3 +788,68 @@ func TestStopReportsAPortThatNeverCloses(t *testing.T) {
 		t.Errorf("stopPID returned %v, want a failure naming the port", err)
 	}
 }
+
+// Both platforms' lookup output is read here, whichever platform this runs on.
+func TestPidFromLookupReadsBothTools(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		goos string
+		out  string
+		want int
+	}{
+		{"lsof names one pid", "darwin", "812\n", 812},
+		{"lsof names several", "darwin", "812\n913\n", 812},
+		{"lsof says nothing", "darwin", "", 0},
+		{"lsof prints something that is not a pid", "darwin", "no\n", 0},
+		{"ss names the listener", "linux",
+			"LISTEN 0 128 127.0.0.1:14222 0.0.0.0:* users:((\"nats-server\",pid=812,fd=9))\n", 812},
+		{"ss lists another port only", "linux",
+			"LISTEN 0 128 127.0.0.1:4222 0.0.0.0:* users:((\"nats-server\",pid=812,fd=9))\n", 0},
+		{"ss without the process column", "linux",
+			"LISTEN 0 128 127.0.0.1:14222 0.0.0.0:*\n", 0},
+		{"ss with a pid of zero", "linux",
+			"LISTEN 0 128 127.0.0.1:14222 0.0.0.0:* users:((\"x\",pid=0,fd=9))\n", 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			pid, ok := pidFromLookup(c.goos, c.out, 14222)
+			if c.want == 0 && ok {
+				t.Errorf("found pid %d, want nothing", pid)
+			}
+			if c.want != 0 && (!ok || pid != c.want) {
+				t.Errorf("found %d (%v), want %d", pid, ok, c.want)
+			}
+		})
+	}
+}
+
+// A daemon log that cannot be opened stops the start before anything is
+// launched.
+func TestStartReportsALogItCannotOpen(t *testing.T) {
+	home, _ := scratchHouse(t)
+	writeFile(t, filepath.Join(home, "run"), "not a directory")
+	restore := daemonCommand
+	daemonCommand = func() (*osexec.Cmd, error) {
+		return osexec.Command(os.Args[0], "-test.run=^TestHelperExitsAtOnce$"), nil
+	}
+	t.Cleanup(func() { daemonCommand = restore })
+
+	code, _, errOut := exec("start")
+	if code != 1 || errOut == "" {
+		t.Errorf("exit %d, stderr %q; want 1 and a failure", code, errOut)
+	}
+}
+
+// A daemon that cannot be launched at all is reported as such.
+func TestStartReportsADaemonItCannotLaunch(t *testing.T) {
+	scratchHouse(t)
+	restore := daemonCommand
+	daemonCommand = func() (*osexec.Cmd, error) {
+		return osexec.Command(filepath.Join(t.TempDir(), "no-such-binary")), nil
+	}
+	t.Cleanup(func() { daemonCommand = restore })
+
+	code, _, errOut := exec("start")
+	if code != 1 || !strings.Contains(errOut, "cannot start the daemon") {
+		t.Errorf("exit %d, stderr %q; want 1 and the failure", code, errOut)
+	}
+}
