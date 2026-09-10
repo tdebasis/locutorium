@@ -77,8 +77,8 @@ func TestBackingNamesAreInjective(t *testing.T) {
 // ------------------------------------------------------------------ events
 
 func TestTheTaxonomy(t *testing.T) {
-	if len(Kinds()) != 7 {
-		t.Errorf("the taxonomy has %d kinds, want the schema's seven", len(Kinds()))
+	if len(Kinds()) != 6 {
+		t.Errorf("the taxonomy has %d kinds, want the schema's six", len(Kinds()))
 	}
 	for _, k := range Kinds() {
 		if !ValidKind(k) {
@@ -99,11 +99,6 @@ func TestTheTaxonomy(t *testing.T) {
 		if RecordsActivity(k) {
 			t.Errorf("%q moves the activity state, but it is membership", k)
 		}
-	}
-	// The third subject is the house's own health. It is not work either, and
-	// its own tests are in incident_test.go.
-	if RecordsActivity(KindIncident) {
-		t.Errorf("%q moves the activity state, but it is the house", KindIncident)
 	}
 }
 

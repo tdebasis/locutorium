@@ -1,16 +1,12 @@
 package nats
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
-	"sort"
-	"strings"
 	"time"
 
 	natsgo "github.com/nats-io/nats.go"
-	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/tdebasis/locutorium/internal/presence"
 )
@@ -120,81 +116,6 @@ func (p *Provider) QueueExists(endpoint string) (bool, error) {
 		return false, nil
 	}
 	return false, fmt.Errorf("cannot tell whether '%s' is attended: %v", endpoint, err)
-}
-
-// listBound is how long a listing waits for the store to answer.
-//
-// A JetStream request the deployment does not permit EXPIRES SILENTLY. The
-// server reports the refusal on the connection and writes nothing at all to
-// the reply subject, so nothing else ever ends the wait (see noteRefusal,
-// nats.go). THE BOUND IS WHAT TURNS "not allowed to look" INTO AN ERROR
-// rather than a hang, which is the only reading a caller can act on.
-const listBound = 5 * time.Second
-
-// Queues lists the endpoints attended in one instance, sorted.
-//
-// THE SCOPE IS APPLIED BY THE SERVER, BY SUBJECT. The store is asked for the
-// objects behind `queue.<instance>.*` and for nothing else, so the topic
-// store, the other instances, and the flat pre-namespace endpoints of an older
-// deployment are never in the answer to begin with. Filtering a whole listing
-// here instead would need the right to ask for a whole listing.
-//
-// THE LISTING IS DRAINED IN FULL BEFORE ANYTHING IS RETURNED, and the lister's
-// own error is read after the drain. A listing that broke halfway looks
-// exactly like a small instance, and the caller of this method acts on
-// absence: a partial list is worse than no list.
-func (p *Provider) Queues(instance string) ([]string, error) {
-	if err := presence.ValidInstance(instance); err != nil {
-		return nil, err
-	}
-	if err := p.connect(); err != nil {
-		return nil, err
-	}
-	js, err := jetstream.New(p.nc)
-	if err != nil {
-		return nil, fmt.Errorf("cannot list the queues of '%s': %v", instance, err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), listBound)
-	defer cancel()
-
-	lister := js.ListStreams(ctx, jetstream.WithStreamListSubject("queue."+instance+".*"))
-	var out []string
-	for info := range lister.Info() {
-		if endpoint, ours := queueEndpoint(info); ours {
-			out = append(out, endpoint)
-		}
-	}
-	if err := lister.Err(); err != nil {
-		return nil, fmt.Errorf("cannot list the queues of '%s': %v", instance, err)
-	}
-	sort.Strings(out)
-	return out, nil
-}
-
-// queueEndpoint reads an endpoint back off a backing object, and refuses
-// anything this model did not make.
-//
-// The subject is what the store matched on, so the NAME is the half still
-// worth checking. An object called something else on one of our subjects
-// belongs to somebody else, and the model's own verbs address a queue by the
-// name queueConfig gives it: a delete would report success while destroying
-// nothing, and a create would be refused for a shape that is not ours to
-// correct. It is skipped silently, because it is not a fault in this instance.
-func queueEndpoint(info *jetstream.StreamInfo) (string, bool) {
-	if info == nil || len(info.Config.Subjects) != 1 {
-		return "", false
-	}
-	endpoint, found := strings.CutPrefix(info.Config.Subjects[0], "queue.")
-	if !found {
-		return "", false
-	}
-	if presence.ValidEndpoint(endpoint) != nil {
-		return "", false
-	}
-	if info.Config.Name != presence.StreamName(endpoint) {
-		return "", false
-	}
-	return endpoint, true
 }
 
 // Emit speaks one event in an instance's subject.
