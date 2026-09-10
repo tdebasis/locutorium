@@ -45,17 +45,13 @@ func serveBell(t *testing.T, p *presence) string {
 	if !waitFor(5*time.Second, func() bool { return registration(t, e1) != nil }) {
 		t.Fatalf("the server did not register %s", e1)
 	}
-	// AND WAIT FOR THE PIDFILE, NOT ONLY THE ROW. (Historical note kept: the
-	// sender used to read this file to decide whether to ring. It only queues
-	// now, R36; the file still says when the server has taken the seat, which
-	// is what this fixture waits for.) The server registers, then
+	// AND WAIT FOR THE PIDFILE, NOT ONLY THE ROW. The server registers, then
 	// starts its bell, then claims the pidfile — in that order, on purpose
-	// (serve.go: "the bell first, then the file that claims there is one"). A
-	// sender decides whether to ring by the FILE (hasItsOwnBell), so a send
-	// that lands after the row and before the file rings itself, and the
-	// server rings too: two bells for one arrival. Measured on ubuntu CI,
-	// 2026-09-08, passing here by timing alone. The wait uses the sender's own
-	// predicate, so the fixture and send cannot disagree about "up".
+	// (serve.go: "the bell first, then the file that claims there is one").
+	// The row appears before the bell is watching, so a send that lands
+	// between the two would find a seat that reads as attended and is not yet
+	// ringing. Waiting for the file waits for the bell. Measured on ubuntu CI,
+	// 2026-09-08, where this passed by timing alone.
 	if !waitFor(5*time.Second, func() bool {
 		_, err := os.Stat(servingPIDPath(p.home, e1))
 		return err == nil

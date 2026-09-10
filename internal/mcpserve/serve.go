@@ -196,21 +196,17 @@ func Serve(ctx context.Context, d Deps, t mcp.Transport) error {
 
 	// THE BELL FIRST, THEN THE FILE THAT CLAIMS THERE IS ONE.
 	//
-	// The pid file is what a sender reads to decide it need not ring: a seat
-	// whose server is up rings its own bell, so `send` stays quiet (cmd/loc,
-	// hasItsOwnBell). Writing the file before the listener exists opens a
-	// window where that is a lie — the sender is told the seat rings, the seat
-	// is not yet watching, and the message arrives with no bell at all, which
-	// is the one outcome this whole arrangement exists to prevent. The order
+	// The pid file says a server is serving this seat. Writing it before the
+	// listener exists opens a window where that is a lie: a reader is told the
+	// seat is served and the seat is not yet watching its queue. The order
 	// makes the file mean what it says.
 	//
-	// THE COST OF THIS ORDER, ACCEPTED: between the registration and the pid
-	// file the seat reads as attended and not yet as ringing, so a send that
-	// lands in that window rings itself, and the bell just started rings too.
-	// Two bells for one arrival, for a few milliseconds at startup. That is
-	// the cheaper of the two windows — the other one is silence — and a
-	// reader who sees a doubled bell at startup is seeing this, not a defect.
-	// A hook that fetches on the second bell finds an empty queue and says so.
+	// The file used to decide something as well as say it. A sender read it to
+	// decide it need not ring, and the two-bells-at-startup cost recorded here
+	// belonged to that arrangement. R36 of 2026-09-10 ended it: a send only
+	// queues, and this server is the only thing that rings. The order is kept
+	// because the file's meaning is worth keeping true, and because an
+	// operator looking for the serving process reads it.
 	stopBell := s.startBell()
 	s.claimPIDFile()
 	reason := s.wait(ss, sig)
