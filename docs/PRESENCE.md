@@ -480,8 +480,9 @@ this document's scope and are not listed.
 
 **The window between a death and the next heartbeat, and what it costs.** Unsubscribing destroys the
 queue. A message sent to a seat after its process died and before the next heartbeat reaches it is
-therefore deleted with that queue. The heartbeat's log records the deletion, so the message is
-recoverable from the record even though it is off the bus. This is an accepted cost in V0.
+therefore deleted with that queue. The heartbeat's log records that the queue was deleted. The
+message log at `run/log/<date>.jsonl` holds the message's body, its sender and its recipient, so the
+message can be found there even though it is off the bus. This is an accepted cost in V0.
 
 ### Called by adapters
 
