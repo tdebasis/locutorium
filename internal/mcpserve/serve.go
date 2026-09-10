@@ -18,8 +18,12 @@
 // put them on the screen.
 //
 // Nothing here knows what runtime is on the other end of the pipe. The server
-// reads LOC_IDENTITY and LOC_HOME and speaks on stdin and stdout, and the
-// pane-specific last inch stays in the deployment's hooks/nudge.
+// reads LOC_IDENTITY and LOC_HOME and speaks on stdin and stdout, and the bell
+// is a notifier in this binary, chosen by the listener type the seat
+// registered with (notify.go). R28 of 2026-09-09 reverses the earlier reading
+// of this line, which said the pane-specific last inch stays in a shell hook
+// the deployment writes: a shell hook does not cross to Windows and CI runs
+// none of it.
 package mcpserve
 
 import (
@@ -37,7 +41,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/tdebasis/locutorium/internal/config"
-	"github.com/tdebasis/locutorium/internal/loc"
 	model "github.com/tdebasis/locutorium/internal/presence"
 )
 
@@ -81,11 +84,14 @@ type Deps struct {
 	// moment there is.
 	Signals <-chan os.Signal
 
+	// Notify rings the seat's bell. Left nil, the server builds the notifier
+	// that the seat's LOC_LISTENER_TYPE names.
+	Notify Notifier
+
 	// Seams a test replaces. The zero value is the real thing.
-	Nudge func(endpoint, line string) error
-	Now   func() time.Time
-	Ppid  func() int
-	Wd    func() (string, error)
+	Now  func() time.Time
+	Ppid func() int
+	Wd   func() (string, error)
 
 	// Where a line goes that the RUNTIME must see. Stdout is the protocol's,
 	// byte for byte, so anything said to a human goes here.
@@ -123,16 +129,24 @@ const bellLine = "🔔 %d new → read"
 func Serve(ctx context.Context, d Deps, t mcp.Transport) error {
 	d = d.withDefaults()
 
-	s := &server{d: d}
+	s := &server{d: d, address: os.Getenv("LOC_LISTENER_ADDRESS")}
 	if err := s.requireListenerEnv(); err != nil {
 		return err
+	}
+	if s.d.Notify == nil {
+		n, err := newNotifier(os.Getenv("LOC_LISTENER_TYPE"), s.log, s.d.Now)
+		if err != nil {
+			s.warn(err.Error())
+			return err
+		}
+		s.d.Notify = n
 	}
 
 	// THE HANDLER IS INSTALLED BEFORE THERE IS ANYTHING TO GIVE UP.
 	//
 	// Everything below this line — the preflight, the handshake, the
-	// registration, the pid file and the first ring of the bell, which runs
-	// the deployment's nudge hook and waits for it — takes time a signal can
+	// registration, the pid file and the first ring of the bell, which may
+	// spawn a courier and wait for it — takes time a signal can
 	// arrive in. Notifying only once the server settled down to wait left
 	// exactly that stretch with Go's DEFAULT disposition in place: terminate
 	// where you stand. A TERM landing there killed a process that had already
@@ -210,6 +224,9 @@ func Serve(ctx context.Context, d Deps, t mcp.Transport) error {
 type server struct {
 	d Deps
 	b *bell
+	// address is where this seat is reached, the deployment's own
+	// LOC_LISTENER_ADDRESS. The notifier is handed it on every ring.
+	address string
 }
 
 // departReason describes why the server is departing.
@@ -462,9 +479,6 @@ func (s *server) log(line string) {
 
 // withDefaults fills the seams a test replaces with the real thing.
 func (d Deps) withDefaults() Deps {
-	if d.Nudge == nil {
-		d.Nudge = loc.NudgeErr
-	}
 	if d.Now == nil {
 		d.Now = time.Now
 	}

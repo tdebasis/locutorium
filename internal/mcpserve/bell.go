@@ -32,7 +32,7 @@ const (
 	defaultBreakerHour   = 60
 )
 
-// bell coalesces arrivals and rings the deployment's nudge hook.
+// bell coalesces arrivals and rings the seat's notifier.
 type bell struct {
 	s       *server
 	window  time.Duration
@@ -168,10 +168,10 @@ func (b *bell) fire() {
 	b.mu.Unlock()
 
 	// A BELL THAT COULD NOT RING SAYS SO, and is never recorded as a wake.
-	// The breaker has already been charged for it, which is deliberate: a hook
-	// that fails will fail again, and a broken bell must not become a way to
-	// hammer the pane once it is fixed.
-	if err := b.s.d.Nudge(b.s.d.Endpoint, fmt.Sprintf(bellLine, n)); err != nil {
+	// The breaker has already been charged for it, which is deliberate: a
+	// notifier that fails will fail again, and a broken bell must not become a
+	// way to hammer the pane once it is fixed.
+	if err := b.s.d.Notify.Ring(b.s.d.Endpoint, b.s.address, fmt.Sprintf(bellLine, n)); err != nil {
 		b.s.warn(fmt.Sprintf("bell failed %s: %v", b.s.d.Endpoint, err))
 		return
 	}

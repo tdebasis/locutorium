@@ -113,12 +113,12 @@ func (f *fake) deps() Deps {
 			return func() {}, nil
 		},
 		Unread: func(string) (int, error) { return f.unread, f.unreadErr },
-		Nudge: func(_, line string) error {
+		Notify: notifierFunc(func(_, _, bell string) error {
 			f.mu.Lock()
 			defer f.mu.Unlock()
-			f.nudged = append(f.nudged, line)
+			f.nudged = append(f.nudged, bell)
 			return f.nudgeErr
-		},
+		}),
 		// A pid that is alive and is not this process, so "our parent" is a
 		// fact a case can arrange rather than inherit.
 		Ppid: os.Getppid,
@@ -500,14 +500,14 @@ func TestBell_ArrivalsInsideTheWindowRingOnce(t *testing.T) {
 // written where the deployment already looks for what was delivered, and said
 // once on the runtime's own log.
 //
-// THE REAL HOOK PATH, not the fake seam: the case is about what happens when
-// the thing outside the binary is not there, so the seam is left unfilled and
-// a home with no hooks/ directory is the whole arrangement.
+// THE REAL NOTIFIER, not the fake seam: the case is about what happens when
+// the bell cannot ring, so the seam is left unfilled and the seat's registered
+// type is tmux with a pane address that names no pane.
 func TestBell_ABellThatCouldNotRingSaysSo(t *testing.T) {
 	dir := home(t, "provider = none\nwake_window_seconds = 1\n")
 	f := &fake{}
 	d := f.deps()
-	d.Nudge = nil // the real hook, and there is none in this home
+	d.Notify = nil // the real notifier, and its pane does not exist
 	var stderr bytes.Buffer
 	d.Stderr = &stderr
 	sess, done := serve(t, d)
@@ -787,7 +787,7 @@ func TestAgentToken(t *testing.T) {
 
 func TestWithDefaults_FillsTheSeamsWithTheRealThing(t *testing.T) {
 	d := Deps{}.withDefaults()
-	if d.Nudge == nil || d.Now == nil || d.Ppid == nil || d.Wd == nil || d.Stderr == nil {
+	if d.Now == nil || d.Ppid == nil || d.Wd == nil || d.Stderr == nil {
 		t.Fatal("a zero Deps left a seam unfilled")
 	}
 	if d.Ppid() != os.Getppid() {
@@ -805,4 +805,12 @@ func waitFor(d time.Duration, cond func() bool) bool {
 		time.Sleep(20 * time.Millisecond)
 	}
 	return cond()
+}
+
+// notifierFunc adapts a function to the Notifier interface, so a case that
+// only wants to see the bell line does not have to declare a type for it.
+type notifierFunc func(endpoint, address, bell string) error
+
+func (f notifierFunc) Ring(endpoint, address, bell string) error {
+	return f(endpoint, address, bell)
 }
