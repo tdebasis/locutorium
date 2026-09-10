@@ -185,7 +185,13 @@ sleep 1
       || { bad "stream init (subscribe $_s)"; exit 1; }
   done
 
-# Nudge hook stub: records invocations instead of ringing anything.
+# A TRAP, NOT A FIXTURE. R36 of 2026-09-10 ruled that a send only queues: the
+# sender notifies nobody, and the seat's own server is the one thing that rings.
+# This executable sits where the retired doorbell used to be looked for and
+# records every call. Nothing should ever call it. It stays because the two
+# cases below assert an ABSENCE, and an absence measured with no instrument is
+# not a measurement: delete this file and both cases pass whatever the sender
+# does.
 cat > "$LOC_HOME/hooks/nudge" <<EOF
 #!/bin/sh
 echo "\$1 \$2" >> "$LOC_HOME/nudges.log"
@@ -234,7 +240,13 @@ out2="$(LOC_IDENTITY=$(ep bob) loc read 2>/dev/null)"
 if grep -q "message-one" <<<"$out2"; then
   bad "queue messages are consumed exactly once"
 else ok "queue messages are consumed exactly once"; fi
-check "nudge hook fired on queue send" grep -q "$(ep bob)" "$LOC_HOME/nudges.log"
+# A QUEUE SEND RINGS NOBODY, AND THE MESSAGE IS STILL THERE. Both halves are
+# asserted, because a send that queued nothing would also ring nothing.
+env LOC_IDENTITY=$(ep alice) loc send $(ep bob) "message-three" >/dev/null 2>&1
+check_not "queue send rings nobody, read finds it (nobody rung)" \
+  grep -q "$(ep bob)" "$LOC_HOME/nudges.log"
+check "queue send rings nobody, read finds it (read finds it)" \
+  bash -c "LOC_IDENTITY=$(ep bob) loc read | grep -q message-three"
 
 say "— reading must not destroy what it failed to show —"
 # Consumption is irreversible (workqueue retention: the ack is a delete), so a
@@ -301,10 +313,14 @@ say "— topics: window, mentions, independent cursors —"
 env LOC_IDENTITY=$(ep alice) loc publish standup "@$(ep carol) please look at this" >/dev/null 2>&1
 check "topic appears in the active list" \
   bash -c "LOC_IDENTITY=$(ep alice) loc topics | grep -q standup"
-check "@mention rang exactly the mentioned endpoint" \
-  grep -q "$(ep carol) .*#standup" "$LOC_HOME/nudges.log"
-check_not "unmentioned endpoint got no topic nudge" \
-  grep -q "^$(ep bob) .*#standup" "$LOC_HOME/nudges.log"
+# AN @MENTION IS DELIVERED TO THE TOPIC AND ANNOUNCED TO NOBODY (R36). The
+# mentioned endpoint finds it on read, at its own cursor, like every other
+# reader. The peek is deliberate: an ordinary read here would advance carol's
+# cursor and the independent-cursors case below would then find nothing.
+check_not "@mention rings nobody, read finds it (nobody rung)" \
+  grep -q "#standup" "$LOC_HOME/nudges.log"
+check "@mention rings nobody, read finds it (read finds it)" \
+  bash -c "LOC_IDENTITY=$(ep carol) loc read --peek | grep -q 'please look'"
 c="$(LOC_IDENTITY=$(ep carol) loc read 2>/dev/null)"; b="$(LOC_IDENTITY=$(ep bob) loc read 2>/dev/null)"
 if grep -q "please look" <<<"$c" && grep -q "please look" <<<"$b"; then
   ok "every reader's cursor sees the conversation independently"
