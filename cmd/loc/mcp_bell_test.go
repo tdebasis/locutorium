@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"testing"
 	"time"
 
@@ -24,7 +25,7 @@ import (
 // cases are about what reaches the PANE, not what an agent asked for.
 func serveBell(t *testing.T, p *presence) string {
 	t.Helper()
-	spool := nudgeSpool(t, p.home)
+	spool := bellSpool(t, p.home)
 	stampVersion(t, "1.4.2")
 	d, release, err := mcpDeps()
 	if err != nil {
@@ -46,13 +47,15 @@ func serveBell(t *testing.T, p *presence) string {
 	}
 	// AND WAIT FOR THE PIDFILE, NOT ONLY THE ROW. The server registers, then
 	// starts its bell, then claims the pidfile — in that order, on purpose
-	// (serve.go: "the bell first, then the file that claims there is one"). A
-	// sender decides whether to ring by the FILE (hasItsOwnBell), so a send
-	// that lands after the row and before the file rings itself, and the
-	// server rings too: two bells for one arrival. Measured on ubuntu CI,
-	// 2026-09-08, passing here by timing alone. The wait uses the sender's own
-	// predicate, so the fixture and send cannot disagree about "up".
-	if !waitFor(5*time.Second, func() bool { return hasItsOwnBell(e1) }) {
+	// (serve.go: "the bell first, then the file that claims there is one").
+	// The row appears before the bell is watching, so a send that lands
+	// between the two would find a seat that reads as attended and is not yet
+	// ringing. Waiting for the file waits for the bell. Measured on ubuntu CI,
+	// 2026-09-08, where this passed by timing alone.
+	if !waitFor(5*time.Second, func() bool {
+		_, err := os.Stat(servingPIDPath(p.home, e1))
+		return err == nil
+	}) {
 		t.Fatalf("the server registered but never claimed its pidfile")
 	}
 	return spool

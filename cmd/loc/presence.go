@@ -13,6 +13,7 @@ import (
 
 	"github.com/tdebasis/locutorium/internal/config"
 	"github.com/tdebasis/locutorium/internal/loc"
+	"github.com/tdebasis/locutorium/internal/mcpserve"
 	// Aliased: the frozen integration suite in this package already declares a
 	// type called `presence` for its scratch deployment, and a package name and
 	// a type name cannot both be that word here.
@@ -152,6 +153,13 @@ func subscribeVerb(args []string) error {
 	}
 	if pidArg == "" || agentType == "" || version == "" {
 		return errUsage
+	}
+	// THE TYPE IS A CLOSED SET, because it chooses the notifier that rings
+	// this seat (internal/mcpserve/notify.go, R28). A type with no notifier
+	// behind it would register a seat that reads as reachable and rings
+	// nothing, and the deployment would find that out by being told nothing.
+	if err := mcpserve.ValidListenerType(agentType); err != nil {
+		return err
 	}
 	pid, err := strconv.Atoi(pidArg)
 	if err != nil || pid <= 0 {

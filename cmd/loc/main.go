@@ -13,8 +13,6 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
-	"strconv"
-	"strings"
 	"syscall"
 
 	"github.com/tdebasis/locutorium/internal/config"
@@ -307,75 +305,15 @@ func send(p provider.Provider, w io.Writer, to, body string) error {
 		return err
 	}
 	loc.LogSent(e)
-	// ONE MESSAGE, ONE BELL, AND THE RECIPIENT DECIDES WHOSE.
-	//
-	// A seat whose SERVER IS RUNNING has a listener on this very queue: the
-	// arrival just made will ring its pane, coalesced across the wake window
-	// and answering to the breaker. Ringing here as well puts TWO lines in one
-	// pane for one message, and the sender's is the one that knows least — it
-	// cannot coalesce, it is not capped, and it does not know what else is
-	// waiting. Everywhere else there is nobody to ring but us, and the line
-	// names the CLI verb, because that is what such a seat reads with; a seat
-	// that has a server has the tool instead, and its own server says so in
-	// its own words.
-	//
-	// AND A SKIPPED BELL IS SAID OUT LOUD. Staying quiet in the pane must not
-	// mean staying quiet everywhere: the only reader who can tell whether the
-	// silence was right is looking at this line, and a sender that suppressed
-	// its ring wrongly would otherwise be indistinguishable from one that rang.
-	// The RINGING path's line does not change — it is the shipped one, and what
-	// reads it has read it for as long as there has been a `send`.
-	if hasItsOwnBell(to) {
-		fmt.Fprintf(w, "sent → queue.%s (the seat's server rings)\n", to)
-		return nil
-	}
-	loc.Nudge(to, "[LOC] 1 new → loc read")
+	// THE SENDER ONLY QUEUES. A send puts the message in the recipient's queue
+	// and does nothing else. The seat's own server is the one thing that
+	// notifies, through the notifier its registered type names (R36,
+	// 2026-09-10). A seat registered as none is not notified at all and finds
+	// its mail on the next read. A sender that rang as well would be a second
+	// bell that cannot coalesce, is not capped, and does not know what else is
+	// waiting for that seat.
 	fmt.Fprintf(w, "sent → queue.%s\n", to)
 	return nil
-}
-
-// hasItsOwnBell reports whether a SERVING PROCESS is running for the recipient,
-// and therefore whether there is a second bell to stay quiet for.
-//
-// THE QUESTION IS ABOUT A PROCESS, NOT A REGISTRATION. A registration says
-// that a host registered this seat and which runtime is at it; it is the right
-// answer to "who is here" and the wrong one to "is anybody ringing". The two
-// come apart constantly, and always in the direction that loses a message: a
-// seat registered by hand, a test suite that registers its own pid, a seat
-// whose server crashed while the runtime it names lives on. Each is a live
-// registration with nobody home, and suppressing on it silences all three.
-//
-// The serving child writes run/<endpoint>.mcp.pid when it takes the seat and
-// removes it when it gives it up (internal/mcpserve), so that file is the only
-// thing in the deployment that names the ringer. Its EXISTENCE is not the
-// answer — a server killed outright leaves the file behind — so the process it
-// names is asked about.
-//
-// AND THE PID IS NOT THE IDENTITY. The file carries two lines, the pid and the
-// start time the presence model records for it, and both are compared, through
-// that model's own liveness rather than a second copy of it. A number alone
-// goes on reading as alive the moment the kernel hands it to a stranger, and
-// here that costs a message: a seat with no server at all would be silenced by
-// whatever process inherited its old pid.
-//
-// AN UNREADABLE ANSWER MEANS NO. Every failure here — no file, a stale file, a
-// line that will not parse — falls back to ringing, because the two ways of
-// being wrong are not equal: one bell too many is a line somebody scrolls
-// past, and one too few is a message nobody was told about.
-func hasItsOwnBell(endpoint string) bool {
-	b, err := os.ReadFile(model.ServerPIDFile(endpoint))
-	if err != nil {
-		return false
-	}
-	lines := strings.SplitN(strings.TrimRight(string(b), "\n"), "\n", 2)
-	if len(lines) < 2 {
-		return false
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(lines[0]))
-	if err != nil {
-		return false
-	}
-	return model.Alive(pid, strings.TrimSpace(lines[1]))
 }
 
 // topicName is the whole grammar of a topic: lowercase, starting with a
@@ -403,11 +341,10 @@ func publish(p provider.Provider, w io.Writer, topic, body string) error {
 	if err := p.PublishTopic(topic, env); err != nil {
 		return err
 	}
-	for _, m := range loc.Mentions(body) {
-		if loc.EndpointExists(m) {
-			loc.Nudge(m, fmt.Sprintf("[LOC] 1 new in #%s → loc read", topic))
-		}
-	}
+	// A MENTION IS DELIVERED TO THE TOPIC AND ANNOUNCED TO NOBODY. The named
+	// seat reads the topic from its own position and finds the mention there
+	// (R36, 2026-09-10). Ringing the seat here would be the sender notifying,
+	// which is the one thing a sender does not do.
 	fmt.Fprintf(w, "published → #%s\n", topic)
 	return nil
 }

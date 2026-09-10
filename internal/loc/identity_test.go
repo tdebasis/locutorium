@@ -3,7 +3,6 @@ package loc
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -18,8 +17,7 @@ func TestIdentityRefusesTheUnattributable(t *testing.T) {
 	if err == nil {
 		t.Fatal("an unattributable caller was accepted")
 	}
-	want := "cannot determine sender identity: set LOC_IDENTITY or provide an executable " +
-		filepath.Join(home, "hooks", "identity")
+	want := "cannot determine sender identity: set LOC_IDENTITY"
 	if err.Error() != want {
 		t.Errorf("refusal text drifted\n got: %s\nwant: %s", err.Error(), want)
 	}
@@ -34,63 +32,28 @@ func TestIdentityPrefersTheEnvironment(t *testing.T) {
 	}
 }
 
-func TestIdentityFallsBackToTheHook(t *testing.T) {
+// R29 of 2026-09-09 removed the identity hook. A deployment that still holds
+// the old file gets the refusal, and the file is not run: an executable left
+// in a home must never become a second answer to who is speaking.
+func TestIdentityNeverRunsAnIdentityHook(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("LOC_HOME", home)
 	t.Setenv("LOC_IDENTITY", "")
-	writeHook(t, home, "#!/bin/sh\necho bob\n", 0o755)
-
-	got, err := Identity()
-	if err != nil || got != "bob" {
-		t.Fatalf("got %q, %v; want bob", got, err)
-	}
-}
-
-// A hook that is present but not executable, or that says nothing, is not an
-// identity: both fall through to the refusal rather than to a blank name.
-func TestIdentityIgnoresAnUnusableHook(t *testing.T) {
-	for _, c := range []struct {
-		name string
-		body string
-		mode os.FileMode
-	}{
-		{"not executable", "#!/bin/sh\necho bob\n", 0o644},
-		{"says nothing", "#!/bin/sh\nexit 0\n", 0o755},
-		{"fails", "#!/bin/sh\necho bob\nexit 1\n", 0o755},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			home := t.TempDir()
-			t.Setenv("LOC_HOME", home)
-			t.Setenv("LOC_IDENTITY", "")
-			writeHook(t, home, c.body, c.mode)
-			if id, err := Identity(); err == nil {
-				t.Errorf("accepted %q from an unusable hook", id)
-			}
-		})
-	}
-}
-
-func TestIdentityTrimsTheHooksNewline(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("LOC_HOME", home)
-	t.Setenv("LOC_IDENTITY", "")
-	writeHook(t, home, "#!/bin/sh\nprintf 'carol\\n\\n'\n", 0o755)
-	got, err := Identity()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "carol" || strings.ContainsAny(got, "\n") {
-		t.Errorf("got %q, want carol", got)
-	}
-}
-
-func writeHook(t *testing.T, home, body string, mode os.FileMode) {
-	t.Helper()
 	dir := filepath.Join(home, "hooks")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "identity"), []byte(body), mode); err != nil {
+	ran := filepath.Join(home, "ran")
+	body := "#!/bin/sh\ntouch " + ran + "\necho bob\n"
+	if err := os.WriteFile(filepath.Join(dir, "identity"), []byte(body), 0o755); err != nil {
 		t.Fatal(err)
+	}
+
+	id, err := Identity()
+	if err == nil {
+		t.Fatalf("accepted %q from an identity hook", id)
+	}
+	if _, err := os.Stat(ran); err == nil {
+		t.Error("the identity hook ran")
 	}
 }

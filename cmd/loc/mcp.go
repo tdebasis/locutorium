@@ -245,6 +245,11 @@ func mcpServe(runtimePID int) error {
 	// during startup is still waiting when the server looks.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	// The subscription is stopped on the way out, as at mcp.go's other Notify
+	// site and daemon.go's. It used to die with the subprocess; a case that
+	// calls this function in the test binary leaves it installed otherwise,
+	// and it would then swallow signals for every case after it.
+	defer signal.Stop(sig)
 
 	d, release, err := mcpDeps()
 	if err != nil {
@@ -255,6 +260,18 @@ func mcpServe(runtimePID int) error {
 	d.Ppid = func() int { return runtimePID }
 	return mcpserve.Serve(context.Background(), d, &mcp.StdioTransport{})
 }
+
+// beforeDial is the seam a test replaces to hold the startup open at the one
+// moment it cannot otherwise reach: after the handler is installed and before
+// the first provider dial. R29 removed the identity hook, which is what a test
+// used to hold that window with, and the claim it held open is still a claim.
+// The zero value does nothing.
+//
+// It is one variable for the whole package, as refuseListen is. A case that
+// sets it must not run in parallel with a case that opens a provider, because
+// the second case would then block in this seam. Do not add t.Parallel to
+// either.
+var beforeDial = func() {}
 
 // mcpDeps resolves the seat and wires the server to THIS BINARY'S OWN VERBS.
 // It is separate from mcpVerb so a test can drive the same wiring over an
@@ -277,6 +294,8 @@ func mcpDeps() (mcpserve.Deps, func(), error) {
 	if err != nil {
 		return mcpserve.Deps{}, none, err
 	}
+
+	beforeDial()
 
 	// ONE LONG-LIVED PROVIDER, FOR THE LISTENER ONLY. The tools open and close
 	// their own exactly as the command line does, so a tool call is the verb

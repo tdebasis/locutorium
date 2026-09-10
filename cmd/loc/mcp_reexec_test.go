@@ -40,7 +40,7 @@ func TestMCP_AHardKillOfTheLaunchedProcessDoesNotSilenceTheGoodbye(t *testing.T)
 	bin := buildLoc(t)
 	p := newPresence(t)
 	tune(t, p.home, "wake_window_seconds = 1")
-	spool := nudgeSpool(t, p.home)
+	spool := bellSpool(t, p.home)
 
 	cmd, wait, letGo := startSeat(t, bin, p.home, e1)
 

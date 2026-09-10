@@ -26,7 +26,7 @@ func TestPresence_Subscribe_JoinEventCarriesTheDisplayRole(t *testing.T) {
 	p.as(t, "host")
 	sub := p.witness(t, "presence.workshop")
 
-	exec("subscribe", e2, "--pid", pidStr(livePid(t)), "--type", "acme-cli", "--version", "3.2.0",
+	exec("subscribe", e2, "--pid", pidStr(livePid(t)), "--type", "tmux", "--version", "3.2.0",
 		"--display", "The Clerk", "--role", "Records")
 
 	events := collect(sub, 2*time.Second)
@@ -53,7 +53,7 @@ func TestPresence_Subscribe_WithoutARoleOmitsTheKey(t *testing.T) {
 	p.as(t, "host")
 	sub := p.witness(t, "presence.workshop")
 
-	exec("subscribe", e2, "--pid", pidStr(livePid(t)), "--type", "acme-cli", "--version", "3.2.0",
+	exec("subscribe", e2, "--pid", pidStr(livePid(t)), "--type", "tmux", "--version", "3.2.0",
 		"--display", "The Clerk")
 
 	events := collect(sub, 2*time.Second)
@@ -75,7 +75,7 @@ func TestPresence_Subscribe_WithoutARoleOmitsTheKey(t *testing.T) {
 func TestRegistryRenderingCarriesTheRole(t *testing.T) {
 	d := newPresenceDeployment(t)
 	d.spy.reply = []byte(`{"agents":[{"endpoint":"workshop.clerk","instance":"workshop",` +
-		`"agent":{"type":"acme-cli","version":"3.2.0"},"process":{"pid":4242,"started":"2026-01-14T09:12:04.006Z"},` +
+		`"agent":{"type":"tmux","version":"3.2.0"},"process":{"pid":4242,"started":"2026-01-14T09:12:04.006Z"},` +
 		`"display":{"name":"The Clerk","role":"Records"},` +
 		`"cwd":"/workspaces/clerk","registered":"2026-01-14T09:12:04.318Z"}]}`)
 
@@ -94,7 +94,7 @@ func TestSubscribeRecordsTheRoleInTheLedger(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
 
-	exec("subscribe", e2, "--pid", pidStr(livePid(t)), "--type", "acme-cli", "--version", "3.2.0",
+	exec("subscribe", e2, "--pid", pidStr(livePid(t)), "--type", "tmux", "--version", "3.2.0",
 		"--display", "The Clerk", "--role", "Records")
 
 	b, err := os.ReadFile(filepath.Join(p.home, "run", "presence", e2+".json"))

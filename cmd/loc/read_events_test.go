@@ -44,7 +44,7 @@ func TestReadPassesOverAPresenceEventAndStillShowsTheRoom(t *testing.T) {
 	sub := p.witness(t, "presence.workshop")
 	p.as(t, "host")
 	if code, _, errOut := exec("subscribe", e2, "--pid", pidStr(livePid(t)),
-		"--type", "acme-cli", "--version", "3.2.0"); code != 0 {
+		"--type", "tmux", "--version", "3.2.0"); code != 0 {
 		t.Fatalf("subscribe exit %d, stderr %q", code, errOut)
 	}
 	events := collect(sub, 2*time.Second)

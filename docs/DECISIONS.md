@@ -266,3 +266,45 @@ That is the whole design for now, and it is meant to be replaced when it stops b
 - **Keeping it out of a source tree is environmental, so a repository should enforce it too.** This one
   ignores `run/` outright rather than by file pattern. A pattern that matched only `*.log` would cover
   the delivery log and miss the message log, which is the file that actually holds bodies.
+
+---
+
+## 11. Why the bell is in the binary, and what that reverses
+
+**Context:** The bell was a shell hook. `loc mcp` ran `hooks/nudge` from the deployment when mail
+arrived, and `loc` ran `hooks/identity` when `LOC_IDENTITY` was unset. Entry 2 above put the fetch in
+the wake hook, and the comment at `internal/mcpserve/serve.go:22` said the pane-specific last inch
+stays in the deployment's `hooks/nudge`.
+
+A shell hook does not run on Windows. It is the one component at the notification boundary that
+cannot cross. CI runs none of it, and three defects in these hooks were found by hand in one week.
+
+**Decision:** The binary carries the bell (R28, 2026-09-09). A seat picks its bell at `subscribe`
+through the listener type, and there are three types: `tmux` types the line into the seat's pane,
+`claude` runs a one-shot courier that delivers it through the runtime's own session messaging, and
+`none` rings nothing. `hooks/nudge` goes. The value `claude-courier` is renamed `claude`.
+
+The identity hook goes with it (R29). `LOC_IDENTITY` is required, and a caller without it is refused
+with a message that names the variable.
+
+**This reverses two things, and they are named here so the reversal is findable.** The first is
+`serve.go:22`, approved on 2026-09-07 and rewritten now. The second is entry 2 above: the wake hook
+that fetches the message no longer exists in the product, because there is no wake hook. What entry 2
+was protecting is unchanged and now stronger — the courier still holds no bus credential, still
+receives a fixed token rather than a body, and still cannot read what it announces.
+
+**Consequences:**
+
+- **The product carries first-party knowledge of tmux and of Claude Code.** Entry 1 already recorded
+  that agent-native notification has exactly one implementation, so the code now says what the
+  decision record said.
+- **The product carries no seat names.** The hook selected its behaviour from a hard-coded list of
+  this deployment's seats. The registered type replaces that list, and the bus never learns what the
+  seats are called.
+- **The `tmux` notifier refuses rather than types when the pane is not an agent's input box**, and
+  refuses when the pane is in copy mode. Typing into a pane that has dropped to a shell executes the
+  text, so this guard is the one part of the notifier that is not optional.
+- **A `claude` courier spawns at most once per seat per 30 seconds** (R35c). A courier is a whole
+  Claude session. A ring inside the window is dropped and logged; the message stays in the queue.
+- **There is still no fallback from one notifier to another**, by the ruling of 2026-09-07. A failed
+  bell is logged and the message waits.

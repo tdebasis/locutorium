@@ -101,7 +101,13 @@ display information · the process id and its start time · the working director
 delivery **address** — opaque to the bus, meaningful only to whatever consumes it (see `CLI.md
 §subscribe`).
 
-For a `claude-courier` listener type, the address is a Claude Code session name, and that session
+**A send only queues.** `loc send` puts the message in the recipient's queue and notifies nobody.
+The seat's own server rings, through the notifier its registered type names, so the type below is
+what decides whether and how a seat is told. A seat registered as `none` is never told, and finds
+its mail on its next `read`. A `@name` mention in a topic is delivered to the topic and announced to
+nobody; the named seat finds it on read.
+
+For a `claude` listener type, the address is a Claude Code session name, and that session
 must be launched with `-n <name>` or the name drifts mid-session — the address then names a session
 that no longer answers to it. Ensuring that precondition holds is the deployment's responsibility,
 not this bus's; the measured detail is in `docs/CLI.md` §mcp.
@@ -229,7 +235,7 @@ an agent comes from here or from the registry.
   "kind": "agent.subscribe",
   "endpoint": "workshop.scribe",
   "instance": "workshop",
-  "agent":   { "type": "acme-cli", "version": "3.2.0" },
+  "agent":   { "type": "tmux", "version": "3.2.0" },
   "process": { "pid": 48213, "started": "2026-01-14T09:12:04.006Z" },
   "display": { "name": "The Scribe", "role": "Records" },
   "cwd": "/…/workspaces/scribe",
@@ -471,6 +477,15 @@ this document's scope and are not listed.
 | `subscribe <endpoint> --pid <n> --type <t> --version <v> [--display …] [--cwd …]` | Registers an agent instance, creates its queue, publishes `agent.subscribe`. **Refused (non-zero) if the endpoint already holds a registration** — free it with `unsubscribe` first. |
 | `unsubscribe <endpoint> [--reason clean\|expiry] [--force]` | Removes the registration, destroys the queue, publishes `agent.unsubscribe`. Defaults to `clean`. Succeeds on an empty endpoint (no-op) or a **dead** incumbent, and **refuses a live incumbent** (non-zero, naming its process) unless **`--force`** is given. An unconditional `unsubscribe`-then-`subscribe` restart is therefore always safe. |
 | `sweep [<instance>]` | Checks every registration in the namespace against its recorded process and unsubscribes those whose process is gone, with `--reason expiry`. **Must run on the machine holding the processes.** Idempotent; safe to run on a timer. |
+
+**The window between a death and the next heartbeat, and what it costs.** Unsubscribing destroys the
+queue. A message sent to a seat after its process died and before the next heartbeat reaches it is
+therefore deleted with that queue. The heartbeat's log records that the queue was deleted. The
+message log at `run/log/<date>.jsonl` holds the message's body, its sender and its recipient, so the
+message can be found there even though it is off the bus. **Nothing announces the deletion.** The
+sender never notifies, and the recipient is gone, so a lost message produces no signal to anyone.
+Recovery from the message log begins only when somebody already suspects a loss. This is an accepted
+cost in V0.
 
 ### Called by adapters
 

@@ -167,9 +167,9 @@ func TestPresenceVerbsUsagePaths(t *testing.T) {
 		{"subscribe with no endpoint", []string{"subscribe"}},
 		{"subscribe with a dangling flag", []string{"subscribe", "workshop.scribe", "--pid"}},
 		{"subscribe with a flag it does not know", []string{"subscribe", "workshop.scribe", "--colour", "red"}},
-		{"subscribe missing --version", []string{"subscribe", "workshop.scribe", "--pid", "1", "--type", "acme-cli"}},
+		{"subscribe missing --version", []string{"subscribe", "workshop.scribe", "--pid", "1", "--type", "tmux"}},
 		{"subscribe missing --type", []string{"subscribe", "workshop.scribe", "--pid", "1", "--version", "3.2.0"}},
-		{"subscribe missing --pid", []string{"subscribe", "workshop.scribe", "--type", "acme-cli", "--version", "3.2.0"}},
+		{"subscribe missing --pid", []string{"subscribe", "workshop.scribe", "--type", "tmux", "--version", "3.2.0"}},
 		{"unsubscribe with no endpoint", []string{"unsubscribe"}},
 		{"unsubscribe with a dangling flag", []string{"unsubscribe", "workshop.scribe", "--reason"}},
 		{"sweep with an argument", []string{"sweep", "workshop"}},
@@ -203,24 +203,24 @@ func TestPresenceVerbsRefusals(t *testing.T) {
 	}{
 		{
 			name: "subscribe to a name with the barred underscore",
-			args: []string{"subscribe", "workshop.scr_ibe", "--pid", "1", "--type", "acme-cli", "--version", "3.2.0"},
+			args: []string{"subscribe", "workshop.scr_ibe", "--pid", "1", "--type", "tmux", "--version", "3.2.0"},
 			wantErr: "loc: invalid endpoint name 'workshop.scr_ibe': an endpoint must match <instance>.<agent>, " +
 				"each segment [a-z0-9-]+, with exactly one dot and the underscore barred\n",
 		},
 		{
 			name: "subscribe to a bare agent name",
-			args: []string{"subscribe", "scribe", "--pid", "1", "--type", "acme-cli", "--version", "3.2.0"},
+			args: []string{"subscribe", "scribe", "--pid", "1", "--type", "tmux", "--version", "3.2.0"},
 			wantErr: "loc: invalid endpoint name 'scribe': an endpoint must match <instance>.<agent>, " +
 				"each segment [a-z0-9-]+, with exactly one dot and the underscore barred\n",
 		},
 		{
 			name:    "subscribe with a pid that is not a number",
-			args:    []string{"subscribe", "workshop.scribe", "--pid", "later", "--type", "acme-cli", "--version", "3.2.0"},
+			args:    []string{"subscribe", "workshop.scribe", "--pid", "later", "--type", "tmux", "--version", "3.2.0"},
 			wantErr: "loc: invalid --pid 'later': a process id is a positive number\n",
 		},
 		{
 			name:    "subscribe with a pid of zero",
-			args:    []string{"subscribe", "workshop.scribe", "--pid", "0", "--type", "acme-cli", "--version", "3.2.0"},
+			args:    []string{"subscribe", "workshop.scribe", "--pid", "0", "--type", "tmux", "--version", "3.2.0"},
 			wantErr: "loc: invalid --pid '0': a process id is a positive number\n",
 		},
 		{
@@ -317,7 +317,7 @@ func TestAnInstanceOmittedComesFromTheCallersIdentity(t *testing.T) {
 // A medium that carries messages but not presence is named in the refusal.
 func TestPresenceVerbsOnAProviderWithoutPresence(t *testing.T) {
 	for _, args := range [][]string{
-		{"subscribe", "workshop.scribe", "--pid", alivePid(), "--type", "acme-cli", "--version", "3.2.0"},
+		{"subscribe", "workshop.scribe", "--pid", alivePid(), "--type", "tmux", "--version", "3.2.0"},
 		{"unsubscribe", "workshop.scribe"},
 		{"registry", "workshop"},
 		{"watch", "workshop"},
@@ -340,14 +340,14 @@ func TestSubscribeRefusesAHeldEndpointNamingTheIncumbent(t *testing.T) {
 	pid := alivePid()
 
 	if code, _, errOut := exec("subscribe", "workshop.scribe", "--pid", pid,
-		"--type", "acme-cli", "--version", "3.2.0", "--display", "The Scribe", "--cwd", "/workspaces/scribe"); code != 0 {
+		"--type", "tmux", "--version", "3.2.0", "--display", "The Scribe", "--cwd", "/workspaces/scribe"); code != 0 {
 		t.Fatalf("first subscribe exited %d (stderr %q)", code, errOut)
 	}
 	if len(d.spy.created) != 1 || d.spy.created[0] != "workshop.scribe" {
 		t.Errorf("CreateQueue calls: %v", d.spy.created)
 	}
 
-	code, out, errOut := exec("subscribe", "workshop.scribe", "--pid", "1", "--type", "acme-cli", "--version", "3.2.0")
+	code, out, errOut := exec("subscribe", "workshop.scribe", "--pid", "1", "--type", "tmux", "--version", "3.2.0")
 	if code != 1 || out != "" {
 		t.Errorf("exit %d, stdout %q; want 1 and nothing", code, out)
 	}
@@ -367,10 +367,10 @@ func TestSubscribeRefusesAHeldEndpointNamingTheIncumbent(t *testing.T) {
 func TestSubscribeRefusalDatesAnIncumbentWithNoStartTime(t *testing.T) {
 	d := newPresenceDeployment(t)
 	writeFile(t, d.ledger("workshop.scribe.json"),
-		`{"endpoint":"workshop.scribe","instance":"workshop","agent":{"type":"acme-cli","version":"3.2.0"},`+
+		`{"endpoint":"workshop.scribe","instance":"workshop","agent":{"type":"tmux","version":"3.2.0"},`+
 			`"process":{"pid":4242,"started":""},"registered":"2026-01-14T09:12:04.318Z"}`)
 
-	_, _, errOut := exec("subscribe", "workshop.scribe", "--pid", alivePid(), "--type", "acme-cli", "--version", "3.2.0")
+	_, _, errOut := exec("subscribe", "workshop.scribe", "--pid", alivePid(), "--type", "tmux", "--version", "3.2.0")
 	for _, want := range []string{"pid 4242", "started unknown", "registered 2026-01-14T09:12:04.318Z"} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("refusal %q does not carry %q", errOut, want)
@@ -383,7 +383,7 @@ func TestSubscribeRefusalDatesAnIncumbentWithNoStartTime(t *testing.T) {
 // refuse-rather-than-replace rule exists to prevent.
 func TestPresenceVerbsReportAnUnreadableRegistration(t *testing.T) {
 	for _, args := range [][]string{
-		{"subscribe", "workshop.scribe", "--pid", alivePid(), "--type", "acme-cli", "--version", "3.2.0"},
+		{"subscribe", "workshop.scribe", "--pid", alivePid(), "--type", "tmux", "--version", "3.2.0"},
 		{"unsubscribe", "workshop.scribe"},
 		{"status", "workshop.scribe"},
 	} {
@@ -408,7 +408,7 @@ func TestSubscribeKeepsTheRowWhenTheQueueCannotBeMade(t *testing.T) {
 	d := newPresenceDeployment(t)
 	d.spy.createErr = fmt.Errorf("cannot reach the medium")
 
-	code, out, errOut := exec("subscribe", "workshop.scribe", "--pid", alivePid(), "--type", "acme-cli", "--version", "3.2.0")
+	code, out, errOut := exec("subscribe", "workshop.scribe", "--pid", alivePid(), "--type", "tmux", "--version", "3.2.0")
 	assertResult(t, code, out, errOut, 1, "", "loc: cannot reach the medium\n")
 	if _, err := os.Stat(d.ledger("workshop.scribe.json")); err != nil {
 		t.Error("the row a later beat repairs from was not written")
@@ -424,7 +424,7 @@ func TestSubscribeReportsALedgerItCannotWrite(t *testing.T) {
 	d := newPresenceDeployment(t)
 	d.blockTheLedger(t)
 
-	code, out, _ := exec("subscribe", "workshop.scribe", "--pid", alivePid(), "--type", "acme-cli", "--version", "3.2.0")
+	code, out, _ := exec("subscribe", "workshop.scribe", "--pid", alivePid(), "--type", "tmux", "--version", "3.2.0")
 	if code != 1 || out != "" {
 		t.Errorf("exit %d, stdout %q; want 1 and nothing", code, out)
 	}
@@ -512,10 +512,10 @@ func TestSweepReapsOnlyTheDead(t *testing.T) {
 	writeFile(t, d.ledger("workshop.scribe.json"),
 		`{"endpoint":"workshop.scribe","instance":"workshop","process":{"pid":4242,"started":""},"registered":"2026-01-14T09:12:04.318Z"}`)
 	// A live one, and one belonging to another instance entirely.
-	if code, _, errOut := exec("subscribe", "workshop.clerk", "--pid", alivePid(), "--type", "acme-cli", "--version", "3.2.0"); code != 0 {
+	if code, _, errOut := exec("subscribe", "workshop.clerk", "--pid", alivePid(), "--type", "tmux", "--version", "3.2.0"); code != 0 {
 		t.Fatalf("subscribe exited %d (stderr %q)", code, errOut)
 	}
-	if code, _, errOut := exec("subscribe", "atelier.scribe", "--pid", alivePid(), "--type", "acme-cli", "--version", "3.2.0"); code != 0 {
+	if code, _, errOut := exec("subscribe", "atelier.scribe", "--pid", alivePid(), "--type", "tmux", "--version", "3.2.0"); code != 0 {
 		t.Fatalf("subscribe exited %d (stderr %q)", code, errOut)
 	}
 	d.spy.emitted = nil
@@ -550,7 +550,7 @@ func TestSweepReapsOnlyTheDead(t *testing.T) {
 // is safe on a timer precisely because a quiet run is a silent one.
 func TestSweepWithNothingWrongIsSilent(t *testing.T) {
 	d := newPresenceDeployment(t)
-	if code, _, errOut := exec("subscribe", "workshop.clerk", "--pid", alivePid(), "--type", "acme-cli", "--version", "3.2.0"); code != 0 {
+	if code, _, errOut := exec("subscribe", "workshop.clerk", "--pid", alivePid(), "--type", "tmux", "--version", "3.2.0"); code != 0 {
 		t.Fatalf("subscribe exited %d (stderr %q)", code, errOut)
 	}
 	d.spy.created, d.spy.deleted = nil, nil
@@ -581,7 +581,7 @@ func TestSweepReportsALedgerItCannotList(t *testing.T) {
 // direction on the repair pass, so it is never acted on.
 func TestSweepStopsWhenTheQueuesCannotBeListed(t *testing.T) {
 	d := newPresenceDeployment(t)
-	if code, _, errOut := exec("subscribe", "workshop.clerk", "--pid", alivePid(), "--type", "acme-cli", "--version", "3.2.0"); code != 0 {
+	if code, _, errOut := exec("subscribe", "workshop.clerk", "--pid", alivePid(), "--type", "tmux", "--version", "3.2.0"); code != 0 {
 		t.Fatalf("subscribe exited %d (stderr %q)", code, errOut)
 	}
 	d.spy.created, d.spy.deleted = nil, nil
@@ -679,7 +679,7 @@ func TestEmitCarriesEveryReferenceItWasGiven(t *testing.T) {
 
 func TestRegistryRendering(t *testing.T) {
 	roster := `{"agents":[{"endpoint":"workshop.scribe","instance":"workshop",` +
-		`"agent":{"type":"acme-cli","version":"3.2.0"},"process":{"pid":4242,"started":"2026-01-14T09:12:04.006Z"},` +
+		`"agent":{"type":"tmux","version":"3.2.0"},"process":{"pid":4242,"started":"2026-01-14T09:12:04.006Z"},` +
 		`"cwd":"/workspaces/scribe","registered":"2026-01-14T09:12:04.318Z"}]}`
 
 	t.Run("one line per agent", func(t *testing.T) {
@@ -690,7 +690,7 @@ func TestRegistryRendering(t *testing.T) {
 		if code != 0 || errOut != "" {
 			t.Fatalf("exit %d, stderr %q", code, errOut)
 		}
-		for _, want := range []string{"workshop.scribe", "acme-cli 3.2.0", "pid 4242", "/workspaces/scribe"} {
+		for _, want := range []string{"workshop.scribe", "tmux 3.2.0", "pid 4242", "/workspaces/scribe"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("roster %q does not carry %q", out, want)
 			}
@@ -787,7 +787,7 @@ func TestStatusReportsAnUnreadableIdleWindow(t *testing.T) {
 func TestStatusHonoursTheConfiguredIdleWindow(t *testing.T) {
 	d := newPresenceDeployment(t)
 	if code, _, errOut := exec("subscribe", "workshop.scribe", "--pid", alivePid(),
-		"--type", "acme-cli", "--version", "3.2.0"); code != 0 {
+		"--type", "tmux", "--version", "3.2.0"); code != 0 {
 		t.Fatalf("subscribe exited %d (stderr %q)", code, errOut)
 	}
 	stamp := time.Now().UTC().Add(-time.Hour).Format("2006-01-02T15:04:05.000Z")
@@ -812,7 +812,7 @@ func TestStatusHonoursTheConfiguredIdleWindow(t *testing.T) {
 func TestStatusReportsAnUnreadableActivityRecord(t *testing.T) {
 	d := newPresenceDeployment(t)
 	if code, _, errOut := exec("subscribe", "workshop.scribe", "--pid", alivePid(),
-		"--type", "acme-cli", "--version", "3.2.0"); code != 0 {
+		"--type", "tmux", "--version", "3.2.0"); code != 0 {
 		t.Fatalf("subscribe exited %d (stderr %q)", code, errOut)
 	}
 	writeFile(t, d.ledger("workshop.scribe.activity.json"), "half a record")

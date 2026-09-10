@@ -42,14 +42,25 @@ func TestMCP_ASignalDuringRegistrationIsCaughtNotObeyed(t *testing.T) {
 	p := newPresence(t)
 
 	// A pane that says when the bell reached it and then HOLDS it. The first
-	// ring is synchronous inside the server's startup, so a hook that sleeps
-	// keeps the window open for as long as it sleeps.
+	// ring is synchronous inside the server's startup, so a pane that answers
+	// slowly keeps the window open for as long as it takes.
 	started := filepath.Join(p.home, "nudge.started")
-	hook := filepath.Join(p.home, "hooks", "nudge")
-	loctest.Write(t, hook, "#!/bin/sh\nprintf 'ringing\\n' > "+started+"\nsleep 2\n")
-	if err := os.Chmod(hook, 0o700); err != nil {
-		t.Fatalf("make the nudge hook executable: %v", err)
+	dir := filepath.Join(p.home, "fakebin")
+	loctest.Write(t, filepath.Join(dir, "tmux"), `#!/bin/sh
+case "$1" in
+  display) printf '0\n' ;;
+  capture-pane) printf '⏵⏵ accept edits mode on\n❯ \n' ;;
+  send-keys)
+    for a in "$@"; do last="$a"; done
+    if [ "$last" != "Enter" ]; then printf 'ringing\n' > `+started+`; sleep 2; fi
+    ;;
+esac
+exit 0
+`)
+	if err := os.Chmod(filepath.Join(dir, "tmux"), 0o700); err != nil {
+		t.Fatalf("make the fake tmux executable: %v", err)
 	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	// One message already waiting, which is what makes the first ring happen
 	// at all: the backlog is rung for at once, without the coalescing window.

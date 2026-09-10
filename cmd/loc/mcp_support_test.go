@@ -26,17 +26,35 @@ const (
 	testClientVersion = "9.9.9"
 )
 
-// nudgeSpool installs a hooks/nudge that appends the LINE it was given (its
-// second argument) to a file, and returns that file's path. It is the pane, as
-// far as these cases are concerned.
-func nudgeSpool(t *testing.T, home string) string {
+// bellSpool makes this package's bell observable and, more importantly, keeps
+// it away from the machine's real tmux. It puts a fake `tmux` first on PATH:
+// the fake answers the two guard questions the notifier asks, and appends the
+// typed line to a file. The file is the pane, as far as these cases are
+// concerned.
+//
+// THE FAKE IS A SAFETY DEVICE BEFORE IT IS A FIXTURE. The `tmux` notifier
+// types into whatever pane the address resolves to, and a developer running
+// this suite has a real tmux server with real panes in it. A test that reached
+// the real binary would be typing into somebody's session.
+func bellSpool(t *testing.T, home string) string {
 	t.Helper()
-	spool := filepath.Join(home, "nudge.log")
-	hook := filepath.Join(home, "hooks", "nudge")
-	loctest.Write(t, hook, "#!/bin/sh\nprintf '%s\\n' \"$2\" >> "+spool+"\n")
-	if err := os.Chmod(hook, 0o700); err != nil {
-		t.Fatalf("make the nudge hook executable: %v", err)
+	spool := filepath.Join(home, "pane.log")
+	dir := filepath.Join(home, "fakebin")
+	loctest.Write(t, filepath.Join(dir, "tmux"), `#!/bin/sh
+case "$1" in
+  display) printf '0\n' ;;
+  capture-pane) printf '⏵⏵ accept edits mode on\n❯ \n' ;;
+  send-keys)
+    for a in "$@"; do last="$a"; done
+    [ "$last" = "Enter" ] || printf '%s\n' "$last" >> `+spool+`
+    ;;
+esac
+exit 0
+`)
+	if err := os.Chmod(filepath.Join(dir, "tmux"), 0o700); err != nil {
+		t.Fatalf("make the fake tmux executable: %v", err)
 	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return spool
 }
 
