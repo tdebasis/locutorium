@@ -89,7 +89,6 @@ func newDeployment(t *testing.T, endpoints ...string) *deployment {
 	t.Helper()
 	home := t.TempDir()
 	writeFile(t, filepath.Join(home, "config"), "provider = spy\n")
-	writeFile(t, filepath.Join(home, "endpoints"), strings.Join(endpoints, "\n")+"\n")
 	// A TRAP, NOT A FIXTURE. A send only queues (R36), so nothing in this
 	// deployment should execute anything at the notification boundary. This
 	// executable sits where the retired doorbell used to be looked for and
@@ -491,16 +490,6 @@ func TestRefusals(t *testing.T) {
 		wantErr  string
 	}{
 		{
-			name:    "send to an endpoint the registry does not have",
-			args:    []string{"send", "mallory", "hi"},
-			wantErr: "loc: unknown endpoint 'mallory' (not in this deployment's registry)\n",
-		},
-		{
-			name:    "send to the empty endpoint",
-			args:    []string{"send", "", "hi"},
-			wantErr: "loc: unknown endpoint '' (not in this deployment's registry)\n",
-		},
-		{
 			name:    "send a body over the limit",
 			args:    []string{"send", "bob", long},
 			wantErr: tooLong,
@@ -655,22 +644,28 @@ func TestVerbsTakeTheTableDefaultProviderWhenTheFileIsSilent(t *testing.T) {
 	t.Setenv("LOC_IDENTITY", "ada")
 	installed = nil
 
-	creds := "loc: no credentials for 'ada' at " + home + "/creds/ada\n"
+	// V0 reads no credential, so the refusal a caller sees is the medium's
+	// own silence: nothing is listening at the table's default nats_url.
 	for _, c := range []struct {
-		args []string
-		want string
+		args     []string
+		wantCode int
+		wantOut  string
+		want     string
 	}{
-		{[]string{"publish", "standup", "hi"}, creds},
-		{[]string{"topics"}, creds},
-		{[]string{"status"}, creds},
+		{[]string{"publish", "standup", "hi"}, 1, "",
+			"loc: publish failed: no acknowledgement from the store (is the server up? try: loc doctor)\n"},
+		// A room nobody can reach reads as quiet, which is the same answer an
+		// empty room gives. See TestTopicsWithAnUnreachableServerReadsAsQuiet.
+		{[]string{"topics"}, 0, "(no active topics)\n", ""},
+		{[]string{"status"}, 1, "", "loc: cannot reach the medium\n"},
 		// `send` never reaches the medium: the endpoint's form is refused
 		// first, by the presence model the nats provider carries.
-		{[]string{"send", "bob", "hi"}, "loc: invalid endpoint name 'bob': an endpoint must match " +
+		{[]string{"send", "bob", "hi"}, 1, "", "loc: invalid endpoint name 'bob': an endpoint must match " +
 			"<instance>.<agent>, each segment [a-z0-9-]+, with exactly one dot and the underscore barred\n"},
 	} {
 		t.Run(c.args[0], func(t *testing.T) {
 			code, out, errOut := exec(c.args...)
-			assertResult(t, code, out, errOut, 1, "", c.want)
+			assertResult(t, code, out, errOut, c.wantCode, c.wantOut, c.want)
 		})
 	}
 }

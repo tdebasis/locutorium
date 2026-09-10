@@ -89,11 +89,8 @@ func TestQueuesReportsAListingTheDeploymentRefuses(t *testing.T) {
 			Subscribe: &natsserver.SubjectPermission{Allow: []string{"queue.>", "_INBOX.>"}},
 		}},
 	}
-	srv := loctest.Boot(t, users, false)
+	srv := loctest.Boot(t, users, seat, false)
 	write(t, filepath.Join(home, "config"), "nats_url = "+srv.URL+"\n")
-	for _, u := range users {
-		write(t, filepath.Join(home, "creds", u.Username), testPassword)
-	}
 	t.Setenv("LOC_HOME", home)
 	nc, js := srv.Admin(t, "admin", testPassword)
 	defer nc.Close()

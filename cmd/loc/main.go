@@ -239,10 +239,9 @@ func withProvider(fn func(provider.Provider) error) error {
 
 // send puts one envelope in one endpoint's queue.
 //
-// The order of the checks is the point: identity, then length, then the
-// registry, then attendance. Everything that can refuse a message does so
-// BEFORE the envelope exists, so a refusal never leaves a half-sent thing
-// behind.
+// The order of the checks is the point: identity, then length, then
+// attendance. Everything that can refuse a message does so BEFORE the
+// envelope exists, so a refusal never leaves a half-sent thing behind.
 func send(p provider.Provider, w io.Writer, to, body string) error {
 	from, err := loc.Identity()
 	if err != nil {
@@ -251,14 +250,12 @@ func send(p provider.Provider, w io.Writer, to, body string) error {
 	if err := loc.CheckBody(body); err != nil {
 		return err
 	}
-	// WHERE ATTENDANCE COMES FROM depends on what the medium can tell us. On a
-	// medium that carries presence, a queue exists exactly while an agent is
-	// subscribed to it, so its absence IS an absent recipient — a live fact,
-	// which REPLACES the static registry file for that medium. The file lists
-	// the names a deployment expects; it cannot know whether anyone is there,
-	// and in the inner parlor there are no mailboxes for agents that are not
-	// running. On a medium without presence the file is still the only answer
-	// available, and stays the one used.
+	// WHERE ATTENDANCE COMES FROM. On a medium that carries presence, a queue
+	// exists exactly while an agent is subscribed to it, so its absence IS an
+	// absent recipient. That is a live fact, and it is the only roster this
+	// tool has: in the inner parlor there are no mailboxes for agents that are
+	// not running. A medium without presence cannot answer the question at
+	// all, so it does not refuse on it.
 	pr, hasPresence := p.(provider.Presence)
 	if hasPresence {
 		if err := model.ValidEndpoint(to); err != nil {
@@ -272,8 +269,6 @@ func send(p provider.Provider, w io.Writer, to, body string) error {
 			return fmt.Errorf("nobody is attending '%s': no live subscription, "+
 				"so no queue to deliver to", to)
 		}
-	} else if !loc.EndpointExists(to) {
-		return fmt.Errorf("unknown endpoint '%s' (not in this deployment's registry)", to)
 	}
 	// Say-semantics (config-gated; enable only once every endpoint registers
 	// at session-up): a send expects an attending peer. When the deployment

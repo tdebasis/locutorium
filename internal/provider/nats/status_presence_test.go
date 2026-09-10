@@ -44,14 +44,10 @@ func newNamespaced(t *testing.T, endpoints []string, withQueues []string) *names
 	for _, e := range endpoints {
 		users = append(users, &natsserver.User{Username: e, Password: testPassword})
 	}
-	srv := loctest.Boot(t, users, false)
+	srv := loctest.Boot(t, users, "admin", false)
 
 	write(t, filepath.Join(home, "config"), "nats_url = "+srv.URL+"\n")
-	write(t, filepath.Join(home, "endpoints"), strings.Join(endpoints, "\n")+"\n")
 	seedLedger(t, home, endpoints...)
-	for _, u := range users {
-		write(t, filepath.Join(home, "creds", u.Username), testPassword)
-	}
 	t.Setenv("LOC_HOME", home)
 
 	nc, js := srv.Admin(t, "admin", testPassword)

@@ -7,6 +7,7 @@ import (
 
 	natsgo "github.com/nats-io/nats.go"
 
+	"github.com/tdebasis/locutorium/internal/config"
 	"github.com/tdebasis/locutorium/internal/provider"
 )
 
@@ -34,12 +35,7 @@ const listenReconnectWait = 1 * time.Second
 // deaf, which is the failure nobody notices. Each re-establishment calls
 // reconnected, because arrivals during the gap were seen by no one.
 func (p *Provider) WatchQueue(endpoint string, arrived, reconnected func()) (func(), error) {
-	id, pass, url, err := credentials()
-	if err != nil {
-		return nil, err
-	}
-	nc, err := natsgo.Connect(url,
-		natsgo.UserInfo(id, pass),
+	nc, err := natsgo.Connect(config.Value(config.NATSURL),
 		natsgo.Name("loc"),
 		natsgo.Timeout(ackTimeout),
 		natsgo.ErrorHandler(p.noteRefusal),

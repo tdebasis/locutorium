@@ -217,14 +217,15 @@ func TestFalsifierStatusReportsButRepairsNothing(t *testing.T) {
 
 // ------------------------------------------------ arm 8: status reads the ledger
 
-// The unread report iterates the ledger, so a deployment with no `endpoints`
-// file still reports every seat that is registered.
-func TestFalsifierStatusReadsTheLedgerNotTheEndpointsFile(t *testing.T) {
+// The unread report iterates the ledger. No `endpoints` file exists any more,
+// so the ledger is the only roster there is, and every registered seat must
+// still be reported from it.
+func TestFalsifierStatusReadsTheLedger(t *testing.T) {
 	p := newPresence(t)
 	p.subscribeLive(t, e1)
 	p.subscribeLive(t, e2)
-	if err := os.Remove(filepath.Join(p.home, "endpoints")); err != nil {
-		t.Fatalf("remove the endpoints file: %v", err)
+	if _, err := os.Stat(filepath.Join(p.home, "endpoints")); !os.IsNotExist(err) {
+		t.Fatalf("the deployment has an endpoints file; V0 writes none: %v", err)
 	}
 
 	p.as(t, "host")

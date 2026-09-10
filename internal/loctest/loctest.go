@@ -18,6 +18,12 @@
 // therefore the ACLs), so the same boot serves the nats package's flat
 // single-password users and the presence suite's per-role, per-endpoint
 // access-control block.
+//
+// V0 HAS NO AUTHENTICATION, so `loc` connects with no user name. The caller
+// names one user that an unauthenticated connection is mapped to, which is
+// how a test still asks what the tool does against a broker that refuses it
+// something: the user set carries the permissions, and the tool arrives as
+// that user without holding a credential.
 package loctest
 
 import (
@@ -45,23 +51,27 @@ type Server struct {
 }
 
 // Boot starts an in-process nats-server with JetStream, bound to loopback on a
-// kernel-chosen port, authorising exactly the supplied users. When monitor is
-// true it also opens a kernel-chosen HTTP monitoring port and records its URL.
+// kernel-chosen port, authorising exactly the supplied users. asUser names the
+// one of them an unauthenticated client is taken to be; an empty asUser with a
+// non-empty user set refuses every connection loc makes, which no test wants.
+// When monitor is true it also opens a kernel-chosen HTTP monitoring port and
+// records its URL.
 //
 // Storage is on disk in a temp dir the test framework removes; the retention
 // semantics under test are identical to a real deployment's, and nothing
 // survives the test.
-func Boot(t *testing.T, users []*natsserver.User, monitor bool) *Server {
+func Boot(t *testing.T, users []*natsserver.User, asUser string, monitor bool) *Server {
 	t.Helper()
 
 	opts := &natsserver.Options{
-		Host:      "127.0.0.1",
-		Port:      -1, // ephemeral: the kernel picks, we ask afterwards
-		JetStream: true,
-		StoreDir:  t.TempDir(),
-		NoLog:     true,
-		NoSigs:    true,
-		Users:     users,
+		Host:       "127.0.0.1",
+		Port:       -1, // ephemeral: the kernel picks, we ask afterwards
+		JetStream:  true,
+		StoreDir:   t.TempDir(),
+		NoLog:      true,
+		NoSigs:     true,
+		Users:      users,
+		NoAuthUser: asUser,
 	}
 	if monitor {
 		opts.HTTPHost = "127.0.0.1"
@@ -123,7 +133,7 @@ func ClosedPort(t *testing.T) string {
 }
 
 // Write writes content to path, creating parent directories, at the modes the
-// deployment uses (0700 dirs, 0600 files — credentials live under here).
+// deployment uses: 0700 directories, 0600 files.
 func Write(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

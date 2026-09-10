@@ -10,7 +10,6 @@ import (
 
 	natsgo "github.com/nats-io/nats.go"
 
-	"github.com/tdebasis/locutorium/internal/loctest"
 	"github.com/tdebasis/locutorium/internal/presence"
 )
 
@@ -371,18 +370,5 @@ func TestWatchStopsWhenTheReaderGoesAway(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Error("the follow carried on with nobody reading")
-	}
-}
-
-// A follow refused by the medium is reported rather than presented as an empty
-// stream: the watch credential publishes nothing, but it must be able to read.
-func TestWatchOnACredentialThatMayNotSubscribe(t *testing.T) {
-	h := newHarness(t, "host")
-	// A credential the deployment has never heard of cannot connect at all.
-	p := h.as(t, "stranger")
-	loctest.Write(t, filepath.Join(h.home, "creds", "stranger"), "not the password")
-
-	if err := p.Watch("workshop", io.Discard); err == nil {
-		t.Error("a follow on a rejected credential reported success")
 	}
 }

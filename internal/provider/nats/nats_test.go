@@ -58,16 +58,12 @@ func newHarness(t *testing.T, endpoints ...string) *harness {
 	for _, u := range users {
 		uu = append(uu, &natsserver.User{Username: u, Password: testPassword})
 	}
-	srv := loctest.Boot(t, uu, false)
+	srv := loctest.Boot(t, uu, "admin", false)
 
 	h := &harness{srv: srv, home: home, url: srv.URL, endpoints: endpoints}
 
 	write(t, filepath.Join(home, "config"), "nats_url = "+h.url+"\n")
-	write(t, filepath.Join(home, "endpoints"), strings.Join(endpoints, "\n")+"\n")
 	seedLedger(t, home, endpoints...)
-	for _, u := range users {
-		write(t, filepath.Join(home, "creds", u), testPassword)
-	}
 	t.Setenv("LOC_HOME", home)
 
 	h.initStreams(t)
@@ -203,42 +199,6 @@ func TestConnectIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestConnectWithoutCredentialsNamesThePathNotTheSecret(t *testing.T) {
-	h := newHarness(t, "ada")
-	p := h.as(t, "ada")
-	credfile := filepath.Join(h.home, "creds", "ada")
-	if err := os.Remove(credfile); err != nil {
-		t.Fatalf("remove creds: %v", err)
-	}
-
-	err := p.connect()
-	if err == nil {
-		t.Fatal("connect succeeded with no credentials")
-	}
-	want := "no credentials for 'ada' at " + credfile
-	if err.Error() != want {
-		t.Errorf("got %q, want %q", err.Error(), want)
-	}
-	if strings.Contains(err.Error(), testPassword) {
-		t.Error("the error carries the credential content")
-	}
-}
-
-func TestConnectWithoutIdentityRefuses(t *testing.T) {
-	newHarness(t, "ada")
-	t.Setenv("LOC_IDENTITY", "")
-	p := &Provider{}
-	t.Cleanup(p.Close)
-
-	err := p.connect()
-	if err == nil {
-		t.Fatal("connect succeeded with no identity")
-	}
-	if !strings.Contains(err.Error(), "cannot determine sender identity") {
-		t.Errorf("got %q, want the unattributable-caller refusal", err.Error())
-	}
-}
-
 func TestConnectToAnUnreachableServer(t *testing.T) {
 	h := newHarness(t, "ada")
 	write(t, filepath.Join(h.home, "config"), "nats_url = "+closedPort(t)+"\n")
@@ -250,28 +210,6 @@ func TestConnectToAnUnreachableServer(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), testPassword) {
 		t.Error("the error carries the credential content")
-	}
-}
-
-func TestConnectRejectsWrongCredentials(t *testing.T) {
-	h := newHarness(t, "ada")
-	write(t, filepath.Join(h.home, "creds", "ada"), "not-the-password")
-	p := h.as(t, "ada")
-
-	if err := p.connect(); err != errConnect {
-		t.Fatalf("got %v, want the errConnect sentinel", err)
-	}
-}
-
-func TestCredentialsAreReadWithoutTheirTrailingNewline(t *testing.T) {
-	// The shell wrote these with printf and read them with $(cat), which drops
-	// trailing newlines. A hand-edited file has one; it must still work.
-	h := newHarness(t, "ada")
-	write(t, filepath.Join(h.home, "creds", "ada"), testPassword+"\r\n")
-	p := h.as(t, "ada")
-
-	if err := p.connect(); err != nil {
-		t.Fatalf("connect with a newline-terminated credential file: %v", err)
 	}
 }
 
@@ -351,22 +289,6 @@ func TestSendQueueToAnUnreachableServer(t *testing.T) {
 	err := p.SendQueue("bob", envelope(t, "ada", "bob", "hello"))
 	if err == nil || !strings.Contains(err.Error(), "no acknowledgement from the store") {
 		t.Fatalf("got %v, want the unacknowledged-send error", err)
-	}
-}
-
-func TestSendQueueWithoutCredentialsSurfacesThatError(t *testing.T) {
-	// An unreachable medium and a missing credential are different problems.
-	// The second is the one no retry fixes, so it must not be flattened into
-	// "is the server up?".
-	h := newHarness(t, "ada")
-	if err := os.Remove(filepath.Join(h.home, "creds", "ada")); err != nil {
-		t.Fatalf("remove creds: %v", err)
-	}
-	p := h.as(t, "ada")
-
-	err := p.SendQueue("bob", envelope(t, "ada", "bob", "hello"))
-	if err == nil || !strings.Contains(err.Error(), "no credentials for 'ada'") {
-		t.Fatalf("got %v, want the missing-credentials error", err)
 	}
 }
 
@@ -516,67 +438,6 @@ func TestTopicsWithAnUnreachableServerReadsAsQuiet(t *testing.T) {
 	}
 }
 
-// FINDING, recorded as it stands rather than fixed here.
-//
-// connect returns the same errConnect sentinel for two different problems: a
-// server that is not there, and credentials the server REJECTED. Topics and
-// Status both treat that sentinel as "the medium is down" and answer anyway —
-// so an endpoint whose password is wrong is told the room is empty and every
-// queue is unreadable ("?"), rather than being told its credentials were
-// refused. A MISSING credentials file is refused outright (the test above);
-// a WRONG one is not, and it is just as unfixable by retrying.
-//
-// These two tests pin the current behaviour so that changing it is a decision
-// somebody makes, not a diff nobody notices.
-func TestTopicsWithRejectedCredentialsReadsAsQuiet(t *testing.T) {
-	h := newHarness(t, "ada")
-	write(t, filepath.Join(h.home, "creds", "ada"), "not-the-password")
-	p := h.as(t, "ada")
-
-	var out strings.Builder
-	if err := p.Topics(&out); err != nil {
-		t.Fatalf("Topics: %v", err)
-	}
-	if out.String() != "(no active topics)\n" {
-		t.Errorf("got %q, want %q", out.String(), "(no active topics)\n")
-	}
-}
-
-func TestStatusWithRejectedCredentialsPrintsQuestionMarks(t *testing.T) {
-	h := newHarness(t, "ada", "bob")
-	write(t, filepath.Join(h.home, "creds", "ada"), "not-the-password")
-	p := h.as(t, "ada")
-
-	var out strings.Builder
-	if err := p.Status(&out); err != nil {
-		t.Fatalf("Status: %v", err)
-	}
-	want := "ada          unread: ?\nbob          unread: ?\n"
-	if out.String() != want {
-		t.Errorf("got:\n%q\nwant:\n%q", out.String(), want)
-	}
-}
-
-func TestTopicsRefusesAnUnattributableCallerBeforePrinting(t *testing.T) {
-	h := newHarness(t, "ada")
-	if err := os.Remove(filepath.Join(h.home, "creds", "ada")); err != nil {
-		t.Fatalf("remove creds: %v", err)
-	}
-	p := h.as(t, "ada")
-
-	var out strings.Builder
-	err := p.Topics(&out)
-	if err == nil {
-		t.Fatal("Topics printed a room it could not see into")
-	}
-	if !strings.Contains(err.Error(), "no credentials for 'ada'") {
-		t.Errorf("got %q, want the missing-credentials error", err.Error())
-	}
-	if out.String() != "" {
-		t.Errorf("Topics wrote %q before failing", out.String())
-	}
-}
-
 func TestTopicSubjectsIgnoresNonTopicSubjects(t *testing.T) {
 	// The filter is `topic.>` and the prefix check is belt-and-braces; both
 	// are exercised here so that neither can quietly stop mattering.
@@ -658,7 +519,6 @@ func clearLedger(t *testing.T, home string) {
 
 func TestStatusWithAnEmptyRegistryPrintsNothing(t *testing.T) {
 	h := newHarness(t)
-	write(t, filepath.Join(h.home, "endpoints"), "")
 	clearLedger(t, h.home)
 	p := h.as(t, "admin")
 
@@ -705,26 +565,6 @@ func TestStatusWithAnUnreachableServerPrintsQuestionMarks(t *testing.T) {
 	want := "ada          unread: ?\nbob          unread: ?\n"
 	if out.String() != want {
 		t.Errorf("got:\n%q\nwant:\n%q", out.String(), want)
-	}
-}
-
-func TestStatusRefusesAnUnattributableCaller(t *testing.T) {
-	h := newHarness(t, "ada")
-	if err := os.Remove(filepath.Join(h.home, "creds", "ada")); err != nil {
-		t.Fatalf("remove creds: %v", err)
-	}
-	p := h.as(t, "ada")
-
-	var out strings.Builder
-	err := p.Status(&out)
-	if err == nil {
-		t.Fatal("Status reported on a deployment it could not authenticate to")
-	}
-	if !strings.Contains(err.Error(), "no credentials for 'ada'") {
-		t.Errorf("got %q, want the missing-credentials error", err.Error())
-	}
-	if out.String() != "" {
-		t.Errorf("Status wrote %q before failing", out.String())
 	}
 }
 

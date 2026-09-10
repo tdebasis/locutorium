@@ -49,7 +49,6 @@ func scratchHouse(t *testing.T) (home string, port int) {
 	port = freePort(t)
 	writeFile(t, filepath.Join(home, "config"),
 		fmt.Sprintf("provider = nats\nnats_url = nats://127.0.0.1:%d\n", port))
-	writeFile(t, filepath.Join(home, "creds", "house.keeper"), "secret")
 	return home, port
 }
 
