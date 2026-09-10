@@ -57,6 +57,15 @@ type Presence interface {
 	// the caller asked for it to be absent, and it is.
 	DeleteQueue(endpoint string) error
 
+	// Queues lists every endpoint that has a queue on this medium.
+	//
+	// A LISTING THAT CANNOT COMPLETE IS AN ERROR, NEVER A SHORT LIST. The
+	// caller is a reconciler: it destroys a queue no row claims, and it
+	// recreates a queue no listing showed. A truncated list is therefore not a
+	// smaller answer but a WRONG one, and it is wrong in the destructive
+	// direction on one pass and the duplicating direction on the other.
+	Queues() ([]string, error)
+
 	// QueueExists answers whether an endpoint is attended. A medium that
 	// cannot be reached is an ERROR here, never a "no": absence and ignorance
 	// are different answers, and only one of them justifies refusing a send.

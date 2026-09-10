@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -36,6 +37,7 @@ type presenceSpy struct {
 	watched          string
 
 	createErr, deleteErr, existsErr, emitErr, requestErr, watchErr error
+	queuesErr                                                      error
 	reply                                                          []byte
 	watchOut                                                       string
 }
@@ -56,6 +58,23 @@ func (s *presenceSpy) DeleteQueue(endpoint string) error {
 	}
 	delete(s.exists, endpoint)
 	return nil
+}
+
+// Queues is the enumerator the reconciler reads. It reports what the spy has
+// been told exists, and fails whole when queuesErr is set: a short list is
+// never one of its answers.
+func (s *presenceSpy) Queues() ([]string, error) {
+	if s.queuesErr != nil {
+		return nil, s.queuesErr
+	}
+	var out []string
+	for e, ok := range s.exists {
+		if ok {
+			out = append(out, e)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 func (s *presenceSpy) QueueExists(endpoint string) (bool, error) {
@@ -153,7 +172,8 @@ func TestPresenceVerbsUsagePaths(t *testing.T) {
 		{"subscribe missing --pid", []string{"subscribe", "workshop.scribe", "--type", "acme-cli", "--version", "3.2.0"}},
 		{"unsubscribe with no endpoint", []string{"unsubscribe"}},
 		{"unsubscribe with a dangling flag", []string{"unsubscribe", "workshop.scribe", "--reason"}},
-		{"sweep with a second argument", []string{"sweep", "workshop", "atelier"}},
+		{"sweep with an argument", []string{"sweep", "workshop"}},
+		{"sweep with two arguments", []string{"sweep", "workshop", "atelier"}},
 		{"emit with no arguments", []string{"emit"}},
 		{"emit with only a kind", []string{"emit", "activity.start"}},
 		{"emit of a kind outside the taxonomy", []string{"emit", "activity.middle", "workshop.scribe"}},
@@ -227,11 +247,6 @@ func TestPresenceVerbsRefusals(t *testing.T) {
 				"each segment [a-z0-9-]+, with exactly one dot and the underscore barred\n",
 		},
 		{
-			name:    "sweep of an instance with a dot in it",
-			args:    []string{"sweep", "workshop.scribe"},
-			wantErr: "loc: invalid instance name 'workshop.scribe': an instance must match [a-z0-9-]+\n",
-		},
-		{
 			name:    "registry of an instance with a dot in it",
 			args:    []string{"registry", "workshop.scribe"},
 			wantErr: "loc: invalid instance name 'workshop.scribe': an instance must match [a-z0-9-]+\n",
@@ -261,7 +276,10 @@ func TestAnInstanceOmittedComesFromTheCallersIdentity(t *testing.T) {
 	d := newPresenceDeployment(t)
 	d.spy.reply = []byte(`{"agents":[]}`)
 
-	for _, verb := range []string{"sweep", "registry", "watch"} {
+	// The sweep is not here: it takes no instance, because a process id means
+	// something only on the machine holding it, so a sweep is machine-wide by
+	// nature and has no caller's-instance form to fall back to.
+	for _, verb := range []string{"registry", "watch"} {
 		t.Run(verb+" takes the caller's instance", func(t *testing.T) {
 			if code, _, errOut := exec(verb); code != 0 {
 				t.Errorf("%s exited %d (stderr %q), want the caller's own instance to serve", verb, code, errOut)
@@ -276,7 +294,7 @@ func TestAnInstanceOmittedComesFromTheCallersIdentity(t *testing.T) {
 	}
 
 	t.Setenv("LOC_IDENTITY", "scribe")
-	for _, verb := range []string{"sweep", "registry", "watch"} {
+	for _, verb := range []string{"registry", "watch"} {
 		t.Run(verb+" with an unqualified identity", func(t *testing.T) {
 			code, out, errOut := exec(verb)
 			want := "loc: no instance given, and the caller's identity 'scribe' is not " +
@@ -286,7 +304,7 @@ func TestAnInstanceOmittedComesFromTheCallersIdentity(t *testing.T) {
 	}
 
 	t.Setenv("LOC_IDENTITY", "")
-	for _, verb := range []string{"sweep", "registry", "watch"} {
+	for _, verb := range []string{"registry", "watch"} {
 		t.Run(verb+" with no identity at all", func(t *testing.T) {
 			_, _, errOut := exec(verb)
 			if !strings.Contains(errOut, "cannot determine sender identity") {
@@ -381,17 +399,19 @@ func TestPresenceVerbsReportAnUnreadableRegistration(t *testing.T) {
 	}
 }
 
-// A queue the medium refuses to create leaves no registration behind: the
-// ledger is written after the queue exists, so a half-made subscription is not
-// a state this can end in.
-func TestSubscribeWritesNoRegistrationWhenTheQueueCannotBeMade(t *testing.T) {
+// A queue the medium refuses to create LEAVES THE ROW, and the verb still
+// fails. The row is written first on purpose: the gap between the two writes
+// is then a row with no queue, which is the sweep's third pass and a repair,
+// rather than a queue with no row, which is its second pass and a destruction.
+// The caller is told the subscribe failed; the next beat makes the queue.
+func TestSubscribeKeepsTheRowWhenTheQueueCannotBeMade(t *testing.T) {
 	d := newPresenceDeployment(t)
 	d.spy.createErr = fmt.Errorf("cannot reach the medium")
 
 	code, out, errOut := exec("subscribe", "workshop.scribe", "--pid", alivePid(), "--type", "acme-cli", "--version", "3.2.0")
 	assertResult(t, code, out, errOut, 1, "", "loc: cannot reach the medium\n")
-	if _, err := os.Stat(d.ledger("workshop.scribe.json")); !os.IsNotExist(err) {
-		t.Error("a subscribe that could not create its queue registered anyway")
+	if _, err := os.Stat(d.ledger("workshop.scribe.json")); err != nil {
+		t.Error("the row a later beat repairs from was not written")
 	}
 	if len(d.spy.emitted) != 0 {
 		t.Error("a subscribe that could not create its queue announced one")
@@ -464,7 +484,7 @@ func TestUnsubscribeCarriesItsReason(t *testing.T) {
 
 // A queue the medium will not destroy leaves the registration in place: the
 // ledger must never say an endpoint is free while its queue is still there.
-func TestUnsubscribeKeepsTheRegistrationWhenTheQueueSurvives(t *testing.T) {
+func TestUnsubscribeRemovesTheRowBeforeTheQueue(t *testing.T) {
 	d := newPresenceDeployment(t)
 	d.spy.exists["workshop.scribe"] = true
 	d.spy.deleteErr = fmt.Errorf("cannot reach the medium")
@@ -473,15 +493,20 @@ func TestUnsubscribeKeepsTheRegistrationWhenTheQueueSurvives(t *testing.T) {
 
 	code, out, errOut := exec("unsubscribe", "workshop.scribe")
 	assertResult(t, code, out, errOut, 1, "", "loc: cannot reach the medium\n")
-	if _, err := os.Stat(d.ledger("workshop.scribe.json")); err != nil {
-		t.Error("the registration was cleared although its queue survived")
+	// THE ROW IS GONE AND THE QUEUE IS NOT, which is the gap this order
+	// chooses. The sweep's orphan pass finishes what the caller started.
+	// Deleting the queue first would leave a row with no queue, and the next
+	// beat would rebuild the queue the caller asked to be destroyed.
+	if _, err := os.Stat(d.ledger("workshop.scribe.json")); !os.IsNotExist(err) {
+		t.Error("the row outlived the queue it was removed before")
 	}
 }
 
 // ---------------------------------------------------------------------- sweep
 
-// The sweep reaps a registration whose process is gone, with reason expiry,
-// and leaves a live one exactly where it is.
+// The sweep reaps a registration whose process is gone — its row, its queue
+// and its server pidfile — and leaves a live one exactly where it is. It
+// reaches every instance, because a machine holds every process on it.
 func TestSweepReapsOnlyTheDead(t *testing.T) {
 	d := newPresenceDeployment(t)
 	writeFile(t, d.ledger("workshop.scribe.json"),
@@ -494,34 +519,48 @@ func TestSweepReapsOnlyTheDead(t *testing.T) {
 		t.Fatalf("subscribe exited %d (stderr %q)", code, errOut)
 	}
 	d.spy.emitted = nil
+	d.spy.deleted = nil
 
-	if code, _, errOut := exec("sweep", "workshop"); code != 0 {
+	code, out, errOut := exec("sweep")
+	if code != 0 {
 		t.Fatalf("sweep exited %d (stderr %q)", code, errOut)
 	}
 	if len(d.spy.deleted) != 1 || d.spy.deleted[0] != "workshop.scribe" {
 		t.Errorf("sweep destroyed %v, want only the dead endpoint's queue", d.spy.deleted)
 	}
-	ev := decodeEvent(t, d.spy.emitted, "agent.unsubscribe")
-	if ev["reason"] != "expiry" || ev["endpoint"] != "workshop.scribe" {
-		t.Errorf("sweep's departure = %v, want workshop.scribe by expiry", ev)
+	if !strings.Contains(out, "workshop.scribe: reaped") {
+		t.Errorf("sweep printed %q, want a line naming the reap", out)
+	}
+	// THE SWEEP PUBLISHES NOTHING. A departure event says an agent left; a
+	// reap says a record was wrong, and telling every listener the first when
+	// the second happened is a false statement about a seat that may have
+	// gone hours ago.
+	if len(d.spy.emitted) != 0 {
+		t.Errorf("the sweep published %d events, want none", len(d.spy.emitted))
 	}
 	if _, err := os.Stat(d.ledger("workshop.clerk.json")); err != nil {
 		t.Error("the sweep cleared a live registration")
 	}
 	if _, err := os.Stat(d.ledger("atelier.scribe.json")); err != nil {
-		t.Error("the sweep reached into another instance")
+		t.Error("the sweep cleared a live registration in another instance")
 	}
 }
 
-// With nothing dead the sweep opens no medium at all: it is safe on a timer
-// precisely because it does nothing when there is nothing to do.
-func TestSweepWithNothingDeadDoesNothing(t *testing.T) {
+// With the three records in agreement the sweep says nothing and exits 0. It
+// is safe on a timer precisely because a quiet run is a silent one.
+func TestSweepWithNothingWrongIsSilent(t *testing.T) {
 	d := newPresenceDeployment(t)
+	if code, _, errOut := exec("subscribe", "workshop.clerk", "--pid", alivePid(), "--type", "acme-cli", "--version", "3.2.0"); code != 0 {
+		t.Fatalf("subscribe exited %d (stderr %q)", code, errOut)
+	}
+	d.spy.created, d.spy.deleted = nil, nil
 
-	code, out, errOut := exec("sweep", "workshop")
+	code, out, errOut := exec("sweep")
 	assertResult(t, code, out, errOut, 0, "", "")
-	if d.spy.closed != 0 {
-		t.Error("a sweep with nothing to reap opened the medium")
+	// The medium IS opened now: the sweep has to list the queues to know that
+	// nothing disagrees. What it does not do is change anything.
+	if len(d.spy.created)+len(d.spy.deleted) != 0 {
+		t.Errorf("a sweep with nothing wrong acted: created=%v deleted=%v", d.spy.created, d.spy.deleted)
 	}
 }
 
@@ -531,9 +570,32 @@ func TestSweepReportsALedgerItCannotList(t *testing.T) {
 	d := newPresenceDeployment(t)
 	d.blockTheLedger(t)
 
-	code, out, _ := exec("sweep", "workshop")
+	code, out, _ := exec("sweep")
 	if code != 1 || out != "" {
 		t.Errorf("exit %d, stdout %q; want 1 and nothing", code, out)
+	}
+}
+
+// A queue enumeration that cannot complete stops the sweep. A short list is
+// wrong in the destructive direction on the orphan pass and the duplicating
+// direction on the repair pass, so it is never acted on.
+func TestSweepStopsWhenTheQueuesCannotBeListed(t *testing.T) {
+	d := newPresenceDeployment(t)
+	if code, _, errOut := exec("subscribe", "workshop.clerk", "--pid", alivePid(), "--type", "acme-cli", "--version", "3.2.0"); code != 0 {
+		t.Fatalf("subscribe exited %d (stderr %q)", code, errOut)
+	}
+	d.spy.created, d.spy.deleted = nil, nil
+	d.spy.queuesErr = fmt.Errorf("cannot reach the medium")
+
+	code, out, errOut := exec("sweep")
+	if code != 1 || out != "" {
+		t.Errorf("exit %d, stdout %q; want 1 and nothing", code, out)
+	}
+	if !strings.Contains(errOut, "cannot reach the medium") {
+		t.Errorf("stderr %q does not carry the enumerator's reason", errOut)
+	}
+	if len(d.spy.created)+len(d.spy.deleted) != 0 {
+		t.Errorf("the sweep acted on a listing it never got: created=%v deleted=%v", d.spy.created, d.spy.deleted)
 	}
 }
 

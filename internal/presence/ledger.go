@@ -121,6 +121,54 @@ func List(instance string) ([]*Registration, error) {
 	return out, nil
 }
 
+// Unreadable is a ledger row that could not be read, and why. The endpoint is
+// taken from the file name, which is the ledger's key, so a row is named even
+// when nothing inside it can be parsed.
+type Unreadable struct {
+	Endpoint string
+	Err      error
+}
+
+// ListAll returns every registration on this machine, in every instance,
+// ordered by endpoint — and, separately, every row it could not read.
+//
+// IT NEVER SKIPS SILENTLY. List drops an unreadable row with `continue`,
+// which is right for a reaper that must not stop at the first bad record and
+// wrong for a reconciler: a row that cannot be read is not a row that is not
+// there, and a listing that cannot tell those apart will report a live seat's
+// queue as an orphan and destroy it. Reporting the row is what lets the caller
+// refuse to act on the part of the picture the row could have changed.
+func ListAll() (rows []*Registration, unreadable []Unreadable, err error) {
+	entries, err := os.ReadDir(Dir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, nil
+		}
+		return nil, nil, err
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".json") || strings.HasSuffix(name, ".activity.json") {
+			continue
+		}
+		endpoint := strings.TrimSuffix(name, ".json")
+		r, err := Load(endpoint)
+		if err != nil {
+			unreadable = append(unreadable, Unreadable{Endpoint: endpoint, Err: err})
+			continue
+		}
+		if r == nil {
+			// Removed between the read of the directory and the read of the
+			// file. A row that is gone is not a row that is unreadable.
+			continue
+		}
+		rows = append(rows, r)
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Endpoint < rows[j].Endpoint })
+	sort.Slice(unreadable, func(i, j int) bool { return unreadable[i].Endpoint < unreadable[j].Endpoint })
+	return rows, unreadable, nil
+}
+
 // LoadActivity returns the last applied event for an endpoint, or nil when
 // none ever was. Absence of activity means idle; it never means away.
 func LoadActivity(endpoint string) (*Activity, error) {

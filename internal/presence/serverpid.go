@@ -33,3 +33,14 @@ func ReleaseServerPID(endpoint string) error {
 	}
 	return nil
 }
+
+// DaemonPIDFile is where the Locutorium's own daemon writes its pid.
+//
+// IT IS NOT A SEAT'S FILE. ServerPIDFile names one process per endpoint; this
+// names the single process that runs the broker and the heartbeat for the
+// whole deployment, so it carries no endpoint in its name. The shape is the
+// same — two lines, the pid and the start time — so the same liveness question
+// can be asked of it.
+func DaemonPIDFile() string {
+	return filepath.Join(config.Home(), "run", "loc.pid")
+}

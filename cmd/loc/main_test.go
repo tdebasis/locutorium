@@ -359,10 +359,13 @@ func TestVerbsDispatch(t *testing.T) {
 			},
 		},
 		{
-			name:   "status",
-			args:   []string{"status"},
-			out:    "ada          unread: 0\n",
-			stdout: "ada          unread: 0\n",
+			name: "status",
+			args: []string{"status"},
+			out:  "ada          unread: 0\n",
+			// The daemon's own state is the first line of the report (#27).
+			// The spy carries mail without carrying presence, so the per-seat
+			// findings are absent here and the unread report follows directly.
+			stdout: "daemon: not running\nada          unread: 0\n",
 			check: func(t *testing.T, s *spy) {
 				if s.status != 1 || s.topics != 0 {
 					t.Errorf("status=%d topics=%d, want 1 and 0", s.status, s.topics)
