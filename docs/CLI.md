@@ -15,9 +15,9 @@ Errors print `loc: <message>` on stderr and exit **1**. Everything else exits **
 | `loc unsub` | stop your listener |
 | `loc subscribe <endpoint> ...` | register an agent instance and create its queue |
 | `loc unsubscribe <endpoint> [--force]` | free the endpoint and destroy its queue |
-| `loc sweep [<instance>]` | unsubscribe registrations whose process is gone |
+| `loc sweep` | reconcile every row, queue and process |
 | `loc emit <kind> <endpoint> ...` | publish one lifecycle or activity event |
-| `loc status` | unread count per endpoint |
+| `loc status` | the daemon, every seat, and the mail waiting |
 | `loc status <endpoint>` | one agent's three facts, each with its reason |
 | `loc topics` | topics with traffic in the window |
 | `loc registry [<instance>] [--json]` | who is registered in an instance, asked of that instance's host; fails when no host answers |
@@ -207,17 +207,36 @@ and it is a separate word because it is a separate decision (PRESENCE.md §How a
 ## sweep
 
 ```
-loc sweep [<instance>]
+loc sweep
 ```
 
-Checks every registration in the namespace against its recorded process and unsubscribes the ones
-whose process is gone, with reason `expiry`. An agent that crashes cannot announce its own
-departure, so something has to do it on the agent's behalf.
+Reconciles the three records a seat has: its **ledger row**, its **queue** on the medium, and its
+**process**. It reads every row and lists every queue, then makes three passes in this order.
 
-**It must run on the machine holding the processes** — a process id means nothing anywhere else.
-With `<instance>` omitted it means the caller's own, taken from its identity; an identity that is
-not of the form `<instance>.<agent>` is refused, because there is nothing to take one from. A sweep
-with nothing to reap publishes nothing, and that silence is what makes it safe to run on a timer.
+| the disagreement | the repair |
+|---|---|
+| a row whose process is gone | delete the queue, the row and the seat's server pidfile |
+| a queue no row claims | delete the queue |
+| a live row with no queue | create the queue; the row is not rewritten |
+
+**It takes no argument.** A process id means something only on the machine holding it, so a sweep is
+machine-wide by nature; reconciling one instance would leave the other instances' queues looking
+like queues that nobody claims.
+
+**A row it cannot read stops the second pass entirely,** and the sweep exits non-zero after naming
+the row. That row may be the one that claims a queue the pass would destroy, and there is no way to
+ask which. The other two passes still run.
+
+**It publishes nothing.** A departure event says an agent left; a reap says a record was wrong, and
+the record may have gone stale hours earlier. It prints one line per change and returns the number
+of changes it made. With nothing to repair it prints nothing and exits **0**, which is what makes it
+safe to run on a timer.
+
+The order of the passes is load-bearing in `subscribe` and `unsubscribe` too. Each is two writes,
+and a sweep can land between them, so `subscribe` writes the row and then creates the queue, and
+`unsubscribe` removes the row and then deletes the queue. The gap is then always the state a sweep
+resolves in the caller's favour: a subscribe interrupted mid-way is repaired, an unsubscribe
+interrupted mid-way is finished.
 
 ## emit
 
@@ -245,12 +264,33 @@ loc status
 loc status <endpoint>
 ```
 
-Bare, it is the message plane's report: the unread count for each endpoint in `$LOC_HOME/endpoints`.
-If the medium is unreachable this prints `?` rather than failing, so a `?` means "could not ask",
-not "zero". The number is what is still **waiting**: once an endpoint has read, it has a cursor, and
-a message handed to it and not yet acknowledged is still stored while no longer owed. Where there is
-no cursor yet, the queue's own count is the figure — under work-queue retention a stored message is
-an untaken one.
+Bare, it is the deployment's report, in three sections, and **it changes nothing**.
+
+First one line for the daemon: `daemon: not running`, or `daemon: running, pid <n>, last beat
+<time>`, read from `$LOC_HOME/run/loc.pid` and the last line of
+`$LOC_HOME/run/heartbeat/<today>.log`. A daemon that has started and not yet beaten says `no beat
+yet`.
+
+Then one line per seat, from the same check the sweep acts on — so `status` is a dry run of the next
+beat and the two can never disagree about what is wrong:
+
+```
+workshop.scribe: row ok, queue ok
+workshop.clerk: queue missing, next beat repairs it
+atelier.scribe: pid dead, next beat reaps it
+workshop.legacy: row unreadable: <reason>
+atelier.stray: queue with no row, next beat removes it
+```
+
+**It performs none of those repairs.** Run it twice and the answer is the same, because a read that
+fixed what it reported would destroy the evidence the operator asked for.
+
+Then the unread count for each **registered seat**. The roster is the ledger, not the `endpoints`
+file: a seat exists because it subscribed. If the medium is unreachable this prints `?` rather than
+failing, so a `?` means "could not ask", not "zero". The number is what is still **waiting**: once
+an endpoint has read, it has a cursor, and a message handed to it and not yet acknowledged is still
+stored while no longer owed. Where there is no cursor yet, the queue's own count is the figure —
+under work-queue retention a stored message is an untaken one.
 
 With an endpoint it is the presence report: three facts, **each with the reason for it**. *Away*
 because there is no process and *idle* because no event arrived inside the window are different
