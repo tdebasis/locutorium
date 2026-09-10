@@ -284,6 +284,12 @@ func TestTheDaemonRefusesANonLoopbackAddress(t *testing.T) {
 func TestListenAddrReadsTheURLAndRefusesTheRest(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("LOC_HOME", home)
+	// THE FLOOR IS ASKED TO STAND ASIDE, AND ONLY HERE. It refuses the
+	// product's default address (testmain_test.go), which three of the entries
+	// below are about. This case reads an address and binds nothing.
+	restore := refuseListen
+	refuseListen = func(string, int) error { return nil }
+	t.Cleanup(func() { refuseListen = restore })
 	for _, c := range []struct {
 		url      string
 		wantHost string
@@ -854,34 +860,25 @@ func TestStartReportsADaemonItCannotLaunch(t *testing.T) {
 	}
 }
 
-// The floor refuses a scratch home that would bind the product's default port.
+// A case with a home of its own and no port of its own is refused before it
+// binds anything.
 //
-// THE HOME IS NOT THE WHOLE ISOLATION. A case can have a home of its own and
-// still resolve nats_url to nats://127.0.0.1:4222, which is a live broker's
-// address on the machine running the tests.
+// THE HOME IS NOT THE WHOLE ISOLATION. This home is scratch and its nats_url
+// still resolves to nats://127.0.0.1:4222, a live deployment's address on the
+// machine running the tests. The control for the other direction is
+// TestTheDaemonBootsBeatsAndStops: a scratch home with a port of its own boots
+// and beats.
 func TestTheFloorRefusesTheDefaultPort(t *testing.T) {
-	for _, c := range []struct {
-		name   string
-		config string
-		want   bool
-	}{
-		{"no config at all", "", true},
-		{"the default written out", "nats_url = " + config.Default(config.NATSURL) + "\n", true},
-		{"a port of its own", "nats_url = nats://127.0.0.1:14999\n", false},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			home := t.TempDir()
-			t.Setenv("LOC_HOME", home)
-			if c.config != "" {
-				writeFile(t, filepath.Join(home, "config"), c.config)
-			}
-			refusal := unsafePort()
-			if c.want && !strings.Contains(refusal, "the product's default") {
-				t.Errorf("the floor said %q, want a refusal naming the default", refusal)
-			}
-			if !c.want && refusal != "" {
-				t.Errorf("the floor refused a scratch port: %q", refusal)
-			}
-		})
+	home := t.TempDir()
+	t.Setenv("LOC_HOME", home)
+	t.Setenv("LOC_IDENTITY", "house.keeper")
+
+	ready := false
+	err := runDaemon(&strings.Builder{}, time.Hour, make(chan os.Signal), func() { ready = true })
+	if err == nil || !strings.Contains(err.Error(), "the product's default") {
+		t.Fatalf("runDaemon returned %v, want the floor's refusal", err)
+	}
+	if ready {
+		t.Error("the daemon became ready, so it bound a port before the floor refused")
 	}
 }

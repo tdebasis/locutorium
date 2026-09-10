@@ -57,8 +57,21 @@ func listenAddr() (host string, port int, err error) {
 			"than 127.0.0.1 or ::1 would offer every queue to the network. Edit %s in %s",
 			host, config.NATSURL, raw, config.NATSURL, config.File())
 	}
+	if err := refuseListen(host, port); err != nil {
+		return "", 0, err
+	}
 	return host, port, nil
 }
+
+// refuseListen is a seam, in the shape of daemonCommand and selfCommand. It
+// answers nothing in the product.
+//
+// It exists so a test floor can refuse the product's default port: every real
+// broker boot in this package goes through listenAddr, and a case that makes
+// its own scratch home with no config resolves nats_url to
+// nats://127.0.0.1:4222, which is a live deployment's address on the machine
+// running the tests.
+var refuseListen = func(host string, port int) error { return nil }
 
 // loopback reports whether a host name reaches this machine and no other.
 func loopback(host string) bool {
