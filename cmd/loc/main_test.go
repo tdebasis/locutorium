@@ -626,22 +626,36 @@ func TestSendRequiresAttendanceOnlyWhenConfigured(t *testing.T) {
 
 // ------------------------------------------------------- the provider seam
 
-func TestVerbsThatNeedAProviderReportWhenThereIsNone(t *testing.T) {
+// A deployment with no config file still has a provider: the key table's
+// default (internal/config/keys.go). The refusal a caller then sees names the
+// next thing that is actually missing, rather than a provider that is not.
+//
+// THIS PINS A CHANGE. The call sites used to spell their own default, "", and
+// an empty name was refused as "no provider configured". The defaults live in
+// one table now, and the table says nats, so no caller can produce an empty
+// name and that refusal is unreachable from here.
+func TestVerbsTakeTheTableDefaultProviderWhenTheFileIsSilent(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("LOC_HOME", home)
 	t.Setenv("LOC_IDENTITY", "ada")
 	installed = nil
 
-	want := "loc: no provider configured (set 'provider = <name>' in " + home + "/config)\n"
-	for _, args := range [][]string{
-		{"send", "bob", "hi"},
-		{"publish", "standup", "hi"},
-		{"topics"},
-		{"status"},
+	creds := "loc: no credentials for 'ada' at " + home + "/creds/ada\n"
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"publish", "standup", "hi"}, creds},
+		{[]string{"topics"}, creds},
+		{[]string{"status"}, creds},
+		// `send` never reaches the medium: the endpoint's form is refused
+		// first, by the presence model the nats provider carries.
+		{[]string{"send", "bob", "hi"}, "loc: invalid endpoint name 'bob': an endpoint must match " +
+			"<instance>.<agent>, each segment [a-z0-9-]+, with exactly one dot and the underscore barred\n"},
 	} {
-		t.Run(args[0], func(t *testing.T) {
-			code, out, errOut := exec(args...)
-			assertResult(t, code, out, errOut, 1, "", want)
+		t.Run(c.args[0], func(t *testing.T) {
+			code, out, errOut := exec(c.args...)
+			assertResult(t, code, out, errOut, 1, "", c.want)
 		})
 	}
 }

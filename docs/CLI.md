@@ -7,6 +7,8 @@ Errors print `loc: <message>` on stderr and exit **1**. Everything else exits **
 
 | command | does |
 |---|---|
+| `loc start` | boot the broker and the heartbeat, detached |
+| `loc stop [--force]` | stop the daemon, and the broker it runs |
 | `loc send <endpoint> <body>` | one message into that endpoint's queue |
 | `loc publish <topic> <body>` | one message into a topic |
 | `loc read [--peek]` | take your messages |
@@ -28,6 +30,73 @@ Errors print `loc: <message>` on stderr and exit **1**. Everything else exits **
 `mcp` is how a seat attends: it is this tool's answer to what a background listener used to do — the
 same three jobs (register, listen,
 wake) done by one process the agent runtime launches instead of by a background listener.
+
+---
+
+## start
+
+```
+loc start
+loc start --serve
+```
+
+Boots the deployment. The broker runs **inside** `loc`, in a process this one starts and leaves
+running; the bare form is the launcher and `--serve` is that process. Nobody types `--serve`.
+
+`loc start` probes `nats_url`. If something answers it reads `run/loc.pid`:
+
+| what it finds | what it prints | exit |
+|---|---|---|
+| the pidfile names a live process | `already running, pid N` | 0 |
+| no pidfile, or one naming a process that is gone | `port N is held by a process loc did not start` | 0 |
+| nothing answers | `started, pid N`, once the port answers | 0 |
+| nothing answers, and nothing answers within ten seconds | the failure, and the log to read | 1 |
+
+**The first run writes `config`** from the key table and prints every default, so the values are
+explicit at that boot. Every later start prints one line: the path, and that it is the place to
+change settings.
+
+**The listen address must be loopback.** `loc start` refuses any other, and says why. The broker has
+no authentication in this version, so an address the network can reach would offer every queue in
+the deployment to it.
+
+The daemon then does five things and repeats the last one:
+
+1. Deletes the heartbeat logs older than `heartbeat_log_retention_days`.
+2. Boots the broker with JetStream on `$LOC_HOME/store`, which it creates itself.
+3. Creates the `TOPICS` stream when the store does not hold it.
+4. Writes `run/loc.pid`: the pid, then the start time the operating system reports.
+5. Sweeps, and appends one line to `run/heartbeat/<date>.log`. **Every five minutes**, it sweeps and
+   appends again — `<RFC3339> swept, N changes`, or `<RFC3339> sweep failed: <what>`.
+
+A beat that finds nothing still writes its line. A log with no line for a period is a heartbeat that
+did not run, and that is the failure worth seeing.
+
+Its own output goes to `run/loc.log`, because a detached process has no terminal.
+
+`SIGTERM` or `SIGINT` stops the ticker, shuts the broker down, removes the pidfile and exits **0**.
+Later signals are ignored, so nothing interrupts that.
+
+## stop
+
+```
+loc stop [--force]
+```
+
+| what it finds | what it prints | exit |
+|---|---|---|
+| a pidfile naming a live daemon | `stopped`, once the port closes | 0 |
+| no live pidfile, and nothing on the port | `not running` | 0 |
+| no live pidfile, and the port held | three lines: the port is held by a process `loc` did not start; stopping it could stop a broker another supervisor owns; `to stop it anyway: loc stop --force` | 1 |
+| `--force`, and a pid found holding the port | `stopped` | 0 |
+| `--force`, and no pid found | that no process was found on the port | 1 |
+
+**The refusal is the point.** A broker on this port may be another supervisor's, and a stop is not
+recoverable. `--force` finds the pid by asking the operating system — `lsof` on macOS, `ss` on
+Linux, `netstat` on Windows. There is no monitoring port to ask.
+
+`loc stop` removes the pidfile itself when the daemon did not, so a daemon that was killed outright
+leaves nothing behind for the next `loc start` to misread.
 
 ---
 
@@ -522,17 +591,22 @@ the bell; something else must then run `subscribe` and `unsubscribe` around the 
 
 | key | default | effect |
 |---|---|---|
-| `provider` | none | which provider backs this house |
+| `provider` | `nats` | which transport loc talks to; only nats exists |
 | `nats_url` | `nats://127.0.0.1:4222` | where the medium is |
 | `idle_window` | `10m` | how long after an event `status <endpoint>` still reads *active* |
 | `send_requires_attendance` | `no` | refuse sends to endpoints that are not attending. With the NATS provider the key is satisfied by the live queue: a subscribed peer attends, and an unsubscribed one has no queue, so its send is refused for absence. |
-| `monitor_url` | none | written by `bootstrap.sh`; no verb reads it — `registry` asks the instance's host over the bus |
-| `topic_window` | `7d` | how long topic messages live |
+| `monitor_url` | none | the broker's HTTP monitoring endpoint; no verb reads it, and `loc start` opens no such port |
+| `topic_window` | `7d` | how long topic messages live; `loc start` gives the `TOPICS` stream this age limit |
+| `heartbeat_log_retention_days` | `7` | heartbeat log files older than this are deleted when loc starts |
 | `wake_window_seconds` | `5` | wakes are coalesced across this window (`loc mcp`) |
 | `wake_breaker_per_minute` | `6` | cap on wakes per minute (both listeners) |
 | `wake_breaker_per_hour` | `60` | cap on wakes per hour (both listeners) |
 
-Every key above except `monitor_url` and `topic_window` is read by the Go build; the three wake keys
+**The defaults live in one table**, `internal/config/keys.go`. `loc start` writes the file from it on
+first run, with each key's comment above it, so the file and the code cannot drift apart. The three
+wake keys are the deployment's and are not in that table.
+
+Every key above except `monitor_url` is read by the Go build; the three wake keys
 are read by BOTH listeners, so a deployment tunes one set of numbers whichever one it runs.
 `registry`'s wait for a host is fixed in the code, not a key.
 

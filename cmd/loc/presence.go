@@ -34,7 +34,7 @@ const registryTimeout = 2 * time.Second
 // refusal, because "this provider cannot" and "you typed it wrong" are
 // different answers and only one of them is fixed by reading the usage.
 func withPresence(fn func(provider.Presence) error) error {
-	name := config.Get("provider", "")
+	name := config.Value(config.Provider)
 	p, err := provider.Open(name)
 	if err != nil {
 		return err
@@ -566,7 +566,7 @@ func statusEndpoint(w io.Writer, endpoint string) error {
 	if err != nil {
 		return err
 	}
-	window, err := time.ParseDuration(config.Get("idle_window", "10m"))
+	window, err := time.ParseDuration(config.Value(config.IdleWindow))
 	if err != nil {
 		return fmt.Errorf("invalid idle_window in this deployment's config: %v", err)
 	}
@@ -606,7 +606,7 @@ func statusVerb(w io.Writer) error {
 // statusBody writes the two sections that need the medium: what the next beat
 // would repair, and what mail is waiting.
 func statusBody(w io.Writer) error {
-	name := config.Get("provider", "")
+	name := config.Value(config.Provider)
 	p, err := provider.Open(name)
 	if err != nil {
 		return err

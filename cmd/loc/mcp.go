@@ -282,7 +282,7 @@ func mcpDeps() (mcpserve.Deps, func(), error) {
 	// their own exactly as the command line does, so a tool call is the verb
 	// and not a variation on it; the bell needs a connection that outlives
 	// them all.
-	name := config.Get("provider", "")
+	name := config.Value(config.Provider)
 	p, err := provider.Open(name)
 	if err != nil {
 		return mcpserve.Deps{}, none, err

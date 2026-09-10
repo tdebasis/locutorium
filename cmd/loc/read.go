@@ -84,7 +84,7 @@ func readMode(p provider.Provider, w io.Writer, peek bool, jsonOut bool) error {
 	}
 	r, ok := p.(provider.Reader)
 	if !ok {
-		return fmt.Errorf("provider '%s' cannot hand a reader its messages", config.Get("provider", ""))
+		return fmt.Errorf("provider '%s' cannot hand a reader its messages", config.Value(config.Provider))
 	}
 
 	// THE MEDIUM IS REACHED BEFORE THE FIRST BYTE IS PRINTED. An unreachable
