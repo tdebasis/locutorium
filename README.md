@@ -98,18 +98,20 @@ git clone git@github.com:tdebasis/locutorium.git && cd locutorium && ./install.s
 suite is its gate — `docs/CONTRACT.md` defines a provider as one the suite passes against. A seat attends
 through `loc mcp`, a stdio MCP server the agent runtime launches and ends.
 
-Dependencies: `nats-server`, `nats` (`brew install nats-server nats-io/nats-tools/nats`), `python3`.
-For the Go build only: `go` and `make` (`brew install go`).
+Dependencies: `python3`, and for the conformance suite the `nats` CLI
+(`brew install nats-io/nats-tools/nats`). The broker is embedded in the binary, so no server package
+is needed. For the Go build only: `go` and `make` (`brew install go`).
 
 <details>
-<summary><b>First deployment</b> — four lines</summary>
+<summary><b>First deployment</b> — two lines</summary>
 
 ```
-providers/nats/bootstrap.sh ada bob carol   # endpoints, credentials, server config → ~/.locutorium
-./install.sh                                # link loc, render and load the server agent
-LOC_IDENTITY=admin loc doctor --init        # create the streams (once)
-LOC_IDENTITY=ada   loc doctor               # four checks, as a real endpoint
+./install.sh                                # build loc, copy it, link it onto your PATH
+loc start                                   # write ~/.locutorium/config, then run the broker
 ```
+
+The broker is embedded in the binary. `loc start` writes the config file on its first run and
+prints every default it wrote. `loc stop` ends it.
 
 </details>
 
