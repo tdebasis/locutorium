@@ -56,6 +56,10 @@ presence — called by a person, or by a consumer
   status [<endpoint>]       one agent's three facts; bare, the whole deployment
   watch [<instance>]        follow the event stream, read-only (^C to stop)
 
+the deployment
+  start                     boot the broker and the heartbeat, detached
+  stop [--force]            stop the daemon, and the broker it runs
+
 other
   mcp                       serve this seat to an agent runtime over stdio
   version                   which loc this is
@@ -209,6 +213,12 @@ func dispatch(args []string, w io.Writer) error {
 	case "read":
 		return readVerb(w, rest)
 
+	case "start":
+		return startVerb(w, rest)
+
+	case "stop":
+		return stopVerb(w, rest)
+
 	case "mcp":
 		return mcpVerb(rest)
 
@@ -221,7 +231,7 @@ func dispatch(args []string, w io.Writer) error {
 // failure — opening the medium, or the verb itself — comes back as an error
 // for run to turn into the single shape this tool has.
 func withProvider(fn func(provider.Provider) error) error {
-	p, err := provider.Open(config.Get("provider", ""))
+	p, err := provider.Open(config.Value(config.Provider))
 	if err != nil {
 		return err
 	}
@@ -283,7 +293,7 @@ func send(p provider.Provider, w io.Writer, to, body string) error {
 	// this key asks has already been asked and answered a few lines up by the
 	// QueueExists refusal, from a live fact instead of a file. Without presence
 	// the pidfile is still the only answer available, and stays the one used.
-	if !hasPresence && config.Get("send_requires_attendance", "no") == "yes" && !loc.ListenerAlive(to) {
+	if !hasPresence && config.Value(config.SendRequiresAttendance) == "yes" && !loc.ListenerAlive(to) {
 		return fmt.Errorf("not attending: '%s' has no live listener "+
 			"(say-semantics: a send expects an attending peer; "+
 			"use a durable channel for messages meant to wait)", to)
