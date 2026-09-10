@@ -103,7 +103,7 @@ func credentials() (id, pass, url string, err error) {
 	// edited file may have one, and the shell's $(cat ...) would have dropped
 	// it too.
 	pass = strings.TrimRight(string(secret), "\r\n")
-	return id, pass, config.Get("nats_url", "nats://127.0.0.1:4222"), nil
+	return id, pass, config.Value(config.NATSURL), nil
 }
 
 // connect opens the one connection, as the caller's own identity.
