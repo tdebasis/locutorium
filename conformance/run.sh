@@ -7,7 +7,7 @@
 #
 # Guarantees exercised here (the contract's test section, v1 scope):
 #   delivery to a dormant endpoint · consumption exactly once per queue ·
-#   per-sender FIFO · ACL denials · unattributable refusal · cwd-independence ·
+#   per-sender FIFO · unattributable refusal · cwd-independence ·
 #   topic window visibility + bounded catch-up · @mention nudge hook ·
 #   cold read with zero prior state · repo cleanliness (no deployment leakage)
 
@@ -54,22 +54,26 @@ obj() { ep "$1" | tr . _; }
 # see the setup below, where the binary under test stands up its own seats —
 # so this is what it always was on the default lane, and it is still named
 # because the README demo further down lays a second house with it.
+# THE SCRATCH BROKER'S PORT, AND WHY IT IS NEVER 4222. This suite runs on a
+# self-hosted runner, which is the machine the live house's broker runs on, and
+# that broker holds 127.0.0.1:4222. `loc start` reads its listen address from
+# the scratch home's `config`, so the port is written there before the first
+# boot. A suite that took the product default would bind the live broker's port
+# on the operator's own computer, and the daemon's loopback check would not
+# stop it, because 127.0.0.1 is loopback.
 PORT=$(( 20000 + RANDOM % 20000 ))
 # The scratch server's address, named on EVERY nats(1) call in this file: with
 # no target the tool goes to the operator's own live deployment on 4222.
 # Defined here rather than beside the first case that needs it, because setup
 # needs it too. (check-scratch-only.sh is the enforcer.)
 NURL="nats://127.0.0.1:$PORT"
-# The monitor port moves with the client port: a scratch server must not
-# collide with the operator's own deployment on the default 8222.
-MPORT=$(( PORT + 1 ))
 # The operator's real house, remembered BEFORE the scratch one replaces it: the
 # cleanliness check reads its vocabulary list from there, so the suite must
 # still check the tree against the deployment the machine actually runs.
 REAL_LOC_HOME="${LOC_HOME:-$HOME/.locutorium}"
 # WHERE THE SCRATCH TREES GO, AND WHY IT IS NOT JUST `mktemp -d`. The scratch
-# server is started as `nats-server -c <scratch home>/nats-server.conf`, so
-# that path is the only thing about the process that says whose it is — and on
+# broker is the daemon `loc start` detaches against this scratch home, so that
+# path is the only thing about the process that says whose it is — and on
 # a runner, a job that was cancelled is cleaned up afterwards by matching
 # command lines against the runner's own directories. A bare `mktemp -d` follows
 # TMPDIR, which on a runner is the per-user temp directory the service manager
@@ -79,7 +83,6 @@ REAL_LOC_HOME="${LOC_HOME:-$HOME/.locutorium}"
 scratch_dir() { mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/loc-conformance.XXXXXX"; }
 export LOC_HOME="$(scratch_dir)/deployment"
 PATH="$LOC_BIN_DIR:$PATH"
-_creds() { cat "$LOC_HOME/creds/$1"; }
 # THE RUN'S OWN RECORD OF WHAT IT STARTED — the spawn ledger read by
 # conformance/teardown.sh, and the reason it exists is written there.
 #
@@ -141,12 +144,25 @@ check_not() { # check_not <description> <command...>
 . "$ROOT/conformance/teardown.sh"
 
 say "conformance: scratch deployment on port $PORT"
-"$ROOT/providers/nats/bootstrap.sh" $(ep alice) $(ep bob) $(ep carol) >/dev/null
-sed -i '' -e "s|127.0.0.1:4222|127.0.0.1:$PORT|" -e "s|127.0.0.1:8222|127.0.0.1:$MPORT|" \
-  "$LOC_HOME/config" "$LOC_HOME/nats-server.conf"
-nats-server -c "$LOC_HOME/nats-server.conf" >"$LOC_HOME/server.log" 2>&1 &
-SERVER_PID=$!
-sleep 1
+# THE CONFIG IS WRITTEN BEFORE THE BOOT, so that `loc start` finds a port that
+# is this suite's and never the product default. `loc start` writes this file
+# itself when it is absent, with 4222 in it; see the PORT comment above.
+mkdir -p "$LOC_HOME/hooks"
+cat > "$LOC_HOME/config" <<EOF
+provider = nats
+nats_url = $NURL
+topic_window = 7d
+send_requires_attendance = no
+idle_window = 10m
+heartbeat_log_retention_days = 7
+EOF
+# The broker is embedded, so the suite boots the product rather than a server
+# beside it. This is also the first acceptance of `loc start`.
+"$LOC_BIN_DIR/loc" start || { bad "loc start"; exit 1; }
+# The daemon holds the port and this suite's teardown stops it; see the trap
+# installed above. The pid is recorded so the teardown's own kill has a target
+# if `loc stop` cannot be run.
+SERVER_PID="$(sed -n 1p "$LOC_HOME/run/loc.pid" 2>/dev/null)"
   # THE HOUSE IS LAID THE WAY THE PRESENCE MODEL SAYS IT IS LAID `doctor --init`. That verb reads the registry
   # and creates one stream per name in it, spelled with the RAW name — for a
   # namespaced deployment that is QUEUE_house.alice, which is not a legal
@@ -159,11 +175,9 @@ sleep 1
   # queue exists while someone is subscribed and not otherwise, which is what
   # makes `send` to an unattended endpoint refusable at all.
   #
-  # TOPICS is created with the SAME configuration the NATS provider gives
-  # it (subjects topic.>, limits retention, max-age = the configured window,
-  # file storage, one replica), read from the config the bootstrap just wrote.
-  window="$(sed -n 's/^topic_window[[:space:]]*=[[:space:]]*//p' "$LOC_HOME/config" | head -1)"
-  window="${window:-7d}"
+  # TOPICS IS THE DAEMON'S. `loc start` creates the room stream with the
+  # configuration the provider gives it, read from the config above, so the
+  # suite no longer stands it up by hand.
   # BEFORE the subscribes below, and that ordering is now the point. A
   # registration used to announce itself on topic.<instance>, which fell
   # inside TOPICS' own subject space, so the room had to be stood up
@@ -171,10 +185,6 @@ sleep 1
   # COLLISION IS CLOSED AT THE SUBJECT LEVEL NOW: events are spoken on
   # presence.<instance>, a family no stream captures, so the room may exist
   # first and the case below asserts that it stayed empty through all three.
-  env NATS_URL="$NURL" NATS_USER=admin NATS_PASSWORD="$(_creds admin)" \
-    nats stream add TOPICS --subjects 'topic.>' --retention limits \
-      --max-age "$window" --storage file --replicas 1 --defaults >/dev/null \
-    || { bad "stream init (TOPICS)"; exit 1; }
   # THE TYPE IS none, BECAUSE THIS SUITE HAS NO BELL. A registered type picks
   # the notifier that rings a seat, and the set is closed to tmux, claude and
   # none. There is no pane here and no runtime to carry a courier, so a seat in
@@ -208,9 +218,9 @@ chmod +x "$LOC_HOME/hooks/nudge"
   # Two questions, because they fail differently. The count is the promise a
   # reader cares about; the subject listing names WHAT arrived, so a wrong
   # answer says where the leak is instead of only that there is one.
-  _ti="$(env NATS_URL="$NURL" NATS_USER=admin NATS_PASSWORD="$(_creds admin)" \
+  _ti="$(env NATS_URL="$NURL" \
     nats stream info TOPICS --json 2>/dev/null)"
-  _tsub="$(env NATS_URL="$NURL" NATS_USER=admin NATS_PASSWORD="$(_creds admin)" \
+  _tsub="$(env NATS_URL="$NURL" \
     nats stream subjects TOPICS --json 2>/dev/null)"
   if [[ "$(jq -r '.state.messages' <<<"$_ti")" == "0" ]]; then
     ok "no registration reached the room stream"
@@ -328,27 +338,10 @@ if grep -q "please look" <<<"$c" && grep -q "please look" <<<"$b"; then
   ok "every reader's cursor sees the conversation independently"
 else bad "every reader's cursor sees the conversation independently"; fi
 
-say "— acl (deny-by-default) —"
-check_not "alice cannot subscribe to bob's queue" \
-  env NATS_URL="$NURL" NATS_USER=$(ep alice) NATS_PASSWORD="$(_creds $(ep alice))" \
-    nats sub queue.$(ep bob) --count 1 --timeout 1s
-check_not "alice cannot pull bob's queue consumer" \
-  env NATS_URL="$NURL" NATS_USER=$(ep alice) NATS_PASSWORD="$(_creds $(ep alice))" \
-    nats consumer next QUEUE_$(obj bob) $(obj bob) --count 1 --timeout 1s
-# A publish is fire-and-forget: the client may exit before the server's
-# refusal arrives, so the assertion reads the enforcer's own log — and the
-# message must also be provably absent from the stream.
-seq_before="$(env NATS_URL="$NURL" NATS_USER=admin NATS_PASSWORD="$(_creds admin)" \
-  nats stream info QUEUE_$(obj bob) --json 2>/dev/null | jq -r .state.messages)"
-env NATS_URL="$NURL" NATS_USER=watch NATS_PASSWORD="$(_creds watch)" \
-  nats pub queue.$(ep bob) forbidden >/dev/null 2>&1 || true
-sleep 0.5
-seq_after="$(env NATS_URL="$NURL" NATS_USER=admin NATS_PASSWORD="$(_creds admin)" \
-  nats stream info QUEUE_$(obj bob) --json 2>/dev/null | jq -r .state.messages)"
-if grep -Eq "Publish Violation.*\"queue\.$(ep bob)\"" "$LOC_HOME/server.log" \
-   && [[ "$seq_before" == "$seq_after" ]]; then
-  ok "watch identity cannot publish (refused by server, stream unchanged)"
-else bad "watch identity cannot publish (refused by server, stream unchanged)"; fi
+# THE ACL CASES ARE GONE, AND THIS LINE SAYS SO. R12 of 2026-09-09 removed
+# authentication from the loopback listener for V0, so there are no per-seat
+# access lists left to deny anything and no watch identity to refuse. What the
+# cases held is recorded in docs/DECISIONS.md, entry 12.
 
 say "— cwd-independence —"
 # TWO CASES, because one of the verbs is not shared. The guarantee is that the
@@ -383,12 +376,12 @@ check "a two-hop symlink to loc finds its house" env LOC_IDENTITY=$(ep alice) "$
 # binary carries both inside itself, so there is nothing here to refuse.
 
 say "— the installer links loc and leaves when told —"
-check "install.sh links loc into a prefix (no service)" \
-  "$ROOT/install.sh" --prefix "$L/bin" --no-service
+check "install.sh links loc into a prefix" \
+  "$ROOT/install.sh" --prefix "$L/bin"
 check "the installed link runs loc" env LOC_IDENTITY=$(ep alice) "$L/bin/loc" topics
-inst2="$("$ROOT/install.sh" --prefix "$L/bin" --no-service 2>&1 || true)"
+inst2="$("$ROOT/install.sh" --prefix "$L/bin" 2>&1 || true)"
 if grep -q "nothing to do" <<<"$inst2"; then ok "a second install has nothing to do"; else bad "a second install has nothing to do"; fi
-"$ROOT/install.sh" --uninstall --prefix "$L/bin" --no-service >/dev/null 2>&1 || true
+"$ROOT/install.sh" --uninstall --prefix "$L/bin" >/dev/null 2>&1 || true
 check_not "uninstall removes the link it made" test -e "$L/bin/loc"
 
 say "— cold read —"
@@ -396,13 +389,13 @@ check "endpoint with zero prior state reads cleanly" \
   env LOC_IDENTITY=$(ep carol) loc read
 
 say "— topic window expiry (short-window scratch stream) —"
-env NATS_URL="$NURL" NATS_USER=admin NATS_PASSWORD="$(_creds admin)" \
+env NATS_URL="$NURL" \
   nats stream add WINDOWTEST --subjects 'wtest.>' --retention limits \
     --max-age 2s --storage file --replicas 1 --defaults >/dev/null 2>&1
-env NATS_URL="$NURL" NATS_USER=admin NATS_PASSWORD="$(_creds admin)" \
+env NATS_URL="$NURL" \
   nats pub wtest.x "ephemeral" >/dev/null 2>&1
 sleep 4
-n="$(env NATS_URL="$NURL" NATS_USER=admin NATS_PASSWORD="$(_creds admin)" \
+n="$(env NATS_URL="$NURL" \
   nats stream info WINDOWTEST --json 2>/dev/null | jq -r .state.messages)"
 if [[ "$n" == "0" ]]; then ok "messages expire at the window's edge (teardown-by-retention)"; else bad "messages expire at the window's edge (got $n)"; fi
 
@@ -478,6 +471,13 @@ printf '# scratch list\n%s\n' "$CLEAN_NONCE" > "$CLEAN_T/list"
 check_not "cleanliness check fails on a tree that carries a listed word" \
   env LOC_FORBIDDEN_FILE="$CLEAN_T/list" "$CLEAN_T/conformance/check-clean.sh"
 rm -rf "$CLEAN_T"
+
+# THE LAST ACCEPTANCE OF THE VERBS. The suite booted with `loc start`, so it
+# stops with `loc stop`; the teardown trap runs it again if this line is never
+# reached, and a second stop is a no-op that says so.
+say "— the house stops when told —"
+if "$LOC_BIN_DIR/loc" stop; then ok "loc stop ends the daemon it started"; else bad "loc stop ends the daemon it started"; fi
+SERVER_PID=""
 
 say ""
 # The skipped count is printed on every run, zero included: "0 skipped" on the

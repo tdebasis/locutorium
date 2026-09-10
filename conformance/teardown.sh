@@ -146,6 +146,16 @@ cleanup() {
   # invisible, and on a runner that does not it is the next job's four
   # failures.
   reap_suite_listeners
+  # THE DAEMON IS DETACHED, so a run that dies between `loc start` and the
+  # suite's own `loc stop` would leave it holding the scratch port and store on
+  # a runner that persists. `loc stop` reads the scratch LOC_HOME this shell
+  # exports and no other, and a second stop is a no-op.
+  # The path test is the safety: `loc stop` reads LOC_HOME from the
+  # environment, and a teardown that ran against the operator's own home would
+  # stop the live house. Only a home this suite made carries loc-conformance.
+  if [[ -n "${LOC_BIN_DIR:-}" && -x "$LOC_BIN_DIR/loc" && "${LOC_HOME:-}" == *loc-conformance.* ]]; then
+    "$LOC_BIN_DIR/loc" stop 2>/dev/null || true
+  fi
   [[ -n "$SERVER_PID" ]] && kill "$SERVER_PID" 2>/dev/null
   # The README demo lays a SECOND scratch house with a second server. It is
   # killed inline where it is used, which covers the run that reaches the end

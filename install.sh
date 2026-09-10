@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# install.sh — put loc on your PATH and the medium under launchd.
+# install.sh — put loc on your PATH.
 #
-# It writes these things and nothing else:
+# It writes these two things and nothing else:
 #   1. $LIBDIR/loc-<version>-<sha> — the built binary, COPIED out of build/
 #   2. $PREFIX/loc — a symlink to that copy
-#   3. $HOME/Library/LaunchAgents/com.locutorium.nats-server.plist — the server agent
-# It never writes under $LOC_HOME (your deployment: creds, config, endpoints, store),
-# never runs bootstrap for you, and never restarts a running agent unless asked.
+# It never writes under $LOC_HOME (your deployment: config, store). The broker is
+# embedded in the binary and `loc start` runs it, so this installer supervises
+# nothing and starts nothing.
 #
 # Usage:
-#   ./install.sh [--prefix DIR] [--dry-run] [--no-service] [--restart-service]
+#   ./install.sh [--prefix DIR] [--dry-run]
 #   ./install.sh --uninstall [--prefix DIR] [--dry-run]
 #
 # WHY A COPY AND NOT A LINK INTO build/. A link into the build tree makes the
@@ -17,23 +17,21 @@
 # what every caller runs, with no act that looks like an act. The copy is named
 # for its version and commit, so what is installed can be read without running it.
 #
-# Exit: 0 done (or nothing to do) · 2 usage · 3 missing dependency · 4 refusal · 5 launchctl failed
+# Exit: 0 done (or nothing to do) · 2 usage · 3 missing dependency · 4 refusal
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 BUILT="$ROOT/build/bin/loc"
 LOC_HOME="${LOC_HOME:-$HOME/.locutorium}"
-PREFIX="" DRY=no UNINSTALL=no NO_SERVICE=no RESTART=no
+PREFIX="" DRY=no UNINSTALL=no
 
-usage() { sed -n '2,18p' "${BASH_SOURCE[0]}"; exit 2; }
+usage() { sed -n '2,17p' "${BASH_SOURCE[0]}"; exit 2; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --prefix) PREFIX="${2:-}"; [[ -n "$PREFIX" ]] || usage; shift 2 ;;
     --dry-run) DRY=yes; shift ;;
     --uninstall) UNINSTALL=yes; shift ;;
-    --no-service) NO_SERVICE=yes; shift ;;
-    --restart-service) RESTART=yes; shift ;;
-    -h|--help) sed -n '2,18p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help) sed -n '2,17p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "install: unknown argument: $1" >&2; usage ;;
   esac
 done
@@ -43,26 +41,16 @@ missing=()
 if ! (( BASH_VERSINFO[0] > 3 || (BASH_VERSINFO[0] == 3 && BASH_VERSINFO[1] >= 2) )); then
   missing+=("bash >= 3.2 (found $BASH_VERSION)")
 fi
-command -v nats    >/dev/null 2>&1 || missing+=("nats — brew install nats-io/nats-tools/nats")
 # The toolchain is needed on the machine: this script never installs anything, so
 # an absent `go` is a named missing dependency like the rest.
 command -v go   >/dev/null 2>&1 || missing+=("go — loc is built from source; brew install go")
 command -v make >/dev/null 2>&1 || missing+=("make — the build is made by the Makefile; xcode-select --install")
-if [[ "$NO_SERVICE" == no ]] && ! command -v nats-server >/dev/null 2>&1; then
-  missing+=("nats-server — brew install nats-server (or pass --no-service to talk to a server elsewhere)")
-fi
-command -v curl    >/dev/null 2>&1 || echo "note: curl not found; 'loc registry' will not work" >&2
-command -v openssl >/dev/null 2>&1 || echo "note: openssl not found; bootstrap will not work" >&2
+command -v curl >/dev/null 2>&1 || echo "note: curl not found; 'loc registry' will not work" >&2
 if [[ ${#missing[@]} -gt 0 ]]; then
   echo "install: missing dependencies:" >&2
   printf '  - %s\n' "${missing[@]}" >&2
   exit 3
 fi
-if [[ "$NO_SERVICE" == no ]] && ! command -v launchctl >/dev/null 2>&1; then
-  echo "note: no launchd here; run 'nats-server -c $LOC_HOME/nats-server.conf' under your own supervisor" >&2
-  NO_SERVICE=yes
-fi
-
 # ── prefix ───────────────────────────────────────────────────────────────────
 if [[ -z "$PREFIX" ]]; then
   if command -v brew >/dev/null 2>&1 && [[ -w "$(brew --prefix)/bin" ]]; then PREFIX="$(brew --prefix)/bin"
@@ -132,12 +120,7 @@ if [[ "$UNINSTALL" == yes ]]; then
     done
     [[ "$DRY" == yes ]] || rmdir "$LIBDIR" 2>/dev/null || true
   fi
-  if [[ "$NO_SERVICE" == no ]]; then
-    # shellcheck source=providers/nats/service.sh
-    source "$ROOT/providers/nats/service.sh"
-    if [[ "$DRY" == yes ]]; then svc_uninstall --dry-run; else svc_uninstall; fi
-  fi
-  echo "note: $LOC_HOME was not touched — it holds your credentials, config and store."
+  echo "note: $LOC_HOME was not touched — it holds your config and store."
   echo "      remove it yourself if you mean to:  rm -rf $LOC_HOME"
   exit 0
 fi
@@ -162,22 +145,10 @@ fi
 link_artifact "$LINK" "$TARGET"
 case ":$PATH:" in *":$PREFIX:"*) ;; *) echo "           $PREFIX is not on your PATH; add:  export PATH=\"$PREFIX:\$PATH\"" ;; esac
 
-# ── service ──────────────────────────────────────────────────────────────────
-if [[ "$NO_SERVICE" == no ]]; then
-  # shellcheck source=providers/nats/service.sh
-  source "$ROOT/providers/nats/service.sh"
-  args=(); [[ "$DRY" == yes ]] && args+=(--dry-run); [[ "$RESTART" == yes ]] && args+=(--restart-service)
-  out="$(svc_install "${args[@]+"${args[@]}"}")" || exit $?
-  printf '%s\n' "$out"
-  case "$out" in UNCHANGED*|SKIPPED*) ;; *) changed=$((changed+1)) ;; esac
-fi
-
 if [[ "$DRY" == yes ]]; then echo "--dry-run: $changed artifact(s) would change; nothing written."
 elif [[ $changed -eq 0 ]]; then echo "nothing to do (every artifact already matches)."
 else echo "done: $changed artifact(s) changed."; fi
-if [[ ! -e "$LOC_HOME/nats-server.conf" ]]; then
+if [[ ! -e "$LOC_HOME/config" ]]; then
   echo "next: no deployment at $LOC_HOME yet —"
-  echo "      $ROOT/providers/nats/bootstrap.sh <endpoint> [<endpoint> ...]   # then re-run ./install.sh"
-  echo "      LOC_IDENTITY=admin loc doctor --init                          # create the streams"
-  echo "      loc doctor                                                    # verify as an endpoint"
+  echo "      loc start     # writes $LOC_HOME/config with its defaults, then runs the broker"
 fi
