@@ -41,7 +41,7 @@ func (p *presence) subscribeLive(t *testing.T, endpoint string) {
 	t.Helper()
 	p.as(t, "host")
 	if code, _, errOut := exec("subscribe", endpoint, "--pid", alivePid(),
-		"--type", "acme-cli", "--version", "3.2.0"); code != 0 {
+		"--type", "tmux", "--version", "3.2.0"); code != 0 {
 		t.Fatalf("subscribe %s exited %d (stderr %q)", endpoint, code, errOut)
 	}
 }
@@ -112,7 +112,7 @@ func TestFalsifierSweepReapsAllThreeRecords(t *testing.T) {
 
 	p.as(t, "host")
 	if code, _, errOut := exec("subscribe", e1, "--pid", strconv.Itoa(pid),
-		"--type", "acme-cli", "--version", "3.2.0"); code != 0 {
+		"--type", "tmux", "--version", "3.2.0"); code != 0 {
 		t.Fatalf("subscribe exited %d (stderr %q)", code, errOut)
 	}
 	// The server that took the seat wrote its own pid beside the row.
@@ -266,7 +266,7 @@ func TestFalsifierABeatInsideSubscribesWindow(t *testing.T) {
 		t.Logf("beat inside the window: exit=%d stdout=%q stderr=%q", code, out, errOut)
 	}
 
-	code, _, errOut := exec("subscribe", e1, "--pid", alivePid(), "--type", "acme-cli", "--version", "3.2.0")
+	code, _, errOut := exec("subscribe", e1, "--pid", alivePid(), "--type", "tmux", "--version", "3.2.0")
 	if code != 0 {
 		t.Fatalf("subscribe exited %d (stderr %q)", code, errOut)
 	}

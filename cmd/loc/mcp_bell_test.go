@@ -24,7 +24,7 @@ import (
 // cases are about what reaches the PANE, not what an agent asked for.
 func serveBell(t *testing.T, p *presence) string {
 	t.Helper()
-	spool := nudgeSpool(t, p.home)
+	spool := bellSpool(t, p.home)
 	stampVersion(t, "1.4.2")
 	d, release, err := mcpDeps()
 	if err != nil {

@@ -29,7 +29,7 @@ func TestMCP_TheServerHoldsTheSeatItWasLaunchedFor(t *testing.T) {
 	bin := buildLoc(t)
 	p := newPresence(t)
 	tune(t, p.home, "wake_window_seconds = 1")
-	spool := nudgeSpool(t, p.home)
+	spool := bellSpool(t, p.home)
 
 	ctx := context.Background()
 	cmd := osexec.Command(bin, "mcp")
@@ -119,7 +119,7 @@ func TestMCP_ASecondServerForALiveSeatRefusesAndNamesThePid(t *testing.T) {
 
 	p.as(t, "host")
 	if code := run([]string{"subscribe", e1, "--pid", strconv.Itoa(pid),
-		"--type", "acme-cli", "--version", "1.0.0"}, os.Stdout, os.Stderr); code != 0 {
+		"--type", "tmux", "--version", "1.0.0"}, os.Stdout, os.Stderr); code != 0 {
 		t.Fatalf("seed the incumbent registration: exit %d", code)
 	}
 

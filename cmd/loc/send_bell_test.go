@@ -46,7 +46,7 @@ func TestSend_ALiveRegistrationWithNoServingProcessIsStillRung(t *testing.T) {
 	// no pid file: exactly a seat a host registered for a runtime that never
 	// started a server, or whose server has gone.
 	p.as(t, "host")
-	subscribeSeat(t, e1, os.Getpid(), testClientName, testClientVersion)
+	subscribeSeat(t, e1, os.Getpid(), "claude", testClientVersion)
 	if reg := registration(t, e1); reg == nil || !reg.Alive() {
 		t.Fatalf("the planted registration for %s does not read as alive; "+
 			"the case is about a LIVE registration with no server, so there is nothing to test without one", e1)
@@ -82,7 +82,7 @@ func TestSend_ASeatWithALiveServingProcessIsNotRungBySend(t *testing.T) {
 	spool := nudgeSpool(t, p.home)
 
 	p.as(t, "host")
-	subscribeSeat(t, e1, os.Getpid(), testClientName, testClientVersion)
+	subscribeSeat(t, e1, os.Getpid(), "claude", testClientVersion)
 	// THIS process stands in for the serving child, which is what the file
 	// names in a real deployment. Planted rather than run, because a case that
 	// started a real server would have that server's own bell in the spool and
@@ -113,7 +113,7 @@ func TestSend_AStaleServingPIDFileIsRungBySend(t *testing.T) {
 	spool := nudgeSpool(t, p.home)
 
 	p.as(t, "host")
-	subscribeSeat(t, e1, os.Getpid(), testClientName, testClientVersion)
+	subscribeSeat(t, e1, os.Getpid(), "claude", testClientVersion)
 	// A file left behind by a server that died without removing it, and the
 	// number it holds has since been handed to something else. THIS IS THE
 	// REUSE HAZARD, written down as a case: the pid exists, so a kill(0) says
@@ -140,7 +140,7 @@ func TestSend_ADepartedServingProcessIsRungBySend(t *testing.T) {
 	spool := nudgeSpool(t, p.home)
 
 	p.as(t, "host")
-	subscribeSeat(t, e1, os.Getpid(), testClientName, testClientVersion)
+	subscribeSeat(t, e1, os.Getpid(), "claude", testClientVersion)
 	gone := departedPID(t)
 	writeServingPID(t, p.home, e1, gone, "1999-01-01T00:00:00Z")
 
@@ -161,7 +161,7 @@ func TestSend_ASeatWithNoLiveRegistrationIsRungBySend(t *testing.T) {
 	// the absence of a registration being tested; it is the absence of anyone
 	// to ring.
 	p.as(t, "host")
-	subscribeSeat(t, e2, departedPID(t), "shell-listener", "1.0.0")
+	subscribeSeat(t, e2, departedPID(t), "none", "1.0.0")
 	if reg := registration(t, e2); reg == nil || reg.Alive() {
 		t.Fatalf("the planted registration for %s reads as alive; "+
 			"the case needs a seat whose process is gone", e2)

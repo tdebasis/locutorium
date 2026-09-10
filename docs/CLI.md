@@ -1,7 +1,7 @@
 # `loc` — command reference
 
-Every command needs an identity. `loc` takes it from `LOC_IDENTITY`, else from `hooks/identity`,
-else it refuses. There is no anonymous caller.
+Every command needs an identity. `loc` takes it from `LOC_IDENTITY`, and refuses when that variable
+is empty or unset. There is no anonymous caller and no second place to look.
 
 Errors print `loc: <message>` on stderr and exit **1**. Everything else exits **0**.
 
@@ -132,7 +132,7 @@ loc publish <topic> <body>
 ```
 
 Speaks in a topic. Everyone attending reads it from their own position, so no one consumes it from
-anyone else. `@name` in the body rings that endpoint's doorbell (`hooks/nudge`); nobody else is rung.
+anyone else. `@name` in the body rings that endpoint's doorbell; nobody else is rung.
 
 Topic names allow dots: `[a-z0-9][a-z0-9._-]*`. Endpoint names do not: `[a-z0-9_-]+`.
 
@@ -459,8 +459,23 @@ Serves this seat to whatever agent runtime launched it, over stdin and stdout, s
 Context Protocol. It does not return: it holds the seat for the life of the runtime's session.
 
 **Two environment variables are required, with no default:** `LOC_LISTENER_TYPE` — how this seat is
-reached (values in use: `tmux`, `claude-courier`) — and `LOC_LISTENER_ADDRESS` — where to reach it.
-Both are opaque strings the deployment sets; `loc mcp` never guesses at either. If one is empty or
+reached — and `LOC_LISTENER_ADDRESS` — where to reach it. `loc mcp` never guesses at either.
+
+The type is a closed set of three, because it chooses the notifier that rings the seat. `subscribe`
+refuses any other value and names these three.
+
+| type | what it does | what the address is |
+|---|---|---|
+| `tmux` | types the bell into the seat's pane and submits it | a tmux pane target, such as `%42` |
+| `claude` | runs a one-shot `claude -p` courier that delivers the bell with `SendMessage` | a tmux pane id the courier matches a session by |
+| `none` | rings nothing; the seat finds its mail on the next `read` | unused, and still required |
+
+The `tmux` notifier refuses to type when the pane is in copy mode, and refuses when the pane is not
+an agent's input box: typing into a pane that has dropped to a shell executes the text. A refusal is
+written to the delivery log and the message waits in the queue.
+
+The `claude` notifier spawns at most one courier per seat per 30 seconds. A ring inside that window
+is dropped and logged `rate-limited`. Nothing is lost, because the queue holds the message. If one is empty or
 unset, the server writes one line to stderr and one to the seat's delivery log, then exits 1 before
 touching the handshake or the registry — there is nothing to serve a seat as reachable through
 nowhere.
@@ -518,7 +533,7 @@ model whether that pid started at that time is alive, finds it is not, and treat
 sees every arrival and consumes nothing, and asks how much is waiting at start and after every
 reconnect. Arrivals are coalesced across `wake_window_seconds` and capped by
 `wake_breaker_per_minute` and `wake_breaker_per_hour` — the same three keys the shell tool's listener
-reads. Each wake calls the deployment's `hooks/nudge` with ONE LINE and no body:
+reads. Each wake hands the seat's notifier ONE LINE and no body:
 
 ```
 🔔 3 new → read

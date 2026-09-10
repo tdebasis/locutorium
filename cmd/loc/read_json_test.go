@@ -28,7 +28,7 @@ import (
 func TestReadJSONShowsOneLineAndConsumes(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
-	exec("subscribe", e1, "--pid", strconv.Itoa(livePid(t)), "--type", "acme-cli", "--version", "3.2.0")
+	exec("subscribe", e1, "--pid", strconv.Itoa(livePid(t)), "--type", "tmux", "--version", "3.2.0")
 
 	code, out, errOut := exec("send", e1, "json-canary")
 	if code != 0 || errOut != "" {

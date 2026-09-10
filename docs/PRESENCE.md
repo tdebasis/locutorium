@@ -101,7 +101,7 @@ display information · the process id and its start time · the working director
 delivery **address** — opaque to the bus, meaningful only to whatever consumes it (see `CLI.md
 §subscribe`).
 
-For a `claude-courier` listener type, the address is a Claude Code session name, and that session
+For a `claude` listener type, the address is a Claude Code session name, and that session
 must be launched with `-n <name>` or the name drifts mid-session — the address then names a session
 that no longer answers to it. Ensuring that precondition holds is the deployment's responsibility,
 not this bus's; the measured detail is in `docs/CLI.md` §mcp.
@@ -229,7 +229,7 @@ an agent comes from here or from the registry.
   "kind": "agent.subscribe",
   "endpoint": "workshop.scribe",
   "instance": "workshop",
-  "agent":   { "type": "acme-cli", "version": "3.2.0" },
+  "agent":   { "type": "tmux", "version": "3.2.0" },
   "process": { "pid": 48213, "started": "2026-01-14T09:12:04.006Z" },
   "display": { "name": "The Scribe", "role": "Records" },
   "cwd": "/…/workspaces/scribe",

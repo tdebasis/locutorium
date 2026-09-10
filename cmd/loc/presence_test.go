@@ -409,8 +409,8 @@ func TestPresence_Subscribe_CreatesInjectiveBackingObjects(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
 
-	exec("subscribe", e1, "--pid", pidStr(livePid(t)), "--type", "acme-cli", "--version", "3.2.0")
-	exec("subscribe", e3, "--pid", pidStr(livePid(t)), "--type", "acme-cli", "--version", "3.2.0")
+	exec("subscribe", e1, "--pid", pidStr(livePid(t)), "--type", "tmux", "--version", "3.2.0")
+	exec("subscribe", e3, "--pid", pidStr(livePid(t)), "--type", "tmux", "--version", "3.2.0")
 
 	if !p.qexists(q1) {
 		t.Errorf("subscribe did not create %s (dots→underscores backing object)", q1)
@@ -428,8 +428,8 @@ func TestPresence_Send_ReachesOnlyItsOwnQueue(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
 
-	exec("subscribe", e1, "--pid", pidStr(livePid(t)), "--type", "acme-cli", "--version", "3.2.0")
-	exec("subscribe", e3, "--pid", pidStr(livePid(t)), "--type", "acme-cli", "--version", "3.2.0")
+	exec("subscribe", e1, "--pid", pidStr(livePid(t)), "--type", "tmux", "--version", "3.2.0")
+	exec("subscribe", e3, "--pid", pidStr(livePid(t)), "--type", "tmux", "--version", "3.2.0")
 	exec("send", e1, "for-workshop-scribe-only")
 
 	if p.qcount(q1) != 1 || p.qcount(q3) != 0 {
@@ -446,7 +446,7 @@ func TestPresence_Subscribe_RefusesUnderscoreInEndpoint(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
 	checkRefusal(t, "invalid|character|underscore|endpoint name|namespac|barred|must match",
-		"subscribe", "workshop.scr_ibe", "--pid", pidStr(livePid(t)), "--type", "acme-cli", "--version", "3.2.0")
+		"subscribe", "workshop.scr_ibe", "--pid", pidStr(livePid(t)), "--type", "tmux", "--version", "3.2.0")
 }
 
 // A FLAG GIVEN WITH AN EMPTY VALUE IS REFUSED, so that absent and empty stay
@@ -477,16 +477,16 @@ func TestPresence_Subscribe_RefusesAFlagGivenWithNoValue(t *testing.T) {
 
 	// The field this was found on: an address that cannot be delivered to.
 	checkRefusal(t, "no value|empty|omit the flag",
-		"subscribe", e2, "--pid", pid, "--type", "acme-cli", "--version", "3.2.0", "--address", "")
+		"subscribe", e2, "--pid", pid, "--type", "tmux", "--version", "3.2.0", "--address", "")
 	clear()
 
 	// The same defect on a field where it had always been latent and harmless.
 	checkRefusal(t, "no value|empty|omit the flag",
-		"subscribe", e2, "--pid", pid, "--type", "acme-cli", "--version", "3.2.0", "--cwd", "")
+		"subscribe", e2, "--pid", pid, "--type", "tmux", "--version", "3.2.0", "--cwd", "")
 	clear()
 
 	// CONTROL 1: a real value is still accepted and still lands.
-	if code, _, errOut := exec("subscribe", e2, "--pid", pid, "--type", "acme-cli",
+	if code, _, errOut := exec("subscribe", e2, "--pid", pid, "--type", "tmux",
 		"--version", "3.2.0", "--address", "workshop:1.2"); code != 0 {
 		t.Fatalf("a non-empty --address must still be accepted; got exit=%d stderr=%q", code, errOut)
 	}
@@ -495,7 +495,7 @@ func TestPresence_Subscribe_RefusesAFlagGivenWithNoValue(t *testing.T) {
 	// CONTROL 2: OMITTING the flag is not the same as passing it empty, and
 	// must stay legal. This is the arm that would catch a fix which refused
 	// absence along with emptiness.
-	if code, _, errOut := exec("subscribe", e2, "--pid", pid, "--type", "acme-cli",
+	if code, _, errOut := exec("subscribe", e2, "--pid", pid, "--type", "tmux",
 		"--version", "3.2.0"); code != 0 {
 		t.Fatalf("omitting --address must remain legal; got exit=%d stderr=%q", code, errOut)
 	}
@@ -517,7 +517,7 @@ func TestPresence_Subscribe_PublishesFullyQualifiedJoinEvent(t *testing.T) {
 	pid := livePid(t)
 	sub := p.witness(t, "presence.workshop")
 
-	exec("subscribe", e2, "--pid", pidStr(pid), "--type", "acme-cli", "--version", "3.2.0",
+	exec("subscribe", e2, "--pid", pidStr(pid), "--type", "tmux", "--version", "3.2.0",
 		"--display", "The Clerk", "--cwd", "/workspaces/clerk", "--address", "workshop:1.2")
 
 	events := collect(sub, 2*time.Second)
@@ -529,7 +529,7 @@ func TestPresence_Subscribe_PublishesFullyQualifiedJoinEvent(t *testing.T) {
 		t.Errorf("join event endpoint = %v, want the fully-qualified %q", m["endpoint"], e2)
 	}
 	agent, _ := m["agent"].(map[string]any)
-	if agent == nil || agent["type"] != "acme-cli" || agent["version"] != "3.2.0" {
+	if agent == nil || agent["type"] != "tmux" || agent["version"] != "3.2.0" {
 		t.Errorf("join event carries the wrong agent.type/version; got %v, want type acme-cli version 3.2.0", m["agent"])
 	}
 	proc, _ := m["process"].(map[string]any)
@@ -562,7 +562,7 @@ func TestPresence_Subscribe_ExitsZeroAndCreatesQueue(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
 
-	code, _, errOut := exec("subscribe", e2, "--pid", pidStr(livePid(t)), "--type", "acme-cli", "--version", "3.2.0")
+	code, _, errOut := exec("subscribe", e2, "--pid", pidStr(livePid(t)), "--type", "tmux", "--version", "3.2.0")
 	if code != 0 {
 		t.Errorf("subscribe on a free endpoint exited %d (stderr %q), want 0", code, errOut)
 	}
@@ -616,7 +616,7 @@ func TestPresence_Sweep_ReapsADeadPidWithoutAnnouncingIt(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
 	// A registration whose process is already gone is what sweep exists to reap.
-	exec("subscribe", e2, "--pid", pidStr(deadPid(t)), "--type", "acme-cli", "--version", "3.2.0")
+	exec("subscribe", e2, "--pid", pidStr(deadPid(t)), "--type", "tmux", "--version", "3.2.0")
 	sub := p.witness(t, "presence.workshop")
 
 	code, out, errOut := exec("sweep")
@@ -639,7 +639,7 @@ func TestPresence_Sweep_ReapsADeadPidWithoutAnnouncingIt(t *testing.T) {
 func TestPresence_Sweep_SecondSweepIsSilent(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
-	exec("subscribe", e2, "--pid", pidStr(deadPid(t)), "--type", "acme-cli", "--version", "3.2.0")
+	exec("subscribe", e2, "--pid", pidStr(deadPid(t)), "--type", "tmux", "--version", "3.2.0")
 	exec("sweep") // first sweep reaps the dead pid
 
 	sub := p.witness(t, "presence.workshop")
@@ -795,7 +795,7 @@ func TestPresence_Status_ReportsThreeInputsSeparately(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
 	pid := livePid(t)
-	exec("subscribe", e1, "--pid", pidStr(pid), "--type", "acme-cli", "--version", "3.2.0")
+	exec("subscribe", e1, "--pid", pidStr(pid), "--type", "tmux", "--version", "3.2.0")
 
 	_, out, _ := exec("status", e1)
 
@@ -825,7 +825,7 @@ func TestPresence_Status_ReportsThreeInputsSeparately(t *testing.T) {
 func TestPresence_Status_StaleActivityStartAfterNewerEndIsIdle(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
-	exec("subscribe", e1, "--pid", pidStr(livePid(t)), "--type", "acme-cli", "--version", "3.2.0")
+	exec("subscribe", e1, "--pid", pidStr(livePid(t)), "--type", "tmux", "--version", "3.2.0")
 
 	// The end is newer; the start that follows it is older, and out of order.
 	exec("emit", "activity.end", e1, "--ts", "2026-01-14T10:04:30.000Z")
@@ -899,10 +899,10 @@ func TestPresence_Subscribe_OnHeldEndpoint_RefusedNamingIncumbentPid(t *testing.
 	p := newPresence(t)
 	p.as(t, "host")
 	pid := livePid(t)
-	exec("subscribe", e1, "--pid", pidStr(pid), "--type", "acme-cli", "--version", "3.2.0") // holds e1
+	exec("subscribe", e1, "--pid", pidStr(pid), "--type", "tmux", "--version", "3.2.0") // holds e1
 
 	checkRefusalNamingIncumbent(t, pid,
-		"subscribe", e1, "--pid", pidStr(pid), "--type", "acme-cli", "--version", "3.2.0")
+		"subscribe", e1, "--pid", pidStr(pid), "--type", "tmux", "--version", "3.2.0")
 }
 
 // Plain unsubscribe must REFUSE a live incumbent, naming the live process — so
@@ -911,7 +911,7 @@ func TestPresence_Unsubscribe_RefusesLiveIncumbent(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
 	pid := livePid(t)
-	exec("subscribe", e1, "--pid", pidStr(pid), "--type", "acme-cli", "--version", "3.2.0")
+	exec("subscribe", e1, "--pid", pidStr(pid), "--type", "tmux", "--version", "3.2.0")
 
 	checkRefusalNamingIncumbent(t, pid,
 		"unsubscribe", e1)
@@ -923,7 +923,7 @@ func TestPresence_Unsubscribe_RefusesLiveIncumbent(t *testing.T) {
 func TestPresence_Unsubscribe_ForceRemovesLiveIncumbent(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
-	exec("subscribe", e1, "--pid", pidStr(livePid(t)), "--type", "acme-cli", "--version", "3.2.0")
+	exec("subscribe", e1, "--pid", pidStr(livePid(t)), "--type", "tmux", "--version", "3.2.0")
 	p.seedQueue(t, q1, "queue."+e1)
 
 	code, _, errOut := exec("unsubscribe", e1, "--force")
@@ -951,7 +951,7 @@ func TestPresence_Unsubscribe_EmptyEndpointIsNoOp(t *testing.T) {
 func TestPresence_Unsubscribe_ClearsDeadIncumbent(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
-	exec("subscribe", e2, "--pid", pidStr(deadPid(t)), "--type", "acme-cli", "--version", "3.2.0")
+	exec("subscribe", e2, "--pid", pidStr(deadPid(t)), "--type", "tmux", "--version", "3.2.0")
 	// Stand the queue up so "cleared" measures the verb's effect, not a queue that
 	// was never created; witness the departure event, as the clean/force cases do.
 	p.seedQueue(t, q2, "queue."+e2)
@@ -978,10 +978,10 @@ func TestPresence_Unsubscribe_ClearsDeadIncumbent(t *testing.T) {
 func TestPresence_RefusedSubscribe_SpeaksOnStderrOnly(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
-	exec("subscribe", e3, "--pid", pidStr(livePid(t)), "--type", "acme-cli", "--version", "3.2.0") // holds e3
+	exec("subscribe", e3, "--pid", pidStr(livePid(t)), "--type", "tmux", "--version", "3.2.0") // holds e3
 
 	checkOnStderr(t, "held|already|incumbent|in use|"+pidStr(livePid(t)),
-		"subscribe", e3, "--pid", "1", "--type", "acme-cli", "--version", "3.2.0")
+		"subscribe", e3, "--pid", "1", "--type", "tmux", "--version", "3.2.0")
 }
 
 func TestPresence_RefusedSend_SpeaksOnStderrOnly(t *testing.T) {

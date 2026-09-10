@@ -45,7 +45,7 @@ func TestPresence_SendRequiresAttendance_SubscribedPeerIsAttending(t *testing.T)
 	p.gateOn(t)
 	p.as(t, "host")
 
-	exec("subscribe", e1, "--pid", pidStr(livePid(t)), "--type", "acme-cli", "--version", "3.2.0")
+	exec("subscribe", e1, "--pid", pidStr(livePid(t)), "--type", "tmux", "--version", "3.2.0")
 	if !p.qexists(q1) {
 		t.Fatalf("precondition: subscribe must leave a live queue %s", q1)
 	}

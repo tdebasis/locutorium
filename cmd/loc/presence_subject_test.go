@@ -34,7 +34,7 @@ func subscribing(t *testing.T, p *presence, endpoint string) {
 	t.Helper()
 	p.as(t, "host")
 	if code, _, errOut := exec("subscribe", endpoint, "--pid", pidStr(livePid(t)),
-		"--type", "acme-cli", "--version", "3.2.0"); code != 0 {
+		"--type", "tmux", "--version", "3.2.0"); code != 0 {
 		t.Fatalf("subscribe exit %d, stderr %q", code, errOut)
 	}
 }
@@ -133,7 +133,7 @@ func TestASeatWithOldGrantsStillSubscribesWhenItsEventIsRefused(t *testing.T) {
 
 	p.as(t, eOld)
 	if code, _, errOut := exec("subscribe", eOld, "--pid", pidStr(livePid(t)),
-		"--type", "acme-cli", "--version", "3.2.0"); code != 0 {
+		"--type", "tmux", "--version", "3.2.0"); code != 0 {
 		t.Fatalf("a refused event publish failed the subscribe: exit %d, stderr %q", code, errOut)
 	}
 	if !p.qexists(qOld) {

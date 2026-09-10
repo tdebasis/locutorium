@@ -89,7 +89,7 @@ func cli(t *testing.T, args ...string) string {
 func TestMCPTools_EachToolIsTheVerbItIsNamedFor(t *testing.T) {
 	p := newPresence(t)
 	tune(t, p.home, "wake_window_seconds = 1")
-	nudgeSpool(t, p.home)
+	bellSpool(t, p.home)
 
 	p.as(t, e1)
 	s := serveInMemory(t, p)
