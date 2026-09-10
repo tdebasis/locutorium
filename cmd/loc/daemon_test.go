@@ -287,6 +287,13 @@ func TestListenAddrReadsTheURLAndRefusesTheRest(t *testing.T) {
 	// THE FLOOR IS ASKED TO STAND ASIDE, AND ONLY HERE. It refuses the
 	// product's default address (testmain_test.go), which three of the entries
 	// below are about. This case reads an address and binds nothing.
+	//
+	// THIS IS SAFE ONLY WHILE THE PACKAGE RUNS SERIALLY. refuseListen is one
+	// variable for the whole package. No case here calls t.Parallel, so the
+	// no-op below is live only for the length of this case. A case that calls
+	// t.Parallel could run while this one holds the no-op, and it would boot a
+	// broker with no floor under it. Do not add t.Parallel to this case, and
+	// do not add it to any case that boots a broker.
 	restore := refuseListen
 	refuseListen = func(string, int) error { return nil }
 	t.Cleanup(func() { refuseListen = restore })

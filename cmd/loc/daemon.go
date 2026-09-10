@@ -71,6 +71,10 @@ func listenAddr() (host string, port int, err error) {
 // its own scratch home with no config resolves nats_url to
 // nats://127.0.0.1:4222, which is a live deployment's address on the machine
 // running the tests.
+//
+// It is one variable for the whole package. A case that sets it aside must not
+// run in parallel with a case that boots a broker, because the second case
+// would then boot with no floor under it.
 var refuseListen = func(host string, port int) error { return nil }
 
 // loopback reports whether a host name reaches this machine and no other.
