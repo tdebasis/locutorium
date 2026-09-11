@@ -839,14 +839,12 @@ func TestSendDerivesAttendanceFromTheLiveSubscription(t *testing.T) {
 	d := newPresenceDeployment(t)
 	// The file lists nobody, and the send still goes: what matters is that a
 	// queue is there to deliver to.
-	writeFile(t, filepath.Join(d.home, "endpoints"), "")
 	d.spy.exists["workshop.scribe"] = true
 
 	code, out, errOut := exec("send", "workshop.scribe", "hello")
 	assertResult(t, code, out, errOut, 0, "sent → queue.workshop.scribe\n", "")
 
 	// And the file listing a name changes nothing when nobody is attending it.
-	writeFile(t, filepath.Join(d.home, "endpoints"), "workshop.clerk\n")
 	code, out, errOut = exec("send", "workshop.clerk", "hello")
 	assertResult(t, code, out, errOut, 1, "",
 		"loc: nobody is attending 'workshop.clerk': no live subscription, so no queue to deliver to\n")

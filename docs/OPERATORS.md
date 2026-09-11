@@ -8,14 +8,11 @@ how to undo anything.
 
 | path | what | who writes it |
 |---|---|---|
-| `config` | `key = value` lines: the provider, URLs, the window, wake policy | bootstrap (once), then you |
-| `endpoints` | the roster, one name per line | bootstrap (once), then you |
-| `creds/<name>` | one credential per endpoint plus `admin` and `watch`, mode 0600 | bootstrap only |
-| `nats-server.conf` | the medium's config: loopback listener, JetStream store, one user per credential with a per-endpoint ACL | bootstrap only |
-| `hooks/` | your deployment's five hooks (below) | you |
-| `run/` | live state: listener pidfiles, spools, delivery logs — never edit | `loc` |
-| `store/` | JetStream data | the medium |
-| `server.log` | the medium's stdout/stderr | launchd |
+| `config` | `key = value` lines: the provider, the URL, the window, the retention | `loc start` (once), then you |
+| `hooks/` | your deployment's own hooks; `loc` reads none of them | you |
+| `run/` | live state: the daemon pidfile, the heartbeat log, delivery logs — never edit | `loc` |
+| `store/` | JetStream data | the embedded broker |
+| `run/loc.log` | the daemon's own output | `loc` |
 | `forbidden` | your deployment's vocabulary, for the cleanliness check (below); mode 0600 | you |
 
 ## Your deployment's vocabulary
@@ -39,25 +36,19 @@ With no file installed it still runs, against a built-in generic list holding on
 paths, and says on stderr that the deployment list is missing. A missing list is a weaker check,
 never a silent pass.
 
-## Bootstrap
+## First run
 
-`providers/nats/bootstrap.sh <endpoint> [<endpoint> …]` writes everything above except `hooks/` and
-`run/`. It **refuses to run over an existing deployment**. `--force` regenerates the deployment
-wholesale: **every credential rotates** (every running client's password goes stale until
-`make-contexts.sh` and the listeners are restarted) and `config` and `endpoints` are rewritten,
-dropping any key you added by hand (`monitor_url`, `send_requires_attendance`). Adding an endpoint
-to a live house without rotating the others is not supported yet; it is on the roadmap.
-
-`providers/nats/make-contexts.sh` writes one NATS CLI context per credential for hand debugging and
-selects none of them.
+`loc start` writes `config` when there is none, prints every default it wrote, and runs the broker.
+It never rewrites a `config` that is already there, so a key you edited survives every later start.
+There is no roster file: a seat exists while it is subscribed, and the ledger is what `loc status`
+reads.
 
 ## The service
 
-`./install.sh` renders `providers/nats/launchd/com.locutorium.nats-server.plist.in` with the
-`nats-server` path and `$LOC_HOME` of the machine it runs on, and loads it. It also builds `loc`,
-copies the stamped binary into `lib/locutorium`, and links `loc` at that copy. `--restart-service` is
-the only path that stops a running medium. Logs: `$LOC_HOME/server.log`. State of the agent:
-`launchctl list com.locutorium.nats-server`. Endpoints survive a medium restart — queues are
+`./install.sh` builds `loc`, copies the stamped binary into `lib/locutorium`, and links `loc` at that
+copy. It supervises nothing. `loc start` runs the broker and the heartbeat; `loc stop` ends them.
+Logs: `$LOC_HOME/run/loc.log`. State of the daemon: the first line of `loc status`. Endpoints
+survive a medium restart — queues are
 durable; listeners reconnect.
 
 ## Config keys
@@ -104,7 +95,7 @@ hook does, the invariant is the product's: *a wake never makes a message unreada
 | a config key | delete the line |
 | a hook | your deployment repository's history (keep the hooks in one) |
 | `loc` | `git checkout vX.Y.Z && ./install.sh` — the binary is a copy of a moment, so the installer remakes and re-copies it; a checkout alone rolls back nothing, because the installed copy is deliberately not the tree |
-| the medium's definition | edit or restore the plist, then `./install.sh --restart-service` |
+| the medium's definition | edit the `config` line, then `loc stop && loc start` |
 | attendance | `loc unsub`; the queue keeps holding messages |
 
 ## Uninstall

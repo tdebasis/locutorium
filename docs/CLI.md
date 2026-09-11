@@ -171,7 +171,7 @@ zero exit. A **medium that cannot be reached** is the opposite: nothing on stand
 on standard error, exit 1. Silence and an unreachable broker are different facts and only one of
 them is about your mailbox.
 
-There is a third loud answer. If the deployment's access control **refuses the reader a cursor on its own queue** (the consumer-create request on `QUEUE_<instance>_<agent>` is denied), `read` exits non-zero with `cannot read queue.<endpoint>: the medium refused <subject> (permissions) …` on standard error and prints nothing — never an empty mailbox with mail still stored. The fix lives in the deployment: regenerate the access control with `providers/nats/bootstrap.sh`, which grants a seat the cursor on its own queue. An endpoint with no queue at all still reads as the two headings and exit 0; absence is not refusal.
+There is a third loud answer. If the deployment's access control **refuses the reader a cursor on its own queue** (the consumer-create request on `QUEUE_<instance>_<agent>` is denied), `read` exits non-zero with `cannot read queue.<endpoint>: the medium refused <subject> (permissions) …` on standard error and prints nothing — never an empty mailbox with mail still stored. V0 sets no access control, so a broker that refuses here is not one `loc` configured; the fix lives in whatever wrote that broker's rules. An endpoint with no queue at all still reads as the two headings and exit 0; absence is not refusal.
 
 `--peek` is much narrower than it looks, and this is worth knowing before relying on it:
 

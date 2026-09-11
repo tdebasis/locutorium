@@ -13,7 +13,9 @@ import (
 	"time"
 
 	natsserver "github.com/nats-io/nats-server/v2/server"
+
 	natsgo "github.com/nats-io/nats.go"
+	"github.com/tdebasis/locutorium/internal/broker"
 
 	"github.com/tdebasis/locutorium/internal/config"
 	model "github.com/tdebasis/locutorium/internal/presence"
@@ -130,16 +132,7 @@ func runDaemon(w io.Writer, beat time.Duration, sigs <-chan os.Signal, ready fun
 	// THE SERVER MAKES store/ ITSELF. JetStream creates its store directory on
 	// boot, so a MkdirAll here would only be a second place that decides where
 	// the store lives.
-	srv, err := natsserver.NewServer(&natsserver.Options{
-		Host:      host,
-		Port:      port,
-		JetStream: true,
-		StoreDir:  filepath.Join(home, "store"),
-		NoLog:     true,
-		// The endings are this function's. The library's own handler would
-		// exit before the pidfile is removed.
-		NoSigs: true,
-	})
+	srv, err := natsserver.NewServer(broker.Options(host, port, filepath.Join(home, "store")))
 	if err != nil {
 		return fmt.Errorf("cannot start the broker: %v", err)
 	}

@@ -18,18 +18,19 @@ as `loc`, and puts the medium (a `nats-server`) under launchd.
 |---|---|---|
 | `go`, `make` | `loc` is built from source; the installer refuses by name rather than installing a toolchain for you | `brew install go` |
 | bash ≥ 3.2 | the installer, the suite and the provider scripts (macOS ships 3.2; that is the floor) | — |
-| `nats` | `bootstrap.sh` shells out to the NATS CLI for its bcrypt hashes; `loc` itself speaks the protocol and never runs it | `brew install nats-io/nats-tools/nats` |
-| `nats-server` | the medium itself, run by the LaunchAgent | `brew install nats-server` |
-| `openssl` | `bootstrap.sh` generates credentials | ships with macOS |
+| `nats` | the conformance suite asserts stream state through the NATS CLI; `loc` itself speaks the protocol and never runs it | `brew install nats-io/nats-tools/nats` |
 
-Development only (the conformance suite): `jq`, `nats-server` on PATH, and BSD `sed` (`sed -i ''`);
+The broker is embedded in the binary, so no server package is needed. `loc start` runs it and
+`loc stop` ends it.
+
+Development only (the conformance suite): `jq`, the `nats` CLI on PATH, and BSD `sed` (`sed -i ''`);
 the suite is macOS-only for now. `make build` first, then `bash conformance/run.sh` — `LOC_BIN_DIR`
 defaults to `build/bin`. A seat's listener is the `mcp` verb, which the suite does not speak; those
 cases are skipped by name, each printing its reason and where the property IS proven, and counted.
 
 ## What `./install.sh` writes — the whole list
 
-Three things:
+Two things:
 
 1. `$LIBDIR/loc-<version>-<sha>` — the built binary, **copied** out of `build/`. `$LIBDIR` is
    `lib/locutorium` beside the prefix. **A copy, not a link into `build/`**: a link would make the
@@ -38,37 +39,27 @@ Three things:
    is on without executing anything.
 2. `$PREFIX/loc` — a symlink to that copy. `$PREFIX` is `$(brew --prefix)/bin` if it is writable,
    else `~/.local/bin`; override with `--prefix DIR`.
-3. `~/Library/LaunchAgents/com.locutorium.nats-server.plist` — rendered from
-   `providers/nats/launchd/com.locutorium.nats-server.plist.in` with the `nats-server` path and
-   `$LOC_HOME` resolved on your machine, then loaded with `launchctl bootstrap`.
 
-It never writes under `$LOC_HOME` (default `~/.locutorium`: credentials, config, endpoints, store),
-never runs `bootstrap.sh` for you, never edits your shell files (it prints the `PATH` line to add
-if needed), and never restarts a loaded agent unless you pass `--restart-service`.
+It never writes under `$LOC_HOME` (default `~/.locutorium`: config, store), never edits your shell
+files (it prints the `PATH` line to add if needed), and starts and supervises nothing. `loc start`
+is the lifecycle.
 
 ## Flags
 
 | flag | effect |
 |---|---|
 | `--prefix DIR` | where the `loc` link goes; the stamped copy goes in `lib/locutorium` beside it |
-| `--dry-run` | print NEW / CHANGED / UNCHANGED for each artifact (with a diff for the plist); write and load nothing |
-| `--no-service` | install `loc` only; no LaunchAgent (use when the medium runs elsewhere, or on Linux) |
-| `--restart-service` | the only way a running agent is stopped and started again — needed after the plist changes |
-| `--uninstall` | remove the `loc` link (only if it points at a copy this clone made), the stamped copies, and the agent + plist; never `$LOC_HOME` |
+| `--dry-run` | print NEW / CHANGED / UNCHANGED for each artifact; write nothing |
+| `--uninstall` | remove the `loc` link (only if it points at a copy this clone made) and the stamped copies; never `$LOC_HOME` |
 | `-h`, `--help` | usage |
 
 ## What a run looks like
 
 ```
 $ ./install.sh --dry-run
+           --dry-run: 'make build' not run; /opt/homebrew/bin/loc would point at /opt/homebrew/lib/locutorium/loc-0.1.1-d616027
 UNCHANGED  /opt/homebrew/bin/loc -> /opt/homebrew/lib/locutorium/loc-0.1.1-d616027
-CHANGED    ~/Library/LaunchAgents/com.locutorium.nats-server.plist
-           --- (on disk)
-           +++ (rendered)
-           -    <string>/usr/local/opt/nats-server/bin/nats-server</string>
-           +    <string>/opt/homebrew/bin/nats-server</string>
-           --dry-run: nothing written, nothing loaded
---dry-run: 1 artifact(s) would change; nothing written.
+--dry-run: 0 artifact(s) would change; nothing written.
 ```
 
 A second real run prints `nothing to do (every artifact already matches).` Moved the clone?
@@ -89,8 +80,7 @@ to be started or supervised; it needs the binary on `PATH` and the endpoint it i
 
 `0` done or nothing to do · `2` usage · `3` a dependency is missing (each is named with its
 install line), or a `make build` that failed · `4` refusal — something is in the way that the
-installer did not create · `5`
-`launchctl` failed (the command is echoed).
+installer did not create.
 
 ## Uninstall
 

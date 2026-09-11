@@ -9,16 +9,15 @@
 //	topic.<name>      -> one TOPICS stream, max_age = the availability window
 //	                     (idle teardown falls out of retention)
 //
-// Credentials live at $LOC_HOME/creds/<identity>, mode 0600. They are read
-// here and handed to the client, and they are never printed, logged, or put
-// in an error message.
+// V0 has no authentication on the loopback listener, so this package opens
+// its connection as nobody: it reads no credential and sends no user name.
+// Only the verbs that speak resolve an identity, and they do it for
+// themselves.
 package nats
 
 import (
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -28,7 +27,6 @@ import (
 	natsgo "github.com/nats-io/nats.go"
 
 	"github.com/tdebasis/locutorium/internal/config"
-	"github.com/tdebasis/locutorium/internal/loc"
 	"github.com/tdebasis/locutorium/internal/presence"
 	"github.com/tdebasis/locutorium/internal/provider"
 )
@@ -79,38 +77,7 @@ func (p *Provider) Close() {
 	}
 }
 
-// credentials resolves the three things every connection this package makes
-// needs: who is speaking, the secret that authenticates them, and where the
-// medium is.
-//
-// It is shared rather than repeated so that the listener's own long-lived
-// connection authenticates as EXACTLY the endpoint the verbs do — one way of
-// asking is one way of being wrong — and so that the rule about the secret is
-// stated once: it is read here, handed to the client, and never printed,
-// logged, or put in an error message.
-func credentials() (id, pass, url string, err error) {
-	id, err = loc.Identity()
-	if err != nil {
-		return "", "", "", err
-	}
-	credfile := filepath.Join(config.Home(), "creds", id)
-	secret, err := os.ReadFile(credfile)
-	if err != nil {
-		// The path, never the content.
-		return "", "", "", fmt.Errorf("no credentials for '%s' at %s", id, credfile)
-	}
-	// Written with printf, so there is no trailing newline to strip; a hand
-	// edited file may have one, and the shell's $(cat ...) would have dropped
-	// it too.
-	pass = strings.TrimRight(string(secret), "\r\n")
-	return id, pass, config.Value(config.NATSURL), nil
-}
-
-// connect opens the one connection, as the caller's own identity.
-//
-// The identity is resolved here and not passed in, so that every path to the
-// medium is authenticated as the same endpoint the semantics layer thinks is
-// speaking.
+// connect opens the one connection.
 func (p *Provider) connect() error { return p.connectWithin(ackTimeout) }
 
 // connectWithin is connect with the dial bounded by the caller. Every verb but
@@ -121,12 +88,8 @@ func (p *Provider) connectWithin(dial time.Duration) error {
 	if p.nc != nil {
 		return nil
 	}
-	id, pass, url, err := credentials()
-	if err != nil {
-		return err
-	}
+	url := config.Value(config.NATSURL)
 	nc, err := natsgo.Connect(url,
-		natsgo.UserInfo(id, pass),
 		natsgo.Name("loc"),
 		natsgo.Timeout(dial),
 		// THE ONLY PLACE A REFUSAL IS EVER SAID OUT LOUD. See noteRefusal.

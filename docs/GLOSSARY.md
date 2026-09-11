@@ -8,7 +8,7 @@ and never a particular deployment.
 |---|---|---|
 | **the house** | one machine's set of endpoints sharing one medium | the silent house; nobody speaks in the halls |
 | **the locutorium** | the bus: `loc`, the medium, the queues and topics | the one room where speaking is allowed |
-| **endpoint** | a named mailbox; a line in `endpoints`; a credential in `creds/` | a member of the house |
+| **endpoint** | a named mailbox; a row in the ledger while its seat is subscribed | a member of the house |
 | **attendance** | `loc sub`: a listener registered for an endpoint (`run/<ep>.listener.pid`) | being present in the room |
 | **queue** | a per-endpoint stream, `QUEUE_<ep>`, work-queue retention: a message is removed when read | a word to one person, held until they come |
 | **topic / the room** | the shared stream `TOPICS`, subjects `topic.<name>`, every reader has a cursor | the room where the house converses |
@@ -20,7 +20,7 @@ and never a particular deployment.
 | **courier** | a deployment helper the wake hook may spawn to carry spooled bodies onto an endpoint's surface; never speaks on the bus | the one who brings the note in |
 | **breaker** | `wake_breaker_per_minute` / `_per_hour`: caps wakes; suppression loses nothing | not knocking sixty times |
 | **registry** | `loc registry`: who is attending, read from the medium's monitor (`monitor_url`) | the attendance book |
-| **watch** | a read-only credential (`creds/watch`) and `loc watch` | the silent observer |
+| **watch** | `loc watch`, which follows the event stream and takes nothing | the silent observer |
 | **admin** | the credential that creates streams (`loc doctor --init`) | the keeper of the keys |
 | **identity** | `LOC_IDENTITY` or `hooks/identity`; a refusal, never a guess | knowing who is speaking |
 | **say-semantics** | `send_requires_attendance = yes`: a send to an absent endpoint is refused | you cannot speak to an empty chair |

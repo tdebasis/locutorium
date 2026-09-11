@@ -84,17 +84,6 @@ jobs:
         with:
           go-version: '1.27'
           cache: true
-      - name: the nats CLI (hosted image only)
-        # The bootstrap proof shells out to `nats server passwd` for its bcrypt
-        # hashes. A hosted image starts empty, so it installs the CLI at a pinned
-        # version; a self-hosted machine is somebody's computer and a job never
-        # installs there — the guard below is the same rule the conformance job
-        # keeps. GOPATH/bin is added to PATH for the steps that follow.
-        if: steps.probe.outputs.present == 'true' && runner.environment == 'github-hosted'
-        run: |
-          go install github.com/nats-io/natscli/nats@v0.4.0
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-          "$(go env GOPATH)/bin/nats" --version
       - name: build
         if: steps.probe.outputs.present == 'true'
         run: go build ./...
@@ -148,18 +137,6 @@ jobs:
           grep -q 'teardown: 15 passed, 0 failed' /tmp/teardown.txt
           bash conformance/leftovers_test.sh | tee /tmp/leftovers.txt
           grep -q 'leftovers: 14 passed, 0 failed' /tmp/leftovers.txt
-
-      - name: the shipped bootstrap reads its own queue
-        # The proof that providers/nats/bootstrap.sh generates a configuration
-        # under which a namespaced seat can read a fresh queue. It skips by name
-        # where the nats CLI is absent, so this step exists to show it RAN here:
-        # a skip is a failure of this step, not a pass.
-        if: steps.probe.outputs.present == 'true'
-        run: |
-          set -o pipefail
-          go test -count=1 -v -run 'TestABootstrappedSeatReadsItsOwnFreshQueue' ./internal/provider/nats/ | tee /tmp/bootstrap-proof.txt
-          grep -q -- '--- PASS: TestABootstrappedSeatReadsItsOwnFreshQueue' /tmp/bootstrap-proof.txt
-          if grep -q -- '--- SKIP' /tmp/bootstrap-proof.txt; then echo "::error::the bootstrap proof was skipped, not run"; exit 1; fi
 
       # Reported, deliberately not gated. A coverage threshold gets satisfied by
       # writing tests that move a number; the gate here is the conformance suite,
@@ -224,6 +201,11 @@ jobs:
           check internal/loc           88
           check internal/mcpserve      85
           check internal/provider      95
+          # HELD AT 94 THROUGH THE REMOVALS PR (#74). V0 has no authentication
+          # (R12), so the credential and access-list cases in this package went
+          # with the feature they tested — see docs/DECISIONS.md entry 12. The
+          # code that READS a refusal is still shipped, and refusal_test.go now
+          # covers it directly instead. 94.9% measured.
           check internal/provider/nats 94
           exit $fail
 
@@ -340,6 +322,9 @@ jobs:
             printf '%s\n' "$offenders"
             exit 1
           fi
+      # The broker is embedded in the binary and `loc start` runs it, so no
+      # server package is installed here. The nats CLI stays: the suite still
+      # asserts stream state through it.
       - name: the medium (hosted image only)
         if: runner.environment == 'github-hosted'
         # A hosted image starts empty, so it installs its own tooling. A
@@ -351,7 +336,6 @@ jobs:
           HOMEBREW_NO_INSTALL_CLEANUP: '1'
           HOMEBREW_NO_INSTALL_UPGRADE: '1'
         run: |
-          brew install nats-server
           brew install nats-io/nats-tools/nats
       - name: the medium is present
         # On every runner: the suite needs both binaries on PATH. Missing on a
@@ -359,13 +343,12 @@ jobs:
         # never repaired by the job.
         run: |
           set -euo pipefail
-          for tool in nats-server nats python3; do
+          for tool in nats python3; do
             if ! command -v "$tool" >/dev/null 2>&1; then
               echo "::error::$tool is not on PATH on this runner (${{ runner.environment }}); install it by hand, the job will not"
               exit 1
             fi
           done
-          nats-server --version
           nats --version
       - name: leftovers from an earlier job
         # `cancel-in-progress` kills the step's shell, not what the suite

@@ -232,7 +232,8 @@ func (p *Provider) refusedOwnQueue(endpoint, stream string) error {
 	}
 	return fmt.Errorf("cannot read queue.%s: the medium refused %s (permissions) — "+
 		"the deployment grants this seat no cursor on its own queue; "+
-		"regenerate the access control (providers/nats/bootstrap.sh)", endpoint, subject)
+		"V0 sets no access control, so a broker that refuses here is not one "+
+		"loc configured", endpoint, subject)
 }
 
 // NextQueued fetches at most one of an endpoint's own messages, unacknowledged.

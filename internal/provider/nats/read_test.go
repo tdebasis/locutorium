@@ -35,20 +35,11 @@ const fetchWindow = 1 * time.Second
 func nsHarness(t *testing.T, endpoints ...string) *harness {
 	t.Helper()
 	home := t.TempDir()
-	users := append([]string{"admin"}, endpoints...)
-	uu := make([]*natsserver.User, 0, len(users))
-	for _, u := range users {
-		uu = append(uu, &natsserver.User{Username: u, Password: testPassword})
-	}
-	srv := loctest.Boot(t, uu, false)
+	srv := loctest.Boot(t)
 
 	h := &harness{srv: srv, home: home, url: srv.URL, endpoints: endpoints}
 	write(t, filepath.Join(home, "config"), "nats_url = "+h.url+"\n")
-	write(t, filepath.Join(home, "endpoints"), strings.Join(endpoints, "\n")+"\n")
 	seedLedger(t, home, endpoints...)
-	for _, u := range users {
-		write(t, filepath.Join(home, "creds", u), testPassword)
-	}
 	t.Setenv("LOC_HOME", home)
 
 	nc, js := h.admin(t)
@@ -326,18 +317,17 @@ func TestNextTopicWithoutATopicsStreamIsDry(t *testing.T) {
 // unreadable.
 func TestNextTopicIsDryWhenTheApiRefuses(t *testing.T) {
 	home := t.TempDir()
-	srv := loctest.Boot(t, []*natsserver.User{
+	// OPT-IN: this case needs the medium to REFUSE, so it boots the
+	// authenticated shape the product does not have. See loctest.WithRefusals.
+	srv := loctest.Boot(t, loctest.WithRefusals([]*natsserver.User{
 		{Username: "admin", Password: testPassword},
 		{Username: "ada", Password: testPassword, Permissions: &natsserver.Permissions{
 			Publish:   &natsserver.SubjectPermission{Allow: []string{"queue.>", "topic.>", "$JS.API.INFO"}},
 			Subscribe: &natsserver.SubjectPermission{Allow: []string{"queue.ada", "_INBOX.>"}},
 		}},
-	}, false)
+	}, "ada"))
 	write(t, filepath.Join(home, "config"), "nats_url = "+srv.URL+"\n")
-	write(t, filepath.Join(home, "endpoints"), "ada\n")
 	seedLedger(t, home, "ada")
-	write(t, filepath.Join(home, "creds", "ada"), testPassword)
-	write(t, filepath.Join(home, "creds", "admin"), testPassword)
 	t.Setenv("LOC_HOME", home)
 
 	t.Setenv("LOC_IDENTITY", "ada")

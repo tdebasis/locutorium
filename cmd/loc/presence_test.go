@@ -52,7 +52,6 @@ import (
 	"testing"
 	"time"
 
-	natsserver "github.com/nats-io/nats-server/v2/server"
 	natsgo "github.com/nats-io/nats.go"
 
 	"github.com/tdebasis/locutorium/internal/loctest"
@@ -91,70 +90,13 @@ type presence struct {
 	adminJS    natsgo.JetStreamContext
 }
 
-// presenceUsers is the access-control block, adapted from
-// providers/nats/bootstrap.sh with the model's differences: endpoints are
-// namespaced (queue subjects have two tokens after `queue`, ACLs use `queue.>`),
-// backing-object names substitute dots for underscores, a `host` supervisor
-// exists alongside the read-only `watch`, and each endpoint may create and
-// delete its own queue stream because subscribe creates the queue and
-// unsubscribe destroys it.
-func presenceUsers() []*natsserver.User {
-	users := []*natsserver.User{
-		// admin: full rights, and the identity every assertion observes through.
-		{Username: "admin", Password: presencePassword},
-		// host: the supervisor. It launches agents (so it holds their pids),
-		// subscribes and unsubscribes them, sweeps, answers the registry and
-		// sends on their behalf. Broad rights, because it is trusted
-		// (PRESENCE.md §Trust, in the inner parlor).
-		{Username: "host", Password: presencePassword, Permissions: &natsserver.Permissions{
-			Publish:   &natsserver.SubjectPermission{Allow: []string{"queue.>", "topic.>", "presence.>", "registry.>", "$JS.>"}},
-			Subscribe: &natsserver.SubjectPermission{Allow: []string{"queue.>", "topic.>", "presence.>", "registry.>", "_INBOX.>"}},
-		}},
-		// watch: read-only. It may follow every queue and event stream and may
-		// publish nothing at all (PRESENCE.md §Command-line operations → watch,
-		// §Trust — the watch role publishes nothing).
-		{Username: "watch", Password: presencePassword, Permissions: &natsserver.Permissions{
-			Subscribe: &natsserver.SubjectPermission{Allow: []string{"queue.>", "topic.>", "presence.>", "registry.>", "_INBOX.>"}},
-			Publish:   &natsserver.SubjectPermission{Deny: []string{">"}},
-		}},
-	}
-	for _, e := range []string{e1, e2, e3, eOld} {
-		s := strings.ReplaceAll(e, ".", "_") // workshop.scribe -> workshop_scribe
-		inst := strings.SplitN(e, ".", 2)[0] // workshop.scribe -> workshop
-		// THE EVENTS PLANE, AND ONE SEAT THAT NEVER GOT IT. A seat emits its
-		// own events, so bootstrap.sh grants it its instance's events subject.
-		// eOld is left with the pre-split grant alone, which is what makes the
-		// refused-publish case a real refusal rather than a mock.
-		events := "presence." + inst
-		if e == eOld {
-			events = "topic." + inst
-		}
-		users = append(users, &natsserver.User{Username: e, Password: presencePassword, Permissions: &natsserver.Permissions{
-			Publish: &natsserver.SubjectPermission{Allow: []string{
-				"queue.>", "topic.>", "registry.>", events,
-				"$JS.API.INFO",
-				"$JS.API.STREAM.CREATE.QUEUE_" + s, "$JS.API.STREAM.DELETE.QUEUE_" + s,
-				"$JS.API.STREAM.INFO.QUEUE_" + s, "$JS.API.STREAM.NAMES", "$JS.API.STREAM.LIST",
-				"$JS.API.CONSUMER.DURABLE.CREATE.QUEUE_" + s + "." + s,
-				"$JS.API.CONSUMER.CREATE.QUEUE_" + s, "$JS.API.CONSUMER.CREATE.QUEUE_" + s + ".>",
-				"$JS.API.CONSUMER.INFO.QUEUE_" + s + "." + s,
-				"$JS.API.CONSUMER.MSG.NEXT.QUEUE_" + s + "." + s,
-				"$JS.ACK.QUEUE_" + s + ".>",
-			}},
-			Subscribe: &natsserver.SubjectPermission{Allow: []string{"queue." + e, "topic." + inst, events, "registry." + inst, "_INBOX.>"}},
-		}})
-	}
-	return users
-}
-
 // newPresence boots a presence deployment for one test and returns it wired up.
 // No host process is run: the registry is host-held (PRESENCE.md §Who is here
 // right now), and its absence is one of the things under test.
 func newPresence(t *testing.T) *presence {
 	t.Helper()
 	home := t.TempDir()
-	users := presenceUsers()
-	srv := loctest.Boot(t, users, true /* monitor: registry/status read connection state from it */)
+	srv := loctest.Boot(t, loctest.WithMonitor() /* registry/status read connection state from it */)
 
 	loctest.Write(t, filepath.Join(home, "config"),
 		"provider = nats\nnats_url = "+srv.URL+"\nmonitor_url = "+srv.MonitorURL+"\ntopic_window = 7d\n")
@@ -162,10 +104,6 @@ func newPresence(t *testing.T) *presence {
 	// presence model; it is written only so the shipping `send` reaches the
 	// medium at all. A presence-model send derives attendance from live
 	// subscriptions, not from this file.
-	loctest.Write(t, filepath.Join(home, "endpoints"), strings.Join([]string{e1, e2, e3}, "\n")+"\n")
-	for _, u := range users {
-		loctest.Write(t, filepath.Join(home, "creds", u.Username), presencePassword)
-	}
 	t.Setenv("LOC_HOME", home)
 	// A SPAWNED SERVER MUST BE TOLD HOW THE SEAT IS REACHED, OR IT REFUSES TO
 	// START. Every mcp test here launches `loc mcp` — as a subprocess that
@@ -1006,54 +944,6 @@ func TestPresence_RegistryFailure_SpeaksOnStderrOnly(t *testing.T) {
 // event stream … Read-only") and the scratch ACL design — NOT §Trust, which
 // concerns accidental collision between instances, not watch's publish rights.
 // ════════════════════════════════════════════════════════════════════════════
-
-func TestBootstrap_WatchCredentialIsDeniedPublish(t *testing.T) {
-	p := newPresence(t)
-	sub := p.witness(t, "presence.workshop")
-
-	violations := make(chan error, 4)
-	nc, err := natsgo.Connect(p.url,
-		natsgo.UserInfo("watch", presencePassword),
-		natsgo.ErrorHandler(func(_ *natsgo.Conn, _ *natsgo.Subscription, e error) {
-			select {
-			case violations <- e:
-			default:
-			}
-		}),
-	)
-	if err != nil {
-		t.Fatalf("connect as watch: %v", err)
-	}
-	defer nc.Close()
-
-	_ = nc.Publish("presence.workshop", []byte("forbidden"))
-	_ = nc.Flush()
-	// A control publish from admin proves the witness path works.
-	_ = p.admin.Publish("presence.workshop", []byte(`{"id":"ev_control"}`))
-	_ = p.admin.Flush()
-
-	seen := collect(sub, 1*time.Second)
-	sawControl := false
-	for _, m := range seen {
-		if strings.Contains(m, "forbidden") {
-			t.Errorf("the watch credential's publish was delivered; the ACL is not enforced")
-		}
-		if strings.Contains(m, "ev_control") {
-			sawControl = true
-		}
-	}
-	if !sawControl {
-		t.Errorf("the witness did not see the admin control publish; the path is broken, not the ACL")
-	}
-	select {
-	case e := <-violations:
-		if !strings.Contains(strings.ToLower(e.Error()), "permission") {
-			t.Errorf("watch got an async error that was not a permissions violation: %v", e)
-		}
-	case <-time.After(1 * time.Second):
-		t.Errorf("no permissions violation surfaced to the watch credential")
-	}
-}
 
 // keysOf lists a decoded event's top-level keys, for a legible failure message.
 func keysOf(m map[string]any) []string {

@@ -62,16 +62,6 @@ func TestWatchQueue_AnUnreachableMediumIsAnError(t *testing.T) {
 	}
 }
 
-func TestWatchQueue_NoCredentialsIsRefusedByPath(t *testing.T) {
-	h := newHarness(t, "alice")
-	p := h.as(t, "nobody")
-	_ = h
-	if stop, err := p.WatchQueue("nobody", func() {}, nil); err == nil {
-		stop()
-		t.Fatal("a watch was established with no credentials")
-	}
-}
-
 // Unread is the figure `status` prints, as a number — and the DIFFERENCE
 // between "none" and "cannot say" is preserved, because a caller deciding
 // whether to ring a bell cannot act on "?".

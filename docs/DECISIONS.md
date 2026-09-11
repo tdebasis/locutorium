@@ -308,3 +308,26 @@ receives a fixed token rather than a body, and still cannot read what it announc
   Claude session. A ring inside the window is dropped and logged; the message stays in the queue.
 - **There is still no fallback from one notifier to another**, by the ruling of 2026-09-07. A failed
   bell is logged and the message waits.
+
+---
+
+## 12. What per-seat read isolation guaranteed, and why V0 drops it
+
+**Decision:** V0 has no authentication on the loopback listener (R12, 2026-09-09). The two test
+files that pinned per-seat read isolation are removed with it: `cmd/loc/read_acl_test.go` and
+`internal/provider/nats/read_acl_test.go`.
+
+**What those files asserted.** A seat held the per-seat access-control block the deployment shipped,
+and nothing wider. Under that block a JetStream request the seat may not make is answered with
+silence rather than a refusal, so a queue holding mail reads as empty. The cases held four
+properties. A `read` whose cursor on the seat's own queue is refused exits non-zero, prints the
+reason on standard error, and prints nothing on standard out. A `--peek` of the same refused cursor
+answers the same way. The very same invocation, under a block that grants the cursor, reads the
+message and exits 0. A watch credential that may not publish is refused by the broker.
+
+**The property was not found wrong.** No case failed and no case was weakened. The block V0 removes
+is the thing the cases needed in order to ask their question, so the question can no longer be put.
+
+**Where authentication starts again.** Work from this entry and from the two files as they stand in
+git history at `main` `9322605`. They carry the shipped per-seat template, the granted template, and
+the harness that stands a deployment up under either one.
