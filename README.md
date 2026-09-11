@@ -8,7 +8,7 @@
 
 <img src="docs/art/architecture.png" alt="ada sends a word into the medium; a queue holds it for bob until bob reads it; a topic is the room; the knock wakes bob" width="920">
 
-![version](https://img.shields.io/badge/version-v0.1.1-1e1e1e) ![macOS](https://img.shields.io/badge/macOS-launchd-a5d8ff) ![bash](https://img.shields.io/badge/bash-3.2%2B-ffec99) ![conformance](https://img.shields.io/badge/conformance-passing-b2f2bb)
+![version](https://img.shields.io/badge/version-v0.1.1-1e1e1e) ![macOS](https://img.shields.io/badge/macOS-supported-a5d8ff) ![bash](https://img.shields.io/badge/bash-3.2%2B-ffec99) ![conformance](https://img.shields.io/badge/conformance-passing-b2f2bb)
 
 </div>
 
@@ -77,7 +77,7 @@ commands and fails if the page and the tool ever disagree.
 - **Held until read.** A queue keeps a word through downtime and gives it up exactly once (Contract: *Delivery*).
 - **Wake on arrival, never poll.** Attendance is a listener at the door; the knock is the deployment's hook, and a wake never hides a message (Contract: *Semantics*).
 - **Rooms that forget.** A topic expires at the edge of its window; teardown by retention, nothing to clean (Contract: *Semantics*).
-- **Nothing leaves the machine.** Loopback only, one credential per endpoint, and the server refuses you another's queue — `loc doctor` proves it (Contract: *Identity and security*).
+- **Nothing leaves the machine.** The broker binds loopback, and `loc start` refuses any other address. This version authenticates nobody, so loopback is the whole of the boundary (Contract: *Identity and security*).
 
 ## Install
 
@@ -86,13 +86,11 @@ git clone git@github.com:tdebasis/locutorium.git && cd locutorium && ./install.s
 ```
 
 > [!IMPORTANT]
-> The installer writes three things: the built binary, copied to `lib/locutorium/loc-<version>-<sha>`;
-> a symlink `loc` in your Homebrew `bin` (or `~/.local/bin`) pointing at that copy; and a LaunchAgent
-> `com.locutorium.nats-server` that runs the medium under launchd. The copy is deliberate — a link into
-> the build tree would make the installed tool whatever was last compiled.
-> It never touches `~/.locutorium` and never restarts a running server unless you pass
-> `--restart-service`. `--dry-run` shows each artifact before making it; `--uninstall` removes only
-> what it made.
+> The installer writes two things: the built binary, copied to `lib/locutorium/loc-<version>-<sha>`;
+> and a symlink `loc` in your Homebrew `bin` (or `~/.local/bin`) pointing at that copy. The copy is
+> deliberate. A link into the build tree would make the installed tool whatever was last compiled.
+> The installer supervises nothing, and it never touches `~/.locutorium`. `--dry-run` shows each
+> artifact before making it. `--uninstall` removes only what it made.
 
 `loc` is one program: a stamped binary from `make build`, documented in `docs/CLI.md`. The conformance
 suite is its gate — `docs/CONTRACT.md` defines a provider as one the suite passes against. A seat attends
@@ -111,7 +109,8 @@ loc start                                   # write ~/.locutorium/config, then r
 ```
 
 The broker is embedded in the binary. `loc start` writes the config file on its first run and
-prints every default it wrote. `loc stop` ends it.
+prints every default it wrote. It also runs the heartbeat, which sweeps every five minutes.
+`loc stop` ends both.
 
 </details>
 
@@ -123,7 +122,7 @@ prints every default it wrote. `loc stop` ends it.
 | `loc send <endpoint> <body>` | a word for one | one envelope into that endpoint's queue; held until read |
 | `loc publish <topic> <body>` | a word in the room | everyone attending reads it from their own cursor; `@name` rings a doorbell |
 | `loc read [--peek]` | take what is yours | spools, then your queue, then the rooms; without `--peek`, taken exactly once |
-| `loc sub [--watch-pid P]` | attend | a listener taps your queue, spools arrivals, and knocks (`hooks/wake`) |
+| `loc sub [--watch-pid P]` | attend | the seat's own server taps your queue and rings your bell |
 | `loc unsub` | leave the door | ends attendance; the queue keeps holding |
 | `loc status` | unread, by name | unread counts per endpoint |
 | `loc topics` | the rooms alive now | active topics in the window |
@@ -138,11 +137,11 @@ prints every default it wrote. `loc stop` ends it.
 
 **Send and read.** `loc send <endpoint> <body>` puts one message in one queue; it stays there until `loc read` takes it, and it is taken exactly once. Bodies are limited to **4000 characters** — this carries conversation, not documents; put a document somewhere durable and send its path. `loc read --peek` looks without taking.
 
-**Attend — wake on arrival.** `loc sub` registers **attendance**: a listener taps your queue and, when something arrives, drains it to a **spool** (a file at your door, `run/<you>.spool`) and knocks — it runs your deployment's `hooks/wake` with the count. A wake never makes a message unreadable: `loc read` presents spools as well as the queue. `loc unsub` ends attendance; the queue keeps holding regardless.
+**Attend — wake on arrival.** Attendance registers a seat and its bell. The seat's own `loc mcp` server taps your queue. When something arrives, it rings the notifier that `LOC_LISTENER_TYPE` names: `tmux` types the line into your pane, `claude` sends a one-shot courier, and `none` rings nothing. A bell never makes a message unreadable. The message waits in the queue until you read it.
 
 <img src="docs/art/attendance.png" alt="send → queue → listener → spool → knock; read presents spools, then the queue, then the rooms" width="920">
 
-**Talk in a room.** `loc publish <topic> <body>` speaks in a topic. Every attending endpoint sees the conversation from its own cursor; `@name` in a body rings that endpoint's **doorbell** (`hooks/nudge`). Topics expire at the edge of the window (`topic_window`, default 7 days) — teardown by retention, nothing to clean.
+**Talk in a room.** `loc publish <topic> <body>` speaks in a topic. Every attending endpoint sees the conversation from its own cursor; `@name` in a body rings that endpoint's **doorbell**. Topics expire at the edge of the window (`topic_window`, default 7 days). Retention tears them down, and nothing needs cleaning.
 
 **Check health.** `loc doctor` — server reachable with your credentials · your queue exists · the topics stream exists · the ACL refuses you another endpoint's queue. `loc doctor --init` (as `admin`) creates what is missing.
 
@@ -157,7 +156,7 @@ are changing this repository, read [`AGENTS.md`](AGENTS.md).
 |---|---|---|
 | [`docs/CLI.md`](docs/CLI.md) | using `loc` | every command, its flags, and the two that behave unexpectedly |
 | [`docs/INSTALL.md`](docs/INSTALL.md) | an operator deploying | what goes where, and how to take it out again |
-| [`docs/OPERATORS.md`](docs/OPERATORS.md) | an operator running the house | the service, the hooks, what to check when it is quiet |
+| [`docs/OPERATORS.md`](docs/OPERATORS.md) | an operator running the house | the service, the bell, what to check when it is quiet |
 | [`docs/AGENTS.md`](docs/AGENTS.md) | an agent joining the house | identity, what a send and a read do, attendance, what "missing" means |
 | [`AGENTS.md`](AGENTS.md) | changing this repository | the house's style and the rules a change must keep |
 | [`docs/CONTRACT.md`](docs/CONTRACT.md) | deciding whether this is a Locutorium | the guarantees a provider must keep |

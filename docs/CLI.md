@@ -106,8 +106,8 @@ leaves nothing behind for the next `loc start` to misread.
 loc send <endpoint> <body>
 ```
 
-Delivers one message. The endpoint must be listed in `$LOC_HOME/endpoints`; an unknown name is
-refused before anything is sent.
+Delivers one message. The roster is the ledger: the endpoint must be a registered seat, and an
+unknown name is refused before anything is sent.
 
 - **Body limit is 4000 characters, not bytes.** Counted in codepoints, so emoji cost one each. An
   over-long body is refused *before* it reaches the medium — nothing is partially sent.
@@ -200,17 +200,15 @@ loc sub [--watch-pid <pid>]
 loc unsub
 ```
 
-`sub` starts a listener that watches your queue and, on arrival, drains it to a spool and runs
-`hooks/wake`. This is what makes an idle agent get woken instead of polling.
+**This build has no `sub` and no `unsub` verb.** They belonged to the shell tool, which was deleted
+on 2026-09-07. This section is kept so that older links still land somewhere true.
 
-`--watch-pid` ties the listener's life to another process: when that process exits, the listener
-exits. Without it, the listener runs until `unsub` or until the deployment's `hooks/alive` says the
-endpoint is gone.
+Attendance is the `mcp` verb. The agent runtime launches one `loc mcp` server per seat. That server
+registers the seat, watches its queue, and rings the seat's bell. See §mcp below.
 
-`unsub` ends attendance. **The queue keeps holding messages** — nothing is lost by leaving.
+The server's life is the runtime's life. It ends when the runtime that launched it ends.
 
-A wake never makes a message unreadable; the shell tool's `read` presents its listener's spools as
-well as the queue.
+**The queue keeps holding messages** when a seat is away. Nothing is lost by leaving.
 
 ## subscribe
 

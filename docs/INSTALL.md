@@ -5,8 +5,8 @@
 inside it, so it answers from anywhere and a copy of it is simply `loc`. The version is stamped in
 at link time from `VERSION`, which is why a stale binary is worth rebuilding rather than trusting.
 
-`./install.sh` builds it, copies the stamped binary out of the build tree, links it into your PATH
-as `loc`, and puts the medium (a `nats-server`) under launchd.
+`./install.sh` builds it, copies the stamped binary out of the build tree, and links it into your
+PATH as `loc`. The broker runs inside the binary, so the installer supervises nothing.
 
 > A bash implementation lived here until 2026-09-07 and was deleted. It was interim, and keeping two
 > implementations meant maintaining the layer between them — which is where its defects turned out
@@ -17,11 +17,11 @@ as `loc`, and puts the medium (a `nats-server`) under launchd.
 | need | why | install |
 |---|---|---|
 | `go`, `make` | `loc` is built from source; the installer refuses by name rather than installing a toolchain for you | `brew install go` |
-| bash ≥ 3.2 | the installer, the suite and the provider scripts (macOS ships 3.2; that is the floor) | — |
+| bash ≥ 3.2 | the installer and the suite (macOS ships 3.2; that is the floor) | — |
 | `nats` | the conformance suite asserts stream state through the NATS CLI; `loc` itself speaks the protocol and never runs it | `brew install nats-io/nats-tools/nats` |
 
 The broker is embedded in the binary, so no server package is needed. `loc start` runs it and
-`loc stop` ends it.
+`loc stop` ends it. `loc start` also runs the heartbeat, which sweeps every five minutes.
 
 Development only (the conformance suite): `jq`, the `nats` CLI on PATH, and BSD `sed` (`sed -i ''`);
 the suite is macOS-only for now. `make build` first, then `bash conformance/run.sh` — `LOC_BIN_DIR`
@@ -68,13 +68,54 @@ Re-run `./install.sh`; the link is repointed and reported as CHANGED.
 ## Telling an agent runtime about it
 
 The Go build serves one seat to an agent runtime over stdio. The runtime launches it, so nothing has
-to be started or supervised; it needs the binary on `PATH` and the endpoint it is speaking as:
+to be started or supervised. It needs the binary on `PATH`, the endpoint it speaks as, and how the
+bell reaches the seat:
 
 ```json
-{"mcpServers": {"loc": {"command": "loc", "args": ["mcp"], "env": {"LOC_IDENTITY": "<instance>.<agent>"}}}}
+{"mcpServers": {"loc": {"command": "loc", "args": ["mcp"], "env": {
+  "LOC_IDENTITY": "<instance>.<agent>",
+  "LOC_LISTENER_TYPE": "tmux",
+  "LOC_LISTENER_ADDRESS": "<pane target>"}}}}
 ```
 
+`LOC_LISTENER_TYPE` is `tmux`, `claude` or `none`. The server refuses to start without both
+listener variables.
+
 `docs/CLI.md` §mcp is what that server does and what a runtime configured in TOML wants instead.
+
+## Sample supervisor files
+
+A supervisor is optional. `loc start` detaches, and it survives the terminal that ran it. Use a
+supervisor when you want the broker back after a reboot.
+
+These samples are documentation. This repository ships no code behind them. Each one runs
+`loc start` and nothing else.
+
+A systemd user unit, `~/.config/systemd/user/locutorium.service`:
+
+```ini
+[Unit]
+Description=Locutorium broker
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/loc start
+
+[Install]
+WantedBy=default.target
+```
+
+Enable it with `systemctl --user enable --now locutorium.service`.
+
+On macOS, add one line to your login shell file, `~/.zprofile`:
+
+```sh
+loc start >/dev/null 2>&1
+```
+
+A repeated run is safe. `loc start` prints `already running, pid N` and exits 0 when the daemon is
+already up.
 
 ## Exit codes
 
@@ -88,12 +129,13 @@ installer did not create.
 ./install.sh --uninstall
 ```
 
-Removes the links and the agent. A link goes only if it points at what this clone would have made;
-anything else is somebody's and is left alone, loudly. Prints, and does not run, the command that
-would remove `~/.locutorium` — that directory holds your credentials and is yours to delete.
+Removes the links and the stamped copies. A link goes only if it points at what this clone would
+have made; anything else is somebody's and is left alone, loudly. Prints, and does not run, the
+command that would remove `~/.locutorium`. That directory holds your config and your store, and it
+is yours to delete.
 
 ## Linux
 
-The links work anywhere; there is no launchd, so run `nats-server -c ~/.locutorium/nats-server.conf`
-under your own supervisor and pass `--no-service`. A systemd unit is a planned follow-up. The
-conformance suite is macOS-only for now, so the Go build is exercised there, not here.
+The links work anywhere. `loc start` runs the broker inside `loc`, so no server package and no
+supervisor are needed. The conformance suite is macOS-only for now, so the Go build is exercised
+there, not here.

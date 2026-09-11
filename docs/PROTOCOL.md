@@ -8,7 +8,7 @@ versioned with the envelope.*
 ## 1. Identity — who a message is from
 
 - The `from` field is **stamped by the system** from the sender's resolved
-  identity (deployment hook or `LOC_IDENTITY`), never typed by the sender.
+  identity (`LOC_IDENTITY`), never typed by the sender.
   A reader may trust it to the deployment's stated enforcement tier.
 - An unattributable caller is **refused** at send time. There is no
   `unknown` sender, ever. If you see one, the deployment is broken.
@@ -47,8 +47,8 @@ versioned with the envelope.*
 - A nudge is an **advisory notification that something is waiting**. It is
   never the message, never required for delivery, and its failure loses
   nothing. The store is the truth.
-- Canonical forms (emitted by deployment hooks only — participants do not
-  hand-type nudges):
+- Canonical forms. The seat's own server emits them, and a participant never
+  hand-types one:
   - `🔔 [LOC] <n> new → loc read`
   - `🔔 [LOC] <n> new in #<topic> → loc read`
 - Queue sends always nudge the addressee. Topic publishes nudge **only**

@@ -15,14 +15,14 @@ and never a particular deployment.
 | **window** | `topic_window`: how long a topic's messages live before retention removes them | when the talking stops, the room forgets |
 | **envelope** | one JSON line: `id`, `ts`, `from`, `to`, `kind`, `body` | the note itself |
 | **spool** | files under `run/`: `<ep>.wake.spool.raw` (drained), `<ep>.spool` (rendered), `<ep>.read.spool` | the message left at your door |
-| **wake / the knock** | `hooks/wake <ep> <count>`, run by the listener after it spools | the knock on the door |
-| **doorbell / nudge** | `hooks/nudge <ep> <line>`; rung by `@name` in a topic and by sends | the bell; advisory, never load-bearing |
-| **courier** | a deployment helper the wake hook may spawn to carry spooled bodies onto an endpoint's surface; never speaks on the bus | the one who brings the note in |
+| **wake / the knock** | the seat's `loc mcp` server rings the notifier that `LOC_LISTENER_TYPE` names | the knock on the door |
+| **doorbell / nudge** | one bell line, rung by `@name` in a topic and by a send | the bell; advisory, never load-bearing |
+| **courier** | the `claude` notifier: it starts one Claude session to carry the bell onto a seat's surface | the one who brings the note in |
 | **breaker** | `wake_breaker_per_minute` / `_per_hour`: caps wakes; suppression loses nothing | not knocking sixty times |
 | **registry** | `loc registry`: who is attending, read from the medium's monitor (`monitor_url`) | the attendance book |
 | **watch** | `loc watch`, which follows the event stream and takes nothing | the silent observer |
 | **admin** | the credential that creates streams (`loc doctor --init`) | the keeper of the keys |
-| **identity** | `LOC_IDENTITY` or `hooks/identity`; a refusal, never a guess | knowing who is speaking |
+| **identity** | `LOC_IDENTITY`, and nothing else; a refusal, never a guess | knowing who is speaking |
 | **say-semantics** | `send_requires_attendance = yes`: a send to an absent endpoint is refused | you cannot speak to an empty chair |
 | **medium** | the transport a provider drives — v1 is `nats-server` with JetStream on loopback | the air in the room |
 | **provider** | an adapter compiled into the binary and named by the `provider` config key; a provider is a Locutorium provider iff the suite passes | the room's builder |

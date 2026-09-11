@@ -6,10 +6,9 @@ guarantees are `CONTRACT.md`.
 
 ## Identity
 
-Every verb runs *as* an endpoint. `loc` takes the name from `LOC_IDENTITY`, or asks the
-deployment's `hooks/identity`; if neither answers, the verb **refuses** (`loc_identity`). There is
-no anonymous send and no `unknown` sender — a refusal is the correct outcome, and you should treat
-it as one, not work around it.
+Every verb runs *as* an endpoint. `loc` takes the name from `LOC_IDENTITY` and from nothing else.
+Without it the verb **refuses** (`loc_identity`). There is no anonymous send and no `unknown`
+sender. A refusal is the correct outcome, and you should treat it as one, not work around it.
 
 ## The verbs, and what runs
 
@@ -18,7 +17,7 @@ it as one, not work around it.
 | `loc send <endpoint> <body>` | `loc_send` | puts one envelope in that endpoint's queue. Guaranteed: it waits there through downtime. |
 | `loc publish <topic> <body>` | `loc_publish` | speaks in a room. Everyone attending reads it from their own cursor; `@name` rings that endpoint's doorbell. |
 | `loc read [--peek]` | `loc_read` | presents your queue backlog **and** anything a listener spooled for you, then the rooms. Without `--peek`, what you read is **consumed** — taken exactly once. |
-| `loc sub [--watch-pid P]` † | `loc_sub` | registers attendance: a listener taps your queue, drains arrivals to a spool, and wakes you through the deployment's hook. |
+| `loc sub [--watch-pid P]` † | `loc_sub` | registers attendance, so your bell rings when mail lands. In this build the `mcp` verb holds the seat. |
 | `loc unsub` † | `loc_unsub` | ends attendance. The queue keeps holding messages. |
 | `loc mcp` ‡ | — | serves this seat to the agent runtime that launched it, over stdio: it registers you with that runtime's pid, rings your bell when mail lands, and hands the mail over through a `read` tool. |
 | `loc status` | `loc_status` | unread counts per endpoint. |
@@ -56,16 +55,15 @@ doing register-listen-wake instead of a background listener. `docs/CLI.md` §mcp
 ![attendance: send → queue → listener → spool → knock; read presents spools, then the queue, then the rooms](art/attendance.png)
 
 ```
-sender: loc send you …  ─▶  queue.you  ─▶  your listener (loc sub) taps it
-                                                  ─▶ drains the arrivals to run/you.wake.spool.raw
-                                                  ─▶ renders them to run/you.spool
-                                                  ─▶ runs hooks/wake you <count>   (the knock)
-you:    loc read  ─▶  presents run/you.spool, then the queue, then the rooms
+sender: loc send you …  ─▶  queue.you  ─▶  your seat's loc mcp server taps it
+                                                  ─▶ coalesces the arrivals across the wake window
+                                                  ─▶ rings the notifier LOC_LISTENER_TYPE names
+you:    loc read  ─▶  presents your queue, then the rooms
 ```
 
-A wake never makes a message unreadable: whatever the deployment's wake hook does or fails to do,
-`loc read` finds the spool. The listener is employment-tied — it exits when the session it watches
-(`--watch-pid`) dies — and a re-registration wakes you once with the count that accumulated.
+A bell never makes a message unreadable. The message waits in the queue until you read it, whatever
+the notifier does or fails to do. The server is employment-tied. It ends when the agent runtime that
+launched it ends.
 
 ## When a message seems missing
 

@@ -10,8 +10,8 @@ To **deploy** it, read
 ## Hard rules
 
 1. **bash 3.2.** Every script must run on the bash that ships with macOS. No associative arrays,
-   no `mapfile`, no `${var,,}`. This binds the installer, the suite and the provider scripts; the Go
-   tree is bound by `go.mod` instead.
+   no `mapfile`, no `${var,,}`. This binds the installer and the suite. The `go.mod` file binds the
+   Go tree instead.
 2. **The suite is the definition.** `conformance/run.sh` must be green after every change to `cmd/`
    or `internal/`; a provider is a Locutorium provider iff the suite passes against it
    (`CONTRACT.md`). `LOC_BIN_DIR` says which `loc` to drive, defaulting to `build/bin`. A seat's
@@ -39,7 +39,7 @@ runtime launches rather than a background process (`docs/CLI.md` §mcp) ·
 `Makefile` the one command that builds it, stamping `VERSION` in at link time · `build/` its
 output, gitignored, because a binary is an artifact and not source.
 
-**Around it.** `providers/nats/bootstrap.sh` first deployment · `providers/nats/make-contexts.sh` CLI
-contexts · `providers/nats/service.sh` + `launchd/` the LaunchAgent · `install.sh` (copies the stamped
-binary and links `loc` at it) · `conformance/run.sh` the suite · `conformance/check-clean.sh` ·
+**Around it.** `install.sh` (copies the stamped binary and links `loc` at it) ·
+`conformance/run.sh` the suite · `conformance/check-clean.sh` ·
 `conformance/check-version.sh` (asks the binary its version) · `VERSION` · `docs/` · `RELEASE.md`.
+The broker runs inside the binary. The repository holds no provider script and no service file.
