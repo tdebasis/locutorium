@@ -172,7 +172,7 @@ func TestNotify_ClaudeSpawnsTheCourierWithItsPromptAndItsTwoGuards(t *testing.T)
 	for _, want := range []string{
 		"-p\n",
 		"tmux pane id is '%42'",
-		"[LOC] 🔔 1 new → read — run /read-loc now.",
+		"🔔🔔🔔 LOCUTORIUM BUS — AUTOMATED, NOT A PERSON — 🔔 1 new → read — run /read-loc now. 🔔🔔🔔",
 		"--allowedTools\nListAgents,SendMessage\n",
 		"LOC_COURIER=1\n",
 		"LOC_IDENTITY=[]\n",

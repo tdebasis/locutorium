@@ -201,9 +201,18 @@ type courierNotifier struct {
 // It names a pane token and the bell and nothing else: a courier that was
 // given the message body once reasoned about it and acted on its own judgment,
 // so there is nothing here to reason about.
+//
+// The delivered line is a banner, not a tag, because SendMessage shows a human
+// only the FIRST LINE as a collapsed preview (measured 2026-09-11, from that
+// tool's own schema) — the marker at both ends is what a human recognizes at a
+// glance, before ever expanding it, as an automated bus message and not
+// something a person typed. No deployment-specific word here — this is
+// product code, and `make build`'s clean-check refuses one (measured: it
+// rejected an earlier draft that named this deployment's operator by title).
 const courierPrompt = "You are a one-shot wake courier. Call ListAgents. " +
 	"Find the live session whose tmux pane id is '%s'. " +
-	"Use SendMessage to send that session exactly this message: '[LOC] %s — run /read-loc now.'. " +
+	"Use SendMessage to send that session exactly this message: " +
+	"'\U0001F514\U0001F514\U0001F514 LOCUTORIUM BUS — AUTOMATED, NOT A PERSON — %s — run /read-loc now. \U0001F514\U0001F514\U0001F514'. " +
 	"Send to no other session. If no session matches, do nothing. Then stop."
 
 // Ring spawns the courier, at most once per seat per courierWindow.
