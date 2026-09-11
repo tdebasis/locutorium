@@ -6,7 +6,7 @@
 
 *In a silent house, the locutorium is the one room where speaking is allowed.*
 
-<img src="docs/art/architecture.png" alt="ada sends a word into the medium; a queue holds it for bob until bob reads it; a topic is the room; the knock wakes bob" width="920">
+<img src="docs/art/architecture.png" alt="an older drawing of the architecture: ada sends a word into the medium, a queue holds it for bob until bob reads it, a topic is the room, and a knock wakes bob. The picture is stale. It draws hook scripts, a background listener verb and a spool file, and this build has none of the three. A seat's own mcp server rings the bell, and a read takes the queue and then the rooms." width="920">
 
 ![version](https://img.shields.io/badge/version-v0.1.1-1e1e1e) ![macOS](https://img.shields.io/badge/macOS-supported-a5d8ff) ![bash](https://img.shields.io/badge/bash-3.2%2B-ffec99) ![conformance](https://img.shields.io/badge/conformance-passing-b2f2bb)
 
