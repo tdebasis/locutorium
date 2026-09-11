@@ -120,11 +120,11 @@ prints every default it wrote. It also runs the heartbeat, which sweeps every fi
 | verb | in the house | what it does |
 |---|---|---|
 | `loc send <endpoint> <body>` | a word for one | one envelope into that endpoint's queue; held until read |
-| `loc publish <topic> <body>` | a word in the room | everyone attending reads it from their own cursor; `@name` rings a doorbell |
+| `loc publish <topic> <body>` | a word in the room | everyone attending reads it from their own cursor; a `@name` mention is announced to nobody and is found on `read` |
 | `loc read [--peek]` | take what is yours | your queue, then the rooms; without `--peek`, taken exactly once |
 | `loc status` | unread, by name | unread counts per endpoint |
 | `loc topics` | the rooms alive now | active topics in the window |
-| `loc registry` | who is at the door | who is attending, read from the medium |
+| `loc registry` | who is at the door | asks an instance's host over the bus; under per-seat servers nobody answers and it fails |
 | `loc watch` | the gallery | every envelope as it passes, read-only |
 | `loc version` | the number | prints the version in `VERSION` |
 
@@ -140,7 +140,7 @@ prints every default it wrote. It also runs the heartbeat, which sweeps every fi
 
 <img src="docs/art/attendance.png" alt="an older drawing of attendance: a send reaches the queue, a background listener drains it to a file, and a knock follows. The picture is stale. This build has neither the listener nor the file, and the seat's own mcp server rings the bell instead." width="920">
 
-**Talk in a room.** `loc publish <topic> <body>` speaks in a topic. Every attending endpoint sees the conversation from its own cursor; `@name` in a body rings that endpoint's **doorbell**. Topics expire at the edge of the window (`topic_window`, default 7 days). Retention tears them down, and nothing needs cleaning.
+**Talk in a room.** `loc publish <topic> <body>` speaks in a topic. Every attending endpoint sees the conversation from its own cursor. A `@name` mention is delivered to the topic and announced to nobody. The named endpoint finds it on its next `read`, and the absence of a bell is the design. Topics expire at the edge of the window (`topic_window`, default 7 days). Retention tears them down, and nothing needs cleaning.
 
 **Check health.** `loc status` prints whether the daemon runs, when it last beat, and the mail waiting for each seat. The `doctor` verb is gone, and nothing replaced its four checks.
 
@@ -162,7 +162,7 @@ are changing this repository, read [`AGENTS.md`](AGENTS.md).
 | [`docs/PROTOCOL.md`](docs/PROTOCOL.md) | building a provider or a client | how a message is shaped, and what a version number means |
 | [`docs/PRESENCE.md`](docs/PRESENCE.md) | asking who is here and what they are doing | how the house knows which agents exist, whether each is alive, and what it is working on |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | asking why it is shaped this way | one entry per call that was not obvious: the context, the decision, what it costs |
-| [`docs/GLOSSARY.md`](docs/GLOSSARY.md) | new to the words | endpoint, queue, topic, attendance, spool, knock |
+| [`docs/GLOSSARY.md`](docs/GLOSSARY.md) | new to the words | endpoint, queue, topic, attendance, knock, courier |
 | [`RELEASE.md`](RELEASE.md) | cutting a version | the steps, and what the number promises |
 
 ## Status

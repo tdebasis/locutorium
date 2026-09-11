@@ -176,9 +176,9 @@ There is a third loud answer. If the deployment's access control **refuses the r
 - shows **no topics**, and says so in place of the heading rather than implying an empty room
 - consumes nothing
 
-> **Trap, in the shell tool only:** there, any argument that isn't exactly `--peek` is silently
-> ignored — so `loc read --pekk` performs a normal, **consuming** read, with no error. The Go build
-> **refuses** it: anything but exactly `--peek` prints the verb list and exits 1.
+> **This build refuses a misspelled flag.** Anything but exactly `--peek` prints the verb list and
+> exits 1. The deleted shell tool ignored the argument instead, so `loc read --pekk` performed a
+> normal, **consuming** read with no error. That trap went with it.
 
 `--json` consumes exactly as a plain read does — the same backlog, the same topics, the same
 per-message acknowledgement — but prints each envelope's raw wire bytes, one per line, with **no**
@@ -186,9 +186,9 @@ per-message acknowledgement — but prints each envelope's raw wire bytes, one p
 to parse. `--peek --json` together is refused, same as any other combination that isn't exactly
 one recognised flag.
 
-The Go build presents the queue and the topics, and **no spools**. `run/<endpoint>.spool` and
-`.wake.spool.raw` belong to the shell tool's listener and to whatever presents what it drained;
-this build runs no listener and does not read them.
+This build presents the queue and the topics, and **no spools**. The files `run/<endpoint>.spool`
+and `.wake.spool.raw` belonged to the deleted shell tool. No separate listener process exists here.
+The seat's own `mcp` server is the listener, and it writes no spool.
 
 ## sub / unsub
 
@@ -516,11 +516,11 @@ is part of departing and a kill runs nothing. A reader asking whether this seat'
 compares both lines against the presence model's liveness and finds the file stale. No send depends
 on the answer: a send only queues.
 
-**It is also the listener.** It holds a core subscription on this endpoint's own queue subject, which
+**It is also the listener, and the only one.** It holds a core subscription on this endpoint's own queue subject, which
 sees every arrival and consumes nothing, and asks how much is waiting at start and after every
 reconnect. Arrivals are coalesced across `wake_window_seconds` and capped by
-`wake_breaker_per_minute` and `wake_breaker_per_hour` — the same three keys the shell tool's listener
-reads. Each wake hands the seat's notifier ONE LINE and no body:
+`wake_breaker_per_minute` and `wake_breaker_per_hour`. Each wake hands the seat's notifier ONE LINE
+and no body:
 
 ```
 🔔 3 new → read
@@ -601,16 +601,16 @@ the bell; something else must then run `subscribe` and `unsubscribe` around the 
 | `topic_window` | `7d` | how long topic messages live; `loc start` gives the `TOPICS` stream this age limit |
 | `heartbeat_log_retention_days` | `7` | heartbeat log files older than this are deleted when loc starts |
 | `wake_window_seconds` | `5` | wakes are coalesced across this window (`loc mcp`) |
-| `wake_breaker_per_minute` | `6` | cap on wakes per minute (both listeners) |
-| `wake_breaker_per_hour` | `60` | cap on wakes per hour (both listeners) |
+| `wake_breaker_per_minute` | `6` | cap on wakes per minute (`loc mcp`) |
+| `wake_breaker_per_hour` | `60` | cap on wakes per hour (`loc mcp`) |
 
 **The defaults live in one table**, `internal/config/keys.go`. `loc start` writes the file from it on
 first run, with each key's comment above it, so the file and the code cannot drift apart. The three
 wake keys are the deployment's and are not in that table.
 
-Every key above except `monitor_url` is read by the Go build; the three wake keys
-are read by BOTH listeners, so a deployment tunes one set of numbers whichever one it runs.
-`registry`'s wait for a host is fixed in the code, not a key.
+Every key above except `monitor_url` is read by this build. The three wake keys are read by the
+seat's own `mcp` server, which is the only listener there is. `registry`'s wait for a host is fixed
+in the code, not a key.
 
 When a breaker trips it says so in `run/<endpoint>.delivery.log` and **suppresses only the wake**.
 No message is lost; the next read still finds everything.

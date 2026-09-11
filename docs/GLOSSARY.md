@@ -15,10 +15,10 @@ and never a particular deployment.
 | **window** | `topic_window`: how long a topic's messages live before retention removes them | when the talking stops, the room forgets |
 | **envelope** | one JSON line: `id`, `ts`, `from`, `to`, `kind`, `body` | the note itself |
 | **wake / the knock** | the seat's `loc mcp` server rings the notifier that `LOC_LISTENER_TYPE` names | the knock on the door |
-| **doorbell / nudge** | one bell line, rung by `@name` in a topic and by a send | the bell; advisory, never load-bearing |
+| **doorbell / nudge** | one bell line; the addressee's own server rings it when mail lands in the queue. A topic publish rings nobody. | the bell; advisory, never load-bearing |
 | **courier** | the `claude` notifier: it starts one Claude session to carry the bell onto a seat's surface | the one who brings the note in |
 | **breaker** | `wake_breaker_per_minute` / `_per_hour`: caps wakes; suppression loses nothing | not knocking sixty times |
-| **registry** | `loc registry`: who is attending, read from the medium's monitor (`monitor_url`) | the attendance book |
+| **registry** | `loc registry`: it asks an instance's host over the bus, and under per-seat servers nobody answers | the attendance book |
 | **watch** | `loc watch`, which follows the event stream and takes nothing | the silent observer |
 | **identity** | `LOC_IDENTITY`, and nothing else; a refusal, never a guess | knowing who is speaking |
 | **say-semantics** | `send_requires_attendance = yes`: a send to an absent endpoint is refused | you cannot speak to an empty chair |

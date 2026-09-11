@@ -51,8 +51,11 @@ versioned with the envelope.*
   hand-types one:
   - `🔔 [LOC] <n> new → loc read`
   - `🔔 [LOC] <n> new in #<topic> → loc read`
-- Queue sends always nudge the addressee. Topic publishes nudge **only**
-  endpoints `@mentioned` in the body. Presence in a topic obliges nothing.
+- The addressee's own server rings when mail lands in its queue. The ring is
+  subject to the seat's registered listener type, to the wake window and to
+  the breaker, so a send does not always produce one.
+- A topic publish rings nobody. A participant finds a mention of itself when
+  it reads the topic. Presence in a topic obliges nothing.
 
 ## 5. Reading — what receipt means
 
@@ -72,8 +75,9 @@ versioned with the envelope.*
   deliberately written elsewhere by whoever it matters to. Relying on a
   topic as an archive is a protocol violation, not a storage request.
 - Name topics after the work (`#deploy-friday`), not after people.
-- `@mention` to summon; don't @mention to merely mention. One piece of
-  work, one topic — don't shard a conversation across topics.
+- `@mention` the endpoint a line is for; do not mention one for decoration.
+  The named endpoint finds it when it reads the topic. One piece of work,
+  one topic: do not shard a conversation across topics.
 
 ## 7. What the peer bus never carries
 

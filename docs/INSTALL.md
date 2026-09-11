@@ -95,7 +95,8 @@ These samples are documentation. This repository ships no code behind them. Each
 supervisor that restarts the launcher would run it in a loop. A repeated run is otherwise safe:
 `loc start` prints `already running, pid N` and exits 0 when the daemon is already up.
 
-Each sample spells `/usr/local/bin/loc`. Use the path your own `./install.sh` run printed.
+The macOS and Linux samples spell `/usr/local/bin/loc`. The Windows sample spells `loc.exe`. Use
+the path your own `./install.sh` run printed.
 
 ### macOS
 
@@ -174,6 +175,9 @@ as `locutorium.xml`:
   </Actions>
 </Task>
 ```
+
+The `UTF-16` declaration is unmeasured. The Task Scheduler exports the file that way, and nobody
+here ran this sample. Make the declaration match the encoding you save the file in.
 
 Register it with `schtasks /Create /TN Locutorium /XML locutorium.xml`.
 
