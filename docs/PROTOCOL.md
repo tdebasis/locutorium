@@ -47,10 +47,9 @@ versioned with the envelope.*
 - A nudge is an **advisory notification that something is waiting**. It is
   never the message, never required for delivery, and its failure loses
   nothing. The store is the truth.
-- Canonical forms. The seat's own server emits them, and a participant never
-  hand-types one:
-  - `🔔 [LOC] <n> new → loc read`
-  - `🔔 [LOC] <n> new in #<topic> → loc read`
+- The canonical form is one line, and there is only one. The seat's own server
+  writes it, and a participant never hand-types one:
+  - `🔔 <n> new → read`
 - The addressee's own server rings when mail lands in its queue. The ring is
   subject to the seat's registered listener type, to the wake window and to
   the breaker, so a send does not always produce one.
