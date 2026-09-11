@@ -8,6 +8,10 @@ import "testing"
 // adds an authorization block would otherwise change the product's posture with
 // nothing to stop it, and every test would still pass, because the integration
 // harness reads this builder rather than spelling its own options.
+//
+// THIS IS THE ARM V1 MUST CHANGE ON PURPOSE. V1 adds authentication, and the
+// commit that adds it must change these assertions in the same edit. The
+// posture then moves by a decision, and never by drift.
 func TestOptionsCarryNoAuthorizationBlock(t *testing.T) {
 	o := Options("127.0.0.1", 4222, "/tmp/store")
 	if o.Users != nil {

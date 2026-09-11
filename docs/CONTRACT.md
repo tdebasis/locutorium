@@ -36,9 +36,11 @@ queue is simply a channel with exactly one durable subscriber.
 - **Event-driven, never scheduled polling.** No component may rely on a timer
   to discover messages. Latency guarantees are tiered to the provider's push
   strength; availability and at-least-once presentation are the constants.
+  The daemon runs one timer, a heartbeat on a five-minute period. That
+  heartbeat discovers dead seats, never messages, at least at this time.
 - **Notification is not attention.** The Locutorium tells an endpoint
-  immediately; it never interrupts one. Notification hooks are advisory —
-  a failed nudge never loses a message, because the store is the truth.
+  immediately. It never interrupts one. Notification is advisory. A failed
+  bell never loses a message, because the store is the truth.
 - Per-sender FIFO is guaranteed; global cross-sender ordering is not promised
   (clocks drift; a false promise is worse than none).
 

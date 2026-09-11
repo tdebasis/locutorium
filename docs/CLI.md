@@ -13,8 +13,6 @@ Errors print `loc: <message>` on stderr and exit **1**. Everything else exits **
 | `loc publish <topic> <body>` | one message into a topic |
 | `loc read [--peek]` | take your messages |
 | `loc mcp` | serve this seat to an agent runtime over stdio |
-| `loc sub [--watch-pid <pid>]` | start your listener, so you get woken |
-| `loc unsub` | stop your listener |
 | `loc subscribe <endpoint> ...` | register an agent instance and create its queue |
 | `loc unsubscribe <endpoint> [--force]` | free the endpoint and destroy its queue |
 | `loc sweep` | reconcile every row, queue and process |
@@ -24,7 +22,6 @@ Errors print `loc: <message>` on stderr and exit **1**. Everything else exits **
 | `loc topics` | topics with traffic in the window |
 | `loc registry [<instance>] [--json]` | who is registered in an instance, asked of that instance's host; fails when no host answers |
 | `loc watch [<instance>]` | follow an instance's event stream, read-only |
-| `loc doctor [--init]` | health checks; `--init` creates the streams |
 | `loc version` | version string |
 
 `mcp` is how a seat attends: it is this tool's answer to what a background listener used to do — the
@@ -106,8 +103,8 @@ leaves nothing behind for the next `loc start` to misread.
 loc send <endpoint> <body>
 ```
 
-Delivers one message. The endpoint must be listed in `$LOC_HOME/endpoints`; an unknown name is
-refused before anything is sent.
+Delivers one message. The roster is the ledger: the endpoint must be a registered seat, and an
+unknown name is refused before anything is sent.
 
 - **Body limit is 4000 characters, not bytes.** Counted in codepoints, so emoji cost one each. An
   over-long body is refused *before* it reaches the medium — nothing is partially sent.
@@ -179,9 +176,9 @@ There is a third loud answer. If the deployment's access control **refuses the r
 - shows **no topics**, and says so in place of the heading rather than implying an empty room
 - consumes nothing
 
-> **Trap, in the shell tool only:** there, any argument that isn't exactly `--peek` is silently
-> ignored — so `loc read --pekk` performs a normal, **consuming** read, with no error. The Go build
-> **refuses** it: anything but exactly `--peek` prints the verb list and exits 1.
+> **This build refuses a misspelled flag.** Anything but exactly `--peek` prints the verb list and
+> exits 1. The deleted shell tool ignored the argument instead, so `loc read --pekk` performed a
+> normal, **consuming** read with no error. That trap went with it.
 
 `--json` consumes exactly as a plain read does — the same backlog, the same topics, the same
 per-message acknowledgement — but prints each envelope's raw wire bytes, one per line, with **no**
@@ -189,28 +186,21 @@ per-message acknowledgement — but prints each envelope's raw wire bytes, one p
 to parse. `--peek --json` together is refused, same as any other combination that isn't exactly
 one recognised flag.
 
-The Go build presents the queue and the topics, and **no spools**. `run/<endpoint>.spool` and
-`.wake.spool.raw` belong to the shell tool's listener and to whatever presents what it drained;
-this build runs no listener and does not read them.
+This build presents the queue and the topics, and **no spools**. The files `run/<endpoint>.spool`
+and `.wake.spool.raw` belonged to the deleted shell tool. No separate listener process exists here.
+The seat's own `mcp` server is the listener, and it writes no spool.
 
 ## sub / unsub
 
-```
-loc sub [--watch-pid <pid>]
-loc unsub
-```
+**This build has no `sub` and no `unsub` verb.** They belonged to the shell tool, which was deleted
+on 2026-09-07. This section is kept so that older links still land somewhere true.
 
-`sub` starts a listener that watches your queue and, on arrival, drains it to a spool and runs
-`hooks/wake`. This is what makes an idle agent get woken instead of polling.
+Attendance is the `mcp` verb. The agent runtime launches one `loc mcp` server per seat. That server
+registers the seat, watches its queue, and rings the seat's bell. See §mcp below.
 
-`--watch-pid` ties the listener's life to another process: when that process exits, the listener
-exits. Without it, the listener runs until `unsub` or until the deployment's `hooks/alive` says the
-endpoint is gone.
+The server's life is the runtime's life. It ends when the runtime that launched it ends.
 
-`unsub` ends attendance. **The queue keeps holding messages** — nothing is lost by leaving.
-
-A wake never makes a message unreadable; the shell tool's `read` presents its listener's spools as
-well as the queue.
+**The queue keeps holding messages** when a seat is away. Nothing is lost by leaving.
 
 ## subscribe
 
@@ -426,16 +416,15 @@ identity. A follow that simply ends is not an error; a follow that ends badly is
 
 ## doctor
 
-```
-loc doctor
-loc doctor --init
-```
+**This build has no `doctor` verb.** It belonged to the shell tool, which was deleted on 2026-09-07.
+This heading is kept so that an older link lands somewhere true.
 
-Health checks: the medium is reachable, your queue exists, the topics stream exists, and the server
-refuses you someone else's queue.
+Nothing replaced it. The four checks it ran are gone, and no verb runs them now. `loc status` prints
+whether the daemon runs and when it last beat, which is a smaller fact.
 
-`--init` creates the streams and consumers. It needs the admin identity and is normally run once at
-setup.
+`--init` went with it. The daemon creates the `TOPICS` stream itself at boot, and `subscribe` creates
+a seat's queue. This version authenticates nobody, so there is no admin identity to run anything
+as.
 
 ## version
 
@@ -527,11 +516,11 @@ is part of departing and a kill runs nothing. A reader asking whether this seat'
 compares both lines against the presence model's liveness and finds the file stale. No send depends
 on the answer: a send only queues.
 
-**It is also the listener.** It holds a core subscription on this endpoint's own queue subject, which
+**It is also the listener, and the only one.** It holds a core subscription on this endpoint's own queue subject, which
 sees every arrival and consumes nothing, and asks how much is waiting at start and after every
 reconnect. Arrivals are coalesced across `wake_window_seconds` and capped by
-`wake_breaker_per_minute` and `wake_breaker_per_hour` — the same three keys the shell tool's listener
-reads. Each wake hands the seat's notifier ONE LINE and no body:
+`wake_breaker_per_minute` and `wake_breaker_per_hour`. Each wake hands the seat's notifier ONE LINE
+and no body:
 
 ```
 🔔 3 new → read
@@ -612,16 +601,16 @@ the bell; something else must then run `subscribe` and `unsubscribe` around the 
 | `topic_window` | `7d` | how long topic messages live; `loc start` gives the `TOPICS` stream this age limit |
 | `heartbeat_log_retention_days` | `7` | heartbeat log files older than this are deleted when loc starts |
 | `wake_window_seconds` | `5` | wakes are coalesced across this window (`loc mcp`) |
-| `wake_breaker_per_minute` | `6` | cap on wakes per minute (both listeners) |
-| `wake_breaker_per_hour` | `60` | cap on wakes per hour (both listeners) |
+| `wake_breaker_per_minute` | `6` | cap on wakes per minute (`loc mcp`) |
+| `wake_breaker_per_hour` | `60` | cap on wakes per hour (`loc mcp`) |
 
 **The defaults live in one table**, `internal/config/keys.go`. `loc start` writes the file from it on
 first run, with each key's comment above it, so the file and the code cannot drift apart. The three
 wake keys are the deployment's and are not in that table.
 
-Every key above except `monitor_url` is read by the Go build; the three wake keys
-are read by BOTH listeners, so a deployment tunes one set of numbers whichever one it runs.
-`registry`'s wait for a host is fixed in the code, not a key.
+Every key above except `monitor_url` is read by this build. The three wake keys are read by the
+seat's own `mcp` server, which is the only listener there is. `registry`'s wait for a host is fixed
+in the code, not a key.
 
 When a breaker trips it says so in `run/<endpoint>.delivery.log` and **suppresses only the wake**.
 No message is lost; the next read still finds everything.

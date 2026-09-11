@@ -1,15 +1,14 @@
 # Running a house — the operator's manual
 
 The **house** is a set of endpoints sharing one medium on one machine. This document is for the
-person who deploys and keeps it: what lives where, what each knob does, what each hook must do, and
-how to undo anything.
+person who deploys and keeps it: what lives where, what each knob does, how a seat is told about
+mail, and how to undo anything.
 
 ## What lives under `$LOC_HOME` (default `~/.locutorium`)
 
 | path | what | who writes it |
 |---|---|---|
 | `config` | `key = value` lines: the provider, the URL, the window, the retention | `loc start` (once), then you |
-| `hooks/` | your deployment's own hooks; `loc` reads none of them | you |
 | `run/` | live state: the daemon pidfile, the heartbeat log, delivery logs — never edit | `loc` |
 | `store/` | JetStream data | the embedded broker |
 | `run/loc.log` | the daemon's own output | `loc` |
@@ -46,7 +45,8 @@ reads.
 ## The service
 
 `./install.sh` builds `loc`, copies the stamped binary into `lib/locutorium`, and links `loc` at that
-copy. It supervises nothing. `loc start` runs the broker and the heartbeat; `loc stop` ends them.
+copy. It supervises nothing. `loc start` runs the broker and the heartbeat. The heartbeat sweeps
+every five minutes. `loc stop` ends them.
 Logs: `$LOC_HOME/run/loc.log`. State of the daemon: the first line of `loc status`. Endpoints
 survive a medium restart — queues are
 durable; listeners reconnect.
@@ -60,49 +60,55 @@ durable; listeners reconnect.
 | `monitor_url` | — (no default) | the medium's HTTP monitor. `loc registry` asks the instance's host over the bus instead, so this key is optional |
 | `topic_window` | `7d` | how long a topic's messages live |
 | `send_requires_attendance` | `no` | *say-semantics*: refuse a send to an endpoint that is not attending, so the sender learns at the only moment it can act |
-| `wake_window_seconds` | `5` | the listener's coalescing window before it knocks |
+| `wake_window_seconds` | `5` | how long the seat's server coalesces arrivals before it rings |
 | `wake_breaker_per_minute` | `6` | max wakes per endpoint per minute; excess is suppressed, loudly, and nothing is lost |
 | `wake_breaker_per_hour` | `60` | the hourly cap |
 
 Change a key by editing the line; revert it by deleting the line.
 
-## The hooks — the deployment's half of the contract
+`loc start` writes every key above except the three `wake_` keys. Those three are read when a line
+holds them and carry the default above when no line does. Add the line yourself to change one.
 
-Hooks are executables under `$LOC_HOME/hooks/`. `loc` runs them; it never assumes what they do.
-A hook that is not executable fails in the quietest possible way, so keep them `755`.
+## The bell — how a seat is told
 
-| hook | called as | must |
-|---|---|---|
-| `identity` | `identity` | print the endpoint name for the calling process, or exit non-zero. Used when `LOC_IDENTITY` is unset (`loc_identity`). A refusal is correct; guessing is not. |
-| `nudge` | `nudge <endpoint> <line>` | ring that endpoint's doorbell with one line — advisory; failure never loses a message (`loc_nudge`). |
-| `register` | `register <endpoint>` | record how to reach the endpoint's surface (a terminal, a session); called at `loc sub`. |
-| `wake` | `wake <endpoint> <count>` | present what the listener drained into `run/<endpoint>.spool`, then clear it only on confirmed presentation. |
-| `alive` | `alive <endpoint>` | exit 0 while the endpoint's session lives; the listener exits when it stops. |
+The bell is inside the binary. The seat's own `loc mcp` server rings it. `loc` runs no hook, and it
+reads no `$LOC_HOME` directory of executables.
 
-### Wake modes — a pattern, not a rule
+A seat says how it is reached with two environment variables, set where the agent runtime launches
+it:
 
-The wake hook decides *how* to present. A common shape is a per-endpoint mode file,
-`run/<endpoint>.wake_mode`, over a default in `config`, with three modes: **off** — spool only,
-present on the next `loc read`; **knock** — the doorbell text only, the body waits in the spool;
-**courier** — a helper carries the spooled bodies onto the endpoint's surface and clears the spool
-only when presentation is confirmed. An unknown mode must refuse and retain the spool. Whatever your
-hook does, the invariant is the product's: *a wake never makes a message unreadable.*
+| variable | what it says |
+|---|---|
+| `LOC_LISTENER_TYPE` | which notifier rings this seat. `subscribe` refuses any value outside the set below. |
+| `LOC_LISTENER_ADDRESS` | where that notifier delivers: a pane target for `tmux`, a session name for `claude`. |
+
+| type | what it does |
+|---|---|
+| `tmux` | types one bell line into the seat's pane, then submits it. It first checks that the pane accepts input. |
+| `claude` | starts one Claude session to carry the bell to the seat. At most one session per seat per 30 seconds. |
+| `none` | rings nothing. The seat finds its mail on its next `loc read`. |
+
+There is no fallback from one notifier to another. A bell that could not ring is written to
+`run/<endpoint>.delivery.log`, and the message waits in the queue.
+
+Identity comes from `LOC_IDENTITY` and from nothing else. A verb with no identity refuses
+(`loc_identity`). A refusal is correct; guessing is not.
 
 ## Rollback
 
 | what | how |
 |---|---|
 | a config key | delete the line |
-| a hook | your deployment repository's history (keep the hooks in one) |
+| a seat's bell | edit `LOC_LISTENER_TYPE` where the agent runtime launches the seat |
 | `loc` | `git checkout vX.Y.Z && ./install.sh` — the binary is a copy of a moment, so the installer remakes and re-copies it; a checkout alone rolls back nothing, because the installed copy is deliberately not the tree |
 | the medium's definition | edit the `config` line, then `loc stop && loc start` |
-| attendance | `loc unsub`; the queue keeps holding messages |
+| attendance | end the seat's `loc mcp` server; the queue keeps holding messages |
 
 ## Uninstall
 
-`./install.sh --uninstall` removes the `loc` link, the stamped copies in `lib/locutorium`, and the
-agent, and prints the `rm -rf $LOC_HOME` line without running it. The link goes only if it points at
-what this clone would have made; anything else is refused and left where it is.
+`./install.sh --uninstall` removes the `loc` link and the stamped copies in `lib/locutorium`. It
+prints the `rm -rf $LOC_HOME` line without running it. The link goes only if it points at what this
+clone would have made; anything else is refused and left where it is.
 
 ## The suite on a machine that stays
 
