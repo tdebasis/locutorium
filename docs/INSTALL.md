@@ -86,10 +86,50 @@ listener variables.
 ## Sample supervisor files
 
 A supervisor is optional. `loc start` detaches, and it survives the terminal that ran it. Use a
-supervisor when you want the broker back after a reboot.
+supervisor when you want the broker back after a reboot or a logon.
 
 These samples are documentation. This repository ships no code behind them. Each one runs
 `loc start` and nothing else.
+
+`loc start` launches the broker, detaches it, and exits 0. Give no sample a restart policy. A
+supervisor that restarts the launcher would run it in a loop. A repeated run is otherwise safe:
+`loc start` prints `already running, pid N` and exits 0 when the daemon is already up.
+
+Each sample spells `/usr/local/bin/loc`. Use the path your own `./install.sh` run printed.
+
+### macOS
+
+Save this as `~/Library/LaunchAgents/com.locutorium.loc.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.locutorium.loc</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/loc</string>
+    <string>start</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>
+```
+
+Load it with `launchctl load ~/Library/LaunchAgents/com.locutorium.loc.plist`. The sample sets
+`RunAtLoad` and no `KeepAlive`, for the reason above.
+
+One line in your login shell file, `~/.zprofile`, does the same job:
+
+```sh
+loc start >/dev/null 2>&1
+```
+
+### Linux
 
 A systemd user unit, `~/.config/systemd/user/locutorium.service`:
 
@@ -108,14 +148,34 @@ WantedBy=default.target
 
 Enable it with `systemctl --user enable --now locutorium.service`.
 
-On macOS, add one line to your login shell file, `~/.zprofile`:
+### Windows
 
-```sh
-loc start >/dev/null 2>&1
+**The Windows build does not compile today.** `GOOS=windows go build ./...` fails at
+`internal/loc/listener.go:36`, where `syscall.Kill` does not exist on Windows. The three
+`*_windows.go` files under `cmd/loc/` ship uncompiled. This sample is here for the build that comes
+later. Do not read it as a supported target.
+
+This sample is a scheduled task and not a service. `loc start` exits as soon as the broker is up, so
+it never answers the Windows service control manager, and `sc create` over it would fail. Save this
+as `locutorium.xml`:
+
+```xml
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2"
+  xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Triggers>
+    <LogonTrigger><Enabled>true</Enabled></LogonTrigger>
+  </Triggers>
+  <Actions>
+    <Exec>
+      <Command>loc.exe</Command>
+      <Arguments>start</Arguments>
+    </Exec>
+  </Actions>
+</Task>
 ```
 
-A repeated run is safe. `loc start` prints `already running, pid N` and exits 0 when the daemon is
-already up.
+Register it with `schtasks /Create /TN Locutorium /XML locutorium.xml`.
 
 ## Exit codes
 

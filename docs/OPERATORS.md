@@ -66,6 +66,9 @@ durable; listeners reconnect.
 
 Change a key by editing the line; revert it by deleting the line.
 
+`loc start` writes every key above except the three `wake_` keys. Those three are read when a line
+holds them and carry the default above when no line does. Add the line yourself to change one.
+
 ## The bell — how a seat is told
 
 The bell is inside the binary. The seat's own `loc mcp` server rings it. `loc` runs no hook, and it

@@ -16,7 +16,7 @@ sender. A refusal is the correct outcome, and you should treat it as one, not wo
 |---|---|---|
 | `loc send <endpoint> <body>` | `loc_send` | puts one envelope in that endpoint's queue. Guaranteed: it waits there through downtime. |
 | `loc publish <topic> <body>` | `loc_publish` | speaks in a room. Everyone attending reads it from their own cursor; `@name` rings that endpoint's doorbell. |
-| `loc read [--peek]` | `loc_read` | presents your queue backlog **and** anything a listener spooled for you, then the rooms. Without `--peek`, what you read is **consumed** — taken exactly once. |
+| `loc read [--peek]` | `loc_read` | presents your queue backlog, then the rooms. Without `--peek`, what you read is **consumed**. It is taken exactly once. |
 | `loc mcp` ‡ | — | serves this seat to the agent runtime that launched it, over stdio: it registers you with that runtime's pid, rings your bell when mail lands, and hands the mail over through a `read` tool. |
 | `loc status` | `loc_status` | unread counts per endpoint. |
 | `loc topics` | `loc_topics` | which rooms are active right now. |
@@ -33,8 +33,9 @@ agent runtime launches and ends (`docs/CLI.md` §mcp). Nothing replaced `doctor`
 
 ## Semantics you must not get wrong
 
-- **Consumed once.** A read takes the message. If your read fails mid-way, `loc` re-presents rather
-  than loses (it spools before rendering); but a *successful* read is the only copy you will get.
+- **Consumed once.** A read takes the message. `loc` acknowledges a message only after the write
+  that carried it returned without an error. A read that fails mid-way gives the message back, and
+  the queue redelivers it. A *successful* read is the only copy you will get.
 - **`--peek` does not consume** — and a peeked message is briefly in flight: an immediate real read
   may show an empty queue. It returns on redelivery. That window is indistinguishable from loss at
   the moment it matters; do not conclude loss from one empty read after a peek.
@@ -50,7 +51,7 @@ agent runtime launches and ends (`docs/CLI.md` §mcp). Nothing replaced `doctor`
 
 ## Attendance — what happens between a send and your reading it
 
-![attendance: send → queue → listener → spool → knock; read presents spools, then the queue, then the rooms](art/attendance.png)
+![an older drawing of attendance: a send reaches the queue, a background listener drains it to a file, and a knock follows. The picture is stale. This build has neither the listener nor the file, and the seat's own mcp server rings the bell instead.](art/attendance.png)
 
 ```
 sender: loc send you …  ─▶  queue.you  ─▶  your seat's loc mcp server taps it
@@ -66,7 +67,8 @@ launched it ends.
 ## When a message seems missing
 
 1. `loc status` — is there an unread count for you?
-2. `loc read` — it presents spools as well as the queue; a knock you missed is still here.
+2. `loc read` — it presents the queue, then the rooms. A bell you missed costs nothing, because the
+   message waits in the queue.
 3. Did you just `--peek`? Wait for redelivery before concluding anything.
 4. `run/<you>.delivery.log` — what the listener did, with timestamps; a suppressed wake is logged as
    a tripped breaker, and nothing is lost by suppression.

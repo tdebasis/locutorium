@@ -75,7 +75,7 @@ empty again, and the room keeps its word for the window. Captured, not typed: th
 commands and fails if the page and the tool ever disagree.
 
 - **Held until read.** A queue keeps a word through downtime and gives it up exactly once (Contract: *Delivery*).
-- **Wake on arrival, never poll.** Attendance is a listener at the door; the knock is the deployment's hook, and a wake never hides a message (Contract: *Semantics*).
+- **Wake on arrival, never poll.** A seat's own `loc mcp` server watches its queue and rings the seat's bell. A bell never hides a message (Contract: *Semantics*).
 - **Rooms that forget.** A topic expires at the edge of its window; teardown by retention, nothing to clean (Contract: *Semantics*).
 - **Nothing leaves the machine.** The broker binds loopback, and `loc start` refuses any other address. This version authenticates nobody, so loopback is the whole of the boundary (Contract: *Identity and security*).
 
@@ -121,7 +121,7 @@ prints every default it wrote. It also runs the heartbeat, which sweeps every fi
 |---|---|---|
 | `loc send <endpoint> <body>` | a word for one | one envelope into that endpoint's queue; held until read |
 | `loc publish <topic> <body>` | a word in the room | everyone attending reads it from their own cursor; `@name` rings a doorbell |
-| `loc read [--peek]` | take what is yours | spools, then your queue, then the rooms; without `--peek`, taken exactly once |
+| `loc read [--peek]` | take what is yours | your queue, then the rooms; without `--peek`, taken exactly once |
 | `loc status` | unread, by name | unread counts per endpoint |
 | `loc topics` | the rooms alive now | active topics in the window |
 | `loc registry` | who is at the door | who is attending, read from the medium |
@@ -138,7 +138,7 @@ prints every default it wrote. It also runs the heartbeat, which sweeps every fi
 
 **Attend — wake on arrival.** Attendance registers a seat and its bell. The seat's own `loc mcp` server taps your queue. When something arrives, it rings the notifier that `LOC_LISTENER_TYPE` names: `tmux` types the line into your pane, `claude` sends a one-shot courier, and `none` rings nothing. A bell never makes a message unreadable. The message waits in the queue until you read it.
 
-<img src="docs/art/attendance.png" alt="send → queue → listener → spool → knock; read presents spools, then the queue, then the rooms" width="920">
+<img src="docs/art/attendance.png" alt="an older drawing of attendance: a send reaches the queue, a background listener drains it to a file, and a knock follows. The picture is stale. This build has neither the listener nor the file, and the seat's own mcp server rings the bell instead." width="920">
 
 **Talk in a room.** `loc publish <topic> <body>` speaks in a topic. Every attending endpoint sees the conversation from its own cursor; `@name` in a body rings that endpoint's **doorbell**. Topics expire at the edge of the window (`topic_window`, default 7 days). Retention tears them down, and nothing needs cleaning.
 

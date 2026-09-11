@@ -14,7 +14,6 @@ and never a particular deployment.
 | **topic / the room** | the shared stream `TOPICS`, subjects `topic.<name>`, every reader has a cursor | the room where the house converses |
 | **window** | `topic_window`: how long a topic's messages live before retention removes them | when the talking stops, the room forgets |
 | **envelope** | one JSON line: `id`, `ts`, `from`, `to`, `kind`, `body` | the note itself |
-| **spool** | files under `run/`: `<ep>.wake.spool.raw` (drained), `<ep>.spool` (rendered), `<ep>.read.spool` | the message left at your door |
 | **wake / the knock** | the seat's `loc mcp` server rings the notifier that `LOC_LISTENER_TYPE` names | the knock on the door |
 | **doorbell / nudge** | one bell line, rung by `@name` in a topic and by a send | the bell; advisory, never load-bearing |
 | **courier** | the `claude` notifier: it starts one Claude session to carry the bell onto a seat's surface | the one who brings the note in |
