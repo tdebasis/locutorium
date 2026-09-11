@@ -17,21 +17,19 @@ sender. A refusal is the correct outcome, and you should treat it as one, not wo
 | `loc send <endpoint> <body>` | `loc_send` | puts one envelope in that endpoint's queue. Guaranteed: it waits there through downtime. |
 | `loc publish <topic> <body>` | `loc_publish` | speaks in a room. Everyone attending reads it from their own cursor; `@name` rings that endpoint's doorbell. |
 | `loc read [--peek]` | `loc_read` | presents your queue backlog **and** anything a listener spooled for you, then the rooms. Without `--peek`, what you read is **consumed** — taken exactly once. |
-| `loc sub [--watch-pid P]` † | `loc_sub` | registers attendance, so your bell rings when mail lands. In this build the `mcp` verb holds the seat. |
-| `loc unsub` † | `loc_unsub` | ends attendance. The queue keeps holding messages. |
 | `loc mcp` ‡ | — | serves this seat to the agent runtime that launched it, over stdio: it registers you with that runtime's pid, rings your bell when mail lands, and hands the mail over through a `read` tool. |
 | `loc status` | `loc_status` | unread counts per endpoint. |
 | `loc topics` | `loc_topics` | which rooms are active right now. |
 | `loc registry` | `loc_registry` | who is attending, read from the medium. |
 | `loc watch` | `loc_watch` | every envelope as it passes, read-only. |
-| `loc doctor` † | `loc_doctor` | four health checks as you. |
 | `loc version` | — | the version. |
 
 ‡ **The Go build's verb.** It is that build's answer to `sub`: one process the runtime launches,
 doing register-listen-wake instead of a background listener. `docs/CLI.md` §mcp has the config line.
 
-† **Attendance is `mcp`.** A seat is held by a stdio MCP server the agent runtime launches and ends
-(`docs/CLI.md` §mcp), not by a background listener you start yourself.
+**Three verbs are gone.** This build dispatches no `sub`, no `unsub` and no `doctor`. They belonged
+to the shell tool, which was deleted on 2026-09-07. A seat is now held by a stdio MCP server the
+agent runtime launches and ends (`docs/CLI.md` §mcp). Nothing replaced `doctor`.
 
 ## Semantics you must not get wrong
 
@@ -72,7 +70,7 @@ launched it ends.
 3. Did you just `--peek`? Wait for redelivery before concluding anything.
 4. `run/<you>.delivery.log` — what the listener did, with timestamps; a suppressed wake is logged as
    a tripped breaker, and nothing is lost by suppression.
-5. `loc doctor` — if the medium is unreachable, every verb says so in its first line.
+5. `loc status` — its first line says whether the daemon runs, and when it last beat.
 
 ## The envelope
 

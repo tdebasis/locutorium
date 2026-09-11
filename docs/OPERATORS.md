@@ -99,7 +99,7 @@ Identity comes from `LOC_IDENTITY` and from nothing else. A verb with no identit
 | a seat's bell | edit `LOC_LISTENER_TYPE` where the agent runtime launches the seat |
 | `loc` | `git checkout vX.Y.Z && ./install.sh` — the binary is a copy of a moment, so the installer remakes and re-copies it; a checkout alone rolls back nothing, because the installed copy is deliberately not the tree |
 | the medium's definition | edit the `config` line, then `loc stop && loc start` |
-| attendance | `loc unsub`; the queue keeps holding messages |
+| attendance | end the seat's `loc mcp` server; the queue keeps holding messages |
 
 ## Uninstall
 

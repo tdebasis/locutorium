@@ -13,8 +13,6 @@ Errors print `loc: <message>` on stderr and exit **1**. Everything else exits **
 | `loc publish <topic> <body>` | one message into a topic |
 | `loc read [--peek]` | take your messages |
 | `loc mcp` | serve this seat to an agent runtime over stdio |
-| `loc sub [--watch-pid <pid>]` | start your listener, so you get woken |
-| `loc unsub` | stop your listener |
 | `loc subscribe <endpoint> ...` | register an agent instance and create its queue |
 | `loc unsubscribe <endpoint> [--force]` | free the endpoint and destroy its queue |
 | `loc sweep` | reconcile every row, queue and process |
@@ -24,7 +22,6 @@ Errors print `loc: <message>` on stderr and exit **1**. Everything else exits **
 | `loc topics` | topics with traffic in the window |
 | `loc registry [<instance>] [--json]` | who is registered in an instance, asked of that instance's host; fails when no host answers |
 | `loc watch [<instance>]` | follow an instance's event stream, read-only |
-| `loc doctor [--init]` | health checks; `--init` creates the streams |
 | `loc version` | version string |
 
 `mcp` is how a seat attends: it is this tool's answer to what a background listener used to do — the
@@ -194,11 +191,6 @@ The Go build presents the queue and the topics, and **no spools**. `run/<endpoin
 this build runs no listener and does not read them.
 
 ## sub / unsub
-
-```
-loc sub [--watch-pid <pid>]
-loc unsub
-```
 
 **This build has no `sub` and no `unsub` verb.** They belonged to the shell tool, which was deleted
 on 2026-09-07. This section is kept so that older links still land somewhere true.
@@ -424,16 +416,15 @@ identity. A follow that simply ends is not an error; a follow that ends badly is
 
 ## doctor
 
-```
-loc doctor
-loc doctor --init
-```
+**This build has no `doctor` verb.** It belonged to the shell tool, which was deleted on 2026-09-07.
+This heading is kept so that an older link lands somewhere true.
 
-Health checks: the medium is reachable, your queue exists, the topics stream exists, and the server
-refuses you someone else's queue.
+Nothing replaced it. The four checks it ran are gone, and no verb runs them now. `loc status` prints
+whether the daemon runs and when it last beat, which is a smaller fact.
 
-`--init` creates the streams and consumers. It needs the admin identity and is normally run once at
-setup.
+`--init` went with it. The daemon creates the `TOPICS` stream itself at boot, and `subscribe` creates
+a seat's queue. This version authenticates nobody, so there is no admin identity to run anything
+as.
 
 ## version
 

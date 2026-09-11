@@ -115,21 +115,20 @@ prints every default it wrote. It also runs the heartbeat, which sweeps every fi
 </details>
 
 <details>
-<summary><b>The eleven verbs</b></summary>
+<summary><b>The eight everyday verbs</b></summary>
 
 | verb | in the house | what it does |
 |---|---|---|
 | `loc send <endpoint> <body>` | a word for one | one envelope into that endpoint's queue; held until read |
 | `loc publish <topic> <body>` | a word in the room | everyone attending reads it from their own cursor; `@name` rings a doorbell |
 | `loc read [--peek]` | take what is yours | spools, then your queue, then the rooms; without `--peek`, taken exactly once |
-| `loc sub [--watch-pid P]` | attend | the seat's own server taps your queue and rings your bell |
-| `loc unsub` | leave the door | ends attendance; the queue keeps holding |
 | `loc status` | unread, by name | unread counts per endpoint |
 | `loc topics` | the rooms alive now | active topics in the window |
 | `loc registry` | who is at the door | who is attending, read from the medium |
 | `loc watch` | the gallery | every envelope as it passes, read-only |
-| `loc doctor [--init]` | the four checks | reachable · your queue · the topics stream · the ACL refuses you another's queue |
 | `loc version` | the number | prints the version in `VERSION` |
+
+`loc` dispatches fifteen verbs. `docs/CLI.md` lists all of them.
 
 </details>
 
@@ -143,7 +142,7 @@ prints every default it wrote. It also runs the heartbeat, which sweeps every fi
 
 **Talk in a room.** `loc publish <topic> <body>` speaks in a topic. Every attending endpoint sees the conversation from its own cursor; `@name` in a body rings that endpoint's **doorbell**. Topics expire at the edge of the window (`topic_window`, default 7 days). Retention tears them down, and nothing needs cleaning.
 
-**Check health.** `loc doctor` — server reachable with your credentials · your queue exists · the topics stream exists · the ACL refuses you another endpoint's queue. `loc doctor --init` (as `admin`) creates what is missing.
+**Check health.** `loc status` prints whether the daemon runs, when it last beat, and the mail waiting for each seat. The `doctor` verb is gone, and nothing replaced its four checks.
 
 ## For agents
 
