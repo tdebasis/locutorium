@@ -143,8 +143,19 @@ func text(body string) *mcp.CallToolResult {
 // rendered into a buffer and written in ONE call, precisely so half of one can
 // never reach a reader. So between the queue heading and the topics heading,
 // one Write is one message. The headings are the only other writes in that
-// span, and both are recognised by their prefix — the peek trailer included,
-// which begins with the topics heading.
+// span.
+//
+// A heading is recognised by its prefix AND by its SHAPE. A heading write is
+// exactly one line: it holds one newline, and that newline is the last byte.
+// The peek trailer is one line too, so it still closes the queue. An envelope
+// write is never one line, because `present` writes a header line, at least one
+// body line and a blank line in the same call.
+//
+// The prefix alone was not enough. The first bytes of an envelope write are the
+// sender identity. The sender chooses that identity, and LOC_IDENTITY is not
+// validated. A seat named "── topics ──x" rendered an envelope that matched the
+// topics prefix, set inQueue to false, and took every later queue envelope out
+// of the `handed=N` audit line. (Assayer finding, 2026-09-12.)
 type queueCount struct {
 	w       io.Writer
 	inQueue bool
@@ -153,12 +164,18 @@ type queueCount struct {
 
 func (c *queueCount) Write(p []byte) (int, error) {
 	switch {
-	case bytes.HasPrefix(p, []byte("── queue.")):
+	case oneLine(p) && bytes.HasPrefix(p, []byte("── queue.")):
 		c.inQueue = true
-	case bytes.HasPrefix(p, []byte("── topics ──")):
+	case oneLine(p) && bytes.HasPrefix(p, []byte("── topics ──")):
 		c.inQueue = false
 	case c.inQueue:
 		c.n++
 	}
 	return c.w.Write(p)
+}
+
+// oneLine reports whether p is exactly one line: one newline, and it is the
+// last byte.
+func oneLine(p []byte) bool {
+	return bytes.Count(p, []byte("\n")) == 1 && bytes.HasSuffix(p, []byte("\n"))
 }
