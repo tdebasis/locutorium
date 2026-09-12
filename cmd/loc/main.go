@@ -153,9 +153,9 @@ func dispatch(args []string, w io.Writer) error {
 
 	switch verb {
 	case "version":
-		// Answered before any provider is opened: `version` reads the VERSION
-		// file and touches no medium, so it must work on a machine that has
-		// just cloned this and has no deployment yet.
+		// Answered before any provider is opened: `version` prints the stamp
+		// linked in at build time and touches no medium, so it must work on a
+		// machine that has just cloned this and has no deployment yet.
 		v, err := version()
 		if err != nil {
 			return err

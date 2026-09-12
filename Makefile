@@ -1,15 +1,15 @@
 # This file exists for exactly one artifact: a stamped `loc` binary under
 # build/bin.
 #
-# VERSION IS THE SOURCE OF TRUTH AND IT IS STATED ONCE. The number is not copied
-# into the Go tree; it is read from the file here and stamped into the binary at
-# link time, which is what lets `loc version` answer from a directory that has no
-# VERSION above it. Without the stamp the binary walks up from wherever it lives
-# looking for the file, which works from the clone and nowhere else.
+# THE NUMBER COMES FROM `git describe`, NOT FROM A FILE. The tag on the commit
+# is the number. `git describe` reads it here and the value is stamped into the
+# binary at link time, so `loc version` answers from any directory. A tagged
+# commit gives a bare number. Any other commit carries `-N-g<sha>`. An unclean
+# tree adds `-dirty`.
 #
 # build/ is gitignored: binaries are artifacts, not source.
 
-VERSION := $(shell tr -d '[:space:]' < VERSION)
+VERSION := $(shell git describe --tags --dirty --always 2>/dev/null | sed 's/^v//')
 GO      ?= go
 BIN     := build/bin/loc
 

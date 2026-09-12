@@ -3,7 +3,8 @@
 `loc` is a compiled binary, made by `make build` into `build/bin/loc`, with one command reference
 (`CLI.md`) and one conformance suite that is the gate. It carries its provider and its version
 inside it, so it answers from anywhere and a copy of it is simply `loc`. The version is stamped in
-at link time from `VERSION`, which is why a stale binary is worth rebuilding rather than trusting.
+at link time from `git describe`, which is why a stale binary is worth rebuilding rather than
+trusting.
 
 `./install.sh` builds it, copies the stamped binary out of the build tree, and links it into your
 PATH as `loc`. The broker runs inside the binary, so the installer supervises nothing.
