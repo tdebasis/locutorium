@@ -51,14 +51,12 @@ $ LOC_IDENTITY=ada loc publish standup "@bob please look at the restore proof"
 published → #standup
 $ LOC_IDENTITY=bob loc read
 ── queue.bob ──
-**`ada -> bob`**   2026-08-26T03:54:39Z
-
-`the build is green; the tag is yours`
+ada -> bob   2026-08-26T03:54:39Z
++ the build is green; the tag is yours
 
 ── topics ──
-**`ada -> #standup`**   2026-08-26T03:54:39Z
-
-`@bob please look at the restore proof`
+ada -> #standup   2026-08-26T03:54:39Z
++ @bob please look at the restore proof
 
 $ LOC_IDENTITY=bob loc topics
 #standup  (1 in window)

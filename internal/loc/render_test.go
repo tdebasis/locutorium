@@ -116,20 +116,20 @@ func TestRenderHeaderUsesASCIIArrow(t *testing.T) {
 
 func TestRenderBodyLines(t *testing.T) {
 	cases := []struct{ body, want string }{
-		{"one", "`one`\n"},
-		{"one\ntwo", "`one`\n`two`\n"},
-		{"one\n\ntwo", "`one`\n\n`two`\n"},
-		{"", "\n"},
-		{"a `b` c", "`` a `b` c ``\n"},
-		{"`lead", "`` `lead ``\n"},
-		{"trail`", "`` trail` ``\n"},
+		{"one", "+ one\n"},
+		{"one\ntwo", "+ one\n+ two\n"},
+		{"one\n\ntwo", "+ one\n+\n+ two\n"},
+		{"", "+\n"},
+		{"a `b` c", "+ a `b` c\n"},
+		{"`lead", "+ `lead\n"},
+		{"trail`", "+ trail`\n"},
 	}
 	for _, c := range cases {
 		var got bytes.Buffer
 		if err := RenderOne(&got, Envelope{From: "a", To: "b", TS: "T", Body: c.body}); err != nil {
 			t.Fatal(err)
 		}
-		want := "**`a -> b`**   T\n\n" + c.want + "\n"
+		want := "a -> b   T\n" + c.want + "\n"
 		if got.String() != want {
 			t.Errorf("body %q\n got: %q\nwant: %q", c.body, got.String(), want)
 		}
@@ -143,7 +143,7 @@ func TestRenderMissingFields(t *testing.T) {
 	if err := Render(strings.NewReader(`{"kind":"msg"}`), &got); err != nil {
 		t.Fatal(err)
 	}
-	if want := "**`? -> ?`**   ?\n\n\n\n"; got.String() != want {
+	if want := "? -> ?   ?\n+\n\n"; got.String() != want {
 		t.Errorf("got %q, want %q", got.String(), want)
 	}
 }
@@ -155,5 +155,54 @@ func TestRenderUnparseableLineIsShown(t *testing.T) {
 	}
 	if want := "  [unparseable] not json\n"; got.String() != want {
 		t.Errorf("got %q, want %q", got.String(), want)
+	}
+}
+
+// TestRenderBodyLinesCarryThePlusAndNoNewBacktick asserts the two properties
+// the reader depends on. The reader copies this output into a fence with the
+// tag "diff". That fence paints a line green only when the line starts with
+// "+", and it shows a backtick as a literal character.
+//
+// So a body line without the "+" is not painted, and a backtick this renderer
+// adds is junk on the reader's screen. The goldens above hold one case each;
+// this arm holds the rule.
+func TestRenderBodyLinesCarryThePlusAndNoNewBacktick(t *testing.T) {
+	bodies := []string{
+		"one",
+		"one\ntwo",
+		"one\n\ntwo",
+		"",
+		"a `b` c",
+		"`lead",
+		"trail`",
+		"``` fence\ncode\n```",
+		"**bold** _italic_ # heading",
+		"   leading spaces kept",
+	}
+	for _, body := range bodies {
+		var got bytes.Buffer
+		if err := RenderOne(&got, Envelope{From: "a", To: "b", TS: "T", Body: body}); err != nil {
+			t.Fatal(err)
+		}
+		// The first line is the header. The last two entries are the blank
+		// line between envelopes and the empty tail after the final "\n".
+		lines := strings.Split(got.String(), "\n")
+		if len(lines) < 4 {
+			t.Fatalf("body %q rendered too few lines: %q", body, got.String())
+		}
+		rendered := lines[1 : len(lines)-2]
+		in := strings.Split(body, "\n")
+		if len(rendered) != len(in) {
+			t.Errorf("body %q: %d rendered lines, want %d: %q", body, len(rendered), len(in), got.String())
+			continue
+		}
+		for i, l := range rendered {
+			if len(l) == 0 || l[0] != '+' {
+				t.Errorf("body %q line %d does not begin with '+': %q", body, i, l)
+			}
+			if got, want := strings.Count(l, "`"), strings.Count(in[i], "`"); got != want {
+				t.Errorf("body %q line %d carries %d backticks, the input carried %d: %q", body, i, got, want, l)
+			}
+		}
 	}
 }
