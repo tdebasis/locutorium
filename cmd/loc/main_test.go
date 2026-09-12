@@ -195,9 +195,9 @@ func TestArgumentCheckHappensBeforeTheProviderIsOpened(t *testing.T) {
 
 // ----------------------------------------------------------------- version
 
-// version answers from the VERSION file and touches no medium, so it must work
-// on a machine that has just cloned this and configured nothing. Found by CI,
-// and only CI could have found it: every machine that runs this by hand
+// version answers from the link-time stamp and touches no medium, so it must
+// work on a machine that has just cloned this and configured nothing. Found by
+// CI, and only CI could have found it: every machine that runs this by hand
 // already has a deployment on it.
 func TestVersionNeedsNoDeployment(t *testing.T) {
 	t.Setenv("LOC_HOME", filepath.Join(t.TempDir(), "does-not-exist"))
@@ -217,78 +217,43 @@ func TestVersionIgnoresTrailingArguments(t *testing.T) {
 	assertResult(t, code, out, errOut, 0, "loc 1.4.2\n", "")
 }
 
-// Unstamped, the number is read out of the tree the binary lives in — so a
-// plain `go build` still tells the truth. The file is planted beside this test
-// binary, which is exactly the walk the released binary does from build/bin.
-func TestVersionReadsTheTreeWhenNotStamped(t *testing.T) {
+// Unstamped, the binary has no number to claim, and it says so rather than
+// inventing one. A plain `go build` produces exactly this binary.
+func TestVersionWithoutAStampSaysDev(t *testing.T) {
 	stampVersion(t, "")
-
-	exe, err := os.Executable()
-	if err != nil {
-		t.Skipf("cannot locate the test binary: %v", err)
-	}
-	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = resolved
-	}
-	dir := filepath.Dir(exe)
-	if versionFileAbove(dir) {
-		t.Skip("a VERSION already sits above this test binary; the walk cannot be pinned here")
-	}
-
-	// With nothing above it, the refusal names where it looked — and it
-	// reaches the user in the tool's one error shape.
-	refusal := "no VERSION above " + dir + " — this loc is a copy, not a build in its tree"
-	if _, err := version(); err == nil {
-		t.Error("version() invented a number with no VERSION anywhere above it")
-	} else if err.Error() != refusal {
-		t.Errorf("got %q, want %q", err.Error(), refusal)
-	}
-	code, out, errOut := exec("version")
-	assertResult(t, code, out, errOut, 1, "", "loc: "+refusal+"\n")
-
-	// Whitespace of every kind is stripped, the same way `tr -d '[:space:]'`
-	// does it for the shell.
-	path := filepath.Join(dir, "VERSION")
-	writeFile(t, path, "  1.4.2\n")
-	t.Cleanup(func() { os.Remove(path) })
 
 	got, err := version()
 	if err != nil {
 		t.Fatalf("version(): %v", err)
 	}
-	if got != "1.4.2" {
-		t.Errorf("got %q, want %q", got, "1.4.2")
+	if got != "dev" {
+		t.Errorf("got %q, want %q", got, "dev")
 	}
 
 	// And it reaches the stream through the verb, not just the function.
 	newDeployment(t, "ada")
-	code, out, errOut = exec("version")
-	assertResult(t, code, out, errOut, 0, "loc 1.4.2\n", "")
+	code, out, errOut := exec("version")
+	assertResult(t, code, out, errOut, 0, "loc dev\n", "")
 }
 
-// A VERSION file that is only whitespace is not a version, and the walk keeps
-// going rather than reporting an empty one.
-func TestVersionRejectsABlankVERSION(t *testing.T) {
-	stampVersion(t, "")
+// Stamped, the binary prints the stamp exactly as it was linked in. `git
+// describe` off a tag carries a commit count and a sha, and an unclean tree
+// carries `-dirty`, so the stamp is not always a plain `X.Y.Z`.
+func TestVersionPrintsTheStamp(t *testing.T) {
+	const stamp = "0.1.1-3-gdeadbee-dirty"
+	stampVersion(t, stamp)
 
-	exe, err := os.Executable()
+	got, err := version()
 	if err != nil {
-		t.Skipf("cannot locate the test binary: %v", err)
+		t.Fatalf("version(): %v", err)
 	}
-	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = resolved
+	if got != stamp {
+		t.Errorf("got %q, want %q", got, stamp)
 	}
-	dir := filepath.Dir(exe)
-	if versionFileAbove(dir) {
-		t.Skip("a VERSION already sits above this test binary; the walk cannot be pinned here")
-	}
-	path := filepath.Join(dir, "VERSION")
-	writeFile(t, path, "\n \t\n")
-	t.Cleanup(func() { os.Remove(path) })
 
-	if v, err := version(); err == nil {
-		t.Errorf("got %q, want a refusal for a blank VERSION", v)
-	}
+	newDeployment(t, "ada")
+	code, out, errOut := exec("version")
+	assertResult(t, code, out, errOut, 0, "loc "+stamp+"\n", "")
 }
 
 // stampVersion sets the link-time number for one test and puts it back after.
@@ -297,20 +262,6 @@ func stampVersion(t *testing.T, v string) {
 	prev := buildVersion
 	buildVersion = v
 	t.Cleanup(func() { buildVersion = prev })
-}
-
-func versionFileAbove(dir string) bool {
-	for i := 0; i < 40; i++ {
-		if _, err := os.Stat(filepath.Join(dir, "VERSION")); err == nil {
-			return true
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return false
-		}
-		dir = parent
-	}
-	return false
 }
 
 // -------------------------------------------------------------- dispatching

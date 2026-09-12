@@ -444,11 +444,6 @@ say "— the front page shows what the tool prints —"
 # output ever moves, the page moves with it or this fails.
 skip "README transcript equals a fresh run (timestamps masked)" "the captured transcript addresses bare endpoints, which the presence model bars — a bare name is never an endpoint — so replaying it against this build would be replaying a deployment it cannot have; the Go build's render contract is internal/loc/render_test.go, which diffs this same README block directly"
 
-say "— one version, stated once —"
-if "$ROOT/conformance/check-version.sh" >/dev/null 2>&1; then
-  ok "VERSION, loc version, docs and tag agree"
-else bad "VERSION, loc version, docs and tag agree (run conformance/check-version.sh)"; fi
-
 say "— repo cleanliness (future-public discipline) —"
 say "  (cleanliness list read from: $REAL_LOC_HOME/forbidden)"
 if LOC_FORBIDDEN_FILE="$REAL_LOC_HOME/forbidden" "$ROOT/conformance/check-clean.sh" >/dev/null 2>&1; then

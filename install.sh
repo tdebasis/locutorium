@@ -61,7 +61,14 @@ LINK="$PREFIX/loc"
 # installed artifact is named for what it IS, so `readlink` answers "which build
 # is this machine running" without executing anything.
 LIBDIR="$(dirname "$PREFIX")/lib/locutorium"
-VERSION_STR="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+# The tag IS the version, so a clone whose tags are behind the remote names an
+# older release. The fetch comes BEFORE the name is read, because the name below
+# and the stamp `make build` links in both come from the same `git describe`.
+git -C "$ROOT" fetch --tags --quiet 2>/dev/null || echo "install: could not fetch tags; the name below may be stale"
+VERSION_STR="$(git -C "$ROOT" describe --tags --dirty --always 2>/dev/null | sed 's/^v//')"
+# The `||` of a pipeline reads sed's status, not git's, so a failed describe
+# leaves this empty rather than taking a default. The emptiness is the test.
+[[ -n "$VERSION_STR" ]] || VERSION_STR=dev
 SHA="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo nogit)"
 TARGET="$LIBDIR/loc-$VERSION_STR-$SHA"
 changed=0

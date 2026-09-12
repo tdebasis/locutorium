@@ -432,8 +432,9 @@ as.
 loc version
 ```
 
-Prints the version from `VERSION`. `conformance/check-version.sh` enforces that this, the file, the
-docs and the git tag all agree.
+Prints the `git describe` stamp the build linked in. On a tagged commit it is the bare number. Off
+a tag it carries `-N-g<sha>`, which names the commit. An unclean tree adds `-dirty`. A plain
+`go build` stamps nothing and prints `dev`.
 
 ---
 

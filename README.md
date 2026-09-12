@@ -8,7 +8,7 @@
 
 <img src="docs/art/architecture.png" alt="an older drawing of the architecture: ada sends a word into the medium, a queue holds it for bob until bob reads it, a topic is the room, and a knock wakes bob. The picture is stale. It draws hook scripts, a background listener verb and a spool file, and this build has none of the three. A seat's own mcp server rings the bell, and a read takes the queue and then the rooms." width="920">
 
-![version](https://img.shields.io/badge/version-v0.1.1-1e1e1e) ![macOS](https://img.shields.io/badge/macOS-supported-a5d8ff) ![bash](https://img.shields.io/badge/bash-3.2%2B-ffec99) ![conformance](https://img.shields.io/badge/conformance-passing-b2f2bb)
+![macOS](https://img.shields.io/badge/macOS-supported-a5d8ff) ![bash](https://img.shields.io/badge/bash-3.2%2B-ffec99) ![conformance](https://img.shields.io/badge/conformance-passing-b2f2bb)
 
 </div>
 
@@ -124,7 +124,7 @@ prints every default it wrote. It also runs the heartbeat, which sweeps every fi
 | `loc topics` | the rooms alive now | active topics in the window |
 | `loc registry` | who is at the door | asks an instance's host over the bus; under per-seat servers nobody answers and it fails |
 | `loc watch` | the gallery | every envelope as it passes, read-only |
-| `loc version` | the number | prints the version in `VERSION` |
+| `loc version` | the number | prints what this build was stamped as |
 
 `loc` dispatches fifteen verbs. `docs/CLI.md` lists all of them.
 
@@ -165,6 +165,6 @@ are changing this repository, read [`AGENTS.md`](AGENTS.md).
 
 ## Status
 
-Early; interfaces may move. The version is in `VERSION`; the definition of the product is the conformance suite;
+Early; interfaces may move. The definition of the product is the conformance suite;
 `docs/PROTOCOL.md` §8 says what a change in version means. Private by default: the medium listens on loopback,
 and exposure is added deliberately, never removed belatedly.

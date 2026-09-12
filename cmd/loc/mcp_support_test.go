@@ -102,8 +102,8 @@ func buildLoc(t *testing.T) string {
 	}
 	bin := filepath.Join(t.TempDir(), "loc")
 	// Stamped, as `make build` stamps it: the version is what the server
-	// introduces itself as in the handshake, and a binary built into a temp
-	// directory has no VERSION file above it to read one from.
+	// introduces itself as in the handshake, and an unstamped binary would
+	// introduce itself as `dev`.
 	out, err := osexec.Command(goTool, "build",
 		"-ldflags", "-X main.buildVersion=0.0.0-test", "-o", bin, ".").CombinedOutput()
 	if err != nil {

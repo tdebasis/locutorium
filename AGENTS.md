@@ -36,10 +36,10 @@ To **deploy** it, read
 `internal/presence` the model · `internal/provider` + `internal/provider/nats` the adapter ·
 `internal/mcpserve` the `mcp` verb — this build's listener, which is a stdio MCP server the agent
 runtime launches rather than a background process (`docs/CLI.md` §mcp) ·
-`Makefile` the one command that builds it, stamping `VERSION` in at link time · `build/` its
+`Makefile` the one command that builds it, stamping `git describe` in at link time · `build/` its
 output, gitignored, because a binary is an artifact and not source.
 
 **Around it.** `install.sh` (copies the stamped binary and links `loc` at it) ·
-`conformance/run.sh` the suite · `conformance/check-clean.sh` ·
-`conformance/check-version.sh` (asks the binary its version) · `VERSION` · `docs/` · `RELEASE.md`.
+`conformance/run.sh` the suite · `conformance/check-clean.sh` · `docs/` · `RELEASE.md`.
+The version is `git describe`, stamped at build: there is no file to keep in agreement.
 The broker runs inside the binary. The repository holds no provider script and no service file.
