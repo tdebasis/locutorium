@@ -26,6 +26,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/tdebasis/locutorium/internal/loc"
 	model "github.com/tdebasis/locutorium/internal/presence"
 )
 
@@ -758,6 +759,41 @@ func TestQueueCount_ThePeekTrailerClosesTheQueue(t *testing.T) {
 	_, _ = io.WriteString(c, "trailing noise\n")
 	if c.n != 1 {
 		t.Errorf("counted %d; one was handed over", c.n)
+	}
+}
+
+// A sender picks its own identity, and the identity is the first bytes of the
+// envelope a reader sees. A seat named like the topics heading must not be able
+// to close the queue early and take every envelope after it out of the count.
+func TestQueueCount_ASenderNamedLikeTheHeadingCannotSilenceTheCount(t *testing.T) {
+	render := func(from string) string {
+		var b strings.Builder
+		err := loc.RenderOne(&b, loc.Envelope{
+			ID:   "0bb1d1ab-0000-4000-8000-000000000001",
+			TS:   "2026-09-12T00:00:00Z",
+			From: from,
+			To:   "workshop.scribe",
+			Kind: "mail",
+			Body: "one line",
+		})
+		if err != nil {
+			t.Fatalf("render an envelope from %q: %v", from, err)
+		}
+		return b.String()
+	}
+	c := &queueCount{w: io.Discard}
+	for _, s := range []string{
+		"── queue.workshop.scribe ──\n",
+		render("── topics ──x"),
+		render("a"),
+		"── topics ──\n",
+	} {
+		if _, err := io.WriteString(c, s); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	if c.n != 2 {
+		t.Errorf("counted %d handed over; two envelopes came out of the queue", c.n)
 	}
 }
 
