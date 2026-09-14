@@ -11,9 +11,13 @@ on:
 permissions:
   contents: read
 
+# A pull request's run is superseded by its next push, so it cancels. A push to main never
+# does: every commit on main shipped and needs its own verdict and its own tag (#59). Each
+# push to main is its own group. Grouping main pushes together and turning cancel-in-progress
+# off is not enough: GitHub still cancels a PENDING run when a newer one queues.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   scope:
@@ -404,6 +408,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    # One tag job at a time, so two merges never compute the same number. queue: max keeps up to
+    # 100 waiting instead of cancelling all but the newest (#59).
+    concurrency:
+      group: tag-main
+      queue: max
     steps:
       - uses: actions/checkout@v4
         with:
