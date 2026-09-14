@@ -124,7 +124,9 @@ jobs:
         run: go vet ./...
       - name: test
         if: steps.probe.outputs.present == 'true'
-        run: go test -cover -coverprofile=coverage.out ./... | tee /tmp/cov.txt
+        run: |
+          set -o pipefail
+          go test -cover -coverprofile=coverage.out ./... | tee /tmp/cov.txt
 
       - name: the suite's own machinery
         # The teardown and the pre-run cleanup are tests OF the suite, not the
