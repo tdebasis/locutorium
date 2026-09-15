@@ -27,7 +27,7 @@ A pull request title is the release note for that change. Write it as `type(comp
 release nothing. Add `!` after the type to mark a breaking change, for example
 `feat(cli)!: rename the flag`.
 
-After `0.1.0`, `feat` moves the middle digit, `fix` and `perf` the last digit, and `!` the first.
+After `0.1.0`, `feat` moves the middle digit, and `fix` and `perf` move the last digit. `!` also moves the middle digit, until a release reaches `1.0.0`.
 
 ## Merges
 
