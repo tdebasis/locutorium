@@ -43,7 +43,7 @@ the changelog section, then merge.
 
 The workflow reads the repository secret `RELEASE_PLEASE_TOKEN`. It is a fine-grained personal access
 token. It is scoped to this repository, with write access to contents, pull requests and issues. It
-expires on EXPIRY-DATE-TBD.
+expires on 2027-09-15.
 
 The default `GITHUB_TOKEN` is not used. A pull request that it opens starts no workflow, so the
 Release PR would carry no CI run.
