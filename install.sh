@@ -13,9 +13,10 @@
 #   ./install.sh --main [--prefix DIR] [--dry-run]      # build this checkout's HEAD
 #   ./install.sh --uninstall [--prefix DIR] [--dry-run]
 #
-# The default fetches the tags. It builds the newest v* tag in a temporary
-# worktree, and it removes that worktree afterwards. Your checkout is not
-# touched. With no release tag and no --main, this script stops and exits 2.
+# The default reads the newest v* tag from origin and fetches the tags. It
+# builds that tag in a temporary worktree, and it removes that worktree
+# afterwards. Your checkout is not touched. With no release tag and no
+# --main, this script stops and exits 2.
 #
 # WHY A COPY AND NOT A LINK INTO build/. A link into the build tree makes the
 # installed tool whatever was last compiled — `make build` would silently change
@@ -29,14 +30,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 LOC_HOME="${LOC_HOME:-$HOME/.locutorium}"
 PREFIX="" DRY=no UNINSTALL=no MAIN=no
 
-usage() { sed -n '2,18p' "${BASH_SOURCE[0]}"; exit 2; }
+usage() { sed -n '2,19p' "${BASH_SOURCE[0]}"; exit 2; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --prefix) PREFIX="${2:-}"; [[ -n "$PREFIX" ]] || usage; shift 2 ;;
     --dry-run) DRY=yes; shift ;;
     --main) MAIN=yes; shift ;;
     --uninstall) UNINSTALL=yes; shift ;;
-    -h|--help) sed -n '2,18p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help) sed -n '2,19p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "install: unknown argument: $1" >&2; usage ;;
   esac
 done
@@ -71,14 +72,23 @@ LIBDIR="$(dirname "$PREFIX")/lib/locutorium"
 # The tag IS the version, so a clone whose tags are behind the remote names an
 # older release. The fetch comes BEFORE the name is read, because the name below
 # and the stamp `make build` links in both come from the same `git describe`.
-# --prune-tags deletes a local tag that the remote no longer has. A persistent
-# clone keeps a deleted tag for ever without it, and "the newest tag" then names
-# a release that nobody can fetch.
-git -C "$ROOT" fetch --tags --prune --prune-tags --quiet 2>/dev/null || echo "install: could not fetch tags; the name below may be stale"
+# The fetch adds tags and deletes none. The tag list below is read from origin,
+# not from this clone, so a deleted-upstream tag is never picked. --prune-tags
+# is not used: it deletes a tag the person made and never pushed, with no
+# warning that it did.
+git -C "$ROOT" fetch --tags --quiet 2>/dev/null || echo "install: could not fetch tags from origin"
 TAG=""
-if [[ "$MAIN" == no ]]; then
+if [[ "$MAIN" == no && "$UNINSTALL" == no ]]; then
+  REMOTE_TAGS="$(git -C "$ROOT" ls-remote --tags --refs origin 'refs/tags/v[0-9]*')" || {
+    echo "install: could not read the tags on origin; run ./install.sh --main to build HEAD" >&2
+    exit 3
+  }
   # `sort -V` orders by version number, so v0.10.0 comes after v0.9.0. A plain
   # `sort` puts them the other way round and installs the older release.
+  TAG="$(printf '%s\n' "$REMOTE_TAGS" | sed 's#.*refs/tags/##' | sort -V | tail -1)"
+elif [[ "$MAIN" == no ]]; then
+  # The uninstall path must work with no network and on a clone with no tags,
+  # so it reads the local tag list here, not the list on origin.
   TAG="$(git -C "$ROOT" tag -l 'v[0-9]*' | sort -V | tail -1)"
 fi
 # A REFUSAL, NOT A FALLBACK. An empty TAG in the default mode means the
@@ -89,6 +99,24 @@ fi
 if [[ -z "$TAG" && "$MAIN" == no && "$UNINSTALL" == no ]]; then
   echo "install: no release tag found; run ./install.sh --main to build HEAD" >&2
   exit 2
+fi
+# The tag named above came from origin, not from this clone, so it is verified
+# here before any use. A build must not run on a tag the fetch did not bring,
+# and it must not run on a local tag whose commit differs from origin's.
+if [[ -n "$TAG" && "$UNINSTALL" == no ]]; then
+  if ! git -C "$ROOT" rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+    echo "install: $TAG is on origin but not in this clone; the fetch did not bring it" >&2
+    exit 4
+  fi
+  # Both ids are the ref's own object: for an annotated tag that is the tag
+  # object, and for a light tag the commit. Peeling one side and not the other
+  # would refuse every annotated release.
+  REMOTE_SHA="$(printf '%s\n' "$REMOTE_TAGS" | awk -v t="refs/tags/$TAG" '$2==t{print $1}')"
+  LOCAL_SHA="$(git -C "$ROOT" rev-parse "refs/tags/$TAG")"
+  if [[ "$REMOTE_SHA" != "$LOCAL_SHA" ]]; then
+    echo "install: the local tag $TAG differs from origin; I will not build it or move it" >&2
+    exit 4
+  fi
 fi
 if [[ -n "$TAG" ]]; then
   VERSION_STR="${TAG#v}"
