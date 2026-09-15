@@ -9,6 +9,10 @@ trusting.
 `./install.sh` builds it, copies the stamped binary out of the build tree, and links it into your
 PATH as `loc`. The broker runs inside the binary, so the installer supervises nothing.
 
+It has two build modes. The default builds the newest release tag, `v*`, in a temporary worktree, so
+your own checkout is not touched. `--main` builds this checkout's `HEAD`. With no release tag and no
+`--main`, the installer exits 2 and names `--main`. `RELEASE.md` describes the releases.
+
 > A bash implementation lived here until 2026-09-07 and was deleted. It was interim, and keeping two
 > implementations meant maintaining the layer between them — which is where its defects turned out
 > to live, not in either tool.
@@ -49,8 +53,9 @@ is the lifecycle.
 
 | flag | effect |
 |---|---|
+| `--main` | build this checkout's `HEAD` instead of the newest release tag |
 | `--prefix DIR` | where the `loc` link goes; the stamped copy goes in `lib/locutorium` beside it |
-| `--dry-run` | print NEW / CHANGED / UNCHANGED for each artifact; write nothing |
+| `--dry-run` | name the tag it would build, print NEW / CHANGED / UNCHANGED for each artifact, and write nothing; it makes no worktree |
 | `--uninstall` | remove the `loc` link (only if it points at a copy this clone made) and the stamped copies; never `$LOC_HOME` |
 | `-h`, `--help` | usage |
 
@@ -58,7 +63,7 @@ is the lifecycle.
 
 ```
 $ ./install.sh --dry-run
-           --dry-run: 'make build' not run; /opt/homebrew/bin/loc would point at /opt/homebrew/lib/locutorium/loc-0.1.1-d616027
+           --dry-run: would build v0.1.1 in a temporary worktree; /opt/homebrew/bin/loc would point at /opt/homebrew/lib/locutorium/loc-0.1.1-d616027
 UNCHANGED  /opt/homebrew/bin/loc -> /opt/homebrew/lib/locutorium/loc-0.1.1-d616027
 --dry-run: 0 artifact(s) would change; nothing written.
 ```
@@ -184,7 +189,7 @@ Register it with `schtasks /Create /TN Locutorium /XML locutorium.xml`.
 
 ## Exit codes
 
-`0` done or nothing to do · `2` usage · `3` a dependency is missing (each is named with its
+`0` done or nothing to do · `2` usage, or no release tag in the default mode · `3` a dependency is missing (each is named with its
 install line), or a `make build` that failed · `4` refusal — something is in the way that the
 installer did not create.
 

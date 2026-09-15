@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 # A pull request's run is superseded by its next push, so it cancels. A push to main never
-# does: every commit on main shipped and needs its own verdict and its own tag (#59). Each
+# does: every commit on main shipped and needs its own verdict (#59). Each
 # push to main is its own group. Grouping main pushes together and turning cancel-in-progress
 # off is not enough: GitHub still cancels a PENDING run when a newer one queues.
 concurrency:
