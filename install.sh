@@ -71,7 +71,10 @@ LIBDIR="$(dirname "$PREFIX")/lib/locutorium"
 # The tag IS the version, so a clone whose tags are behind the remote names an
 # older release. The fetch comes BEFORE the name is read, because the name below
 # and the stamp `make build` links in both come from the same `git describe`.
-git -C "$ROOT" fetch --tags --quiet 2>/dev/null || echo "install: could not fetch tags; the name below may be stale"
+# --prune-tags deletes a local tag that the remote no longer has. A persistent
+# clone keeps a deleted tag for ever without it, and "the newest tag" then names
+# a release that nobody can fetch.
+git -C "$ROOT" fetch --tags --prune --prune-tags --quiet 2>/dev/null || echo "install: could not fetch tags; the name below may be stale"
 TAG=""
 if [[ "$MAIN" == no ]]; then
   # `sort -V` orders by version number, so v0.10.0 comes after v0.9.0. A plain
