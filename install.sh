@@ -2,15 +2,20 @@
 # install.sh — put loc on your PATH.
 #
 # It writes these two things and nothing else:
-#   1. $LIBDIR/loc-<version>-<sha> — the built binary, COPIED out of build/
+#   1. $LIBDIR/loc-<version>-<sha> — the built binary, COPIED out of the build tree
 #   2. $PREFIX/loc — a symlink to that copy
 # It never writes under $LOC_HOME (your deployment: config, store). The broker is
 # embedded in the binary and `loc start` runs it, so this installer supervises
 # nothing and starts nothing.
 #
 # Usage:
-#   ./install.sh [--prefix DIR] [--dry-run]
+#   ./install.sh [--prefix DIR] [--dry-run]             # build the newest release tag
+#   ./install.sh --main [--prefix DIR] [--dry-run]      # build this checkout's HEAD
 #   ./install.sh --uninstall [--prefix DIR] [--dry-run]
+#
+# The default fetches the tags. It builds the newest v* tag in a temporary
+# worktree, and it removes that worktree afterwards. Your checkout is not
+# touched. With no release tag and no --main, this script stops and exits 2.
 #
 # WHY A COPY AND NOT A LINK INTO build/. A link into the build tree makes the
 # installed tool whatever was last compiled — `make build` would silently change
@@ -21,17 +26,17 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-BUILT="$ROOT/build/bin/loc"
 LOC_HOME="${LOC_HOME:-$HOME/.locutorium}"
-PREFIX="" DRY=no UNINSTALL=no
+PREFIX="" DRY=no UNINSTALL=no MAIN=no
 
-usage() { sed -n '2,17p' "${BASH_SOURCE[0]}"; exit 2; }
+usage() { sed -n '2,18p' "${BASH_SOURCE[0]}"; exit 2; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --prefix) PREFIX="${2:-}"; [[ -n "$PREFIX" ]] || usage; shift 2 ;;
     --dry-run) DRY=yes; shift ;;
+    --main) MAIN=yes; shift ;;
     --uninstall) UNINSTALL=yes; shift ;;
-    -h|--help) sed -n '2,17p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help) sed -n '2,18p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "install: unknown argument: $1" >&2; usage ;;
   esac
 done
@@ -61,17 +66,54 @@ LINK="$PREFIX/loc"
 # installed artifact is named for what it IS, so `readlink` answers "which build
 # is this machine running" without executing anything.
 LIBDIR="$(dirname "$PREFIX")/lib/locutorium"
+
+# ── which tree gets built ────────────────────────────────────────────────────
 # The tag IS the version, so a clone whose tags are behind the remote names an
 # older release. The fetch comes BEFORE the name is read, because the name below
 # and the stamp `make build` links in both come from the same `git describe`.
 git -C "$ROOT" fetch --tags --quiet 2>/dev/null || echo "install: could not fetch tags; the name below may be stale"
-VERSION_STR="$(git -C "$ROOT" describe --tags --dirty --always 2>/dev/null | sed 's/^v//')"
-# The `||` of a pipeline reads sed's status, not git's, so a failed describe
-# leaves this empty rather than taking a default. The emptiness is the test.
-[[ -n "$VERSION_STR" ]] || VERSION_STR=dev
-SHA="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo nogit)"
+TAG=""
+if [[ "$MAIN" == no ]]; then
+  # `sort -V` orders by version number, so v0.10.0 comes after v0.9.0. A plain
+  # `sort` puts them the other way round and installs the older release.
+  TAG="$(git -C "$ROOT" tag -l 'v[0-9]*' | sort -V | tail -1)"
+fi
+# A REFUSAL, NOT A FALLBACK. An empty TAG in the default mode means the
+# repository has no release yet. Building HEAD instead would install something
+# nobody released, under a name that looks like one, so the script stops and
+# names the flag that asks for HEAD. The uninstall path never stops here: it
+# builds nothing, and it must work on a clone that has no tags.
+if [[ -z "$TAG" && "$MAIN" == no && "$UNINSTALL" == no ]]; then
+  echo "install: no release tag found; run ./install.sh --main to build HEAD" >&2
+  exit 2
+fi
+if [[ -n "$TAG" ]]; then
+  VERSION_STR="${TAG#v}"
+  SHA="$(git -C "$ROOT" rev-parse --short "$TAG^{commit}" 2>/dev/null || echo nogit)"
+else
+  VERSION_STR="$(git -C "$ROOT" describe --tags --dirty --always 2>/dev/null | sed 's/^v//')"
+  # The `||` of a pipeline reads sed's status, not git's, so a failed describe
+  # leaves this empty rather than taking a default. The emptiness is the test.
+  [[ -n "$VERSION_STR" ]] || VERSION_STR=dev
+  SHA="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo nogit)"
+fi
 TARGET="$LIBDIR/loc-$VERSION_STR-$SHA"
 changed=0
+
+# The worktree is this script's own litter, so this script removes it on every
+# exit path. The trap keeps the rc of whatever ended the script: a cleanup that
+# reports its own success hides the failure it was cleaning up after.
+TMPD="" WT=""
+cleanup() {
+  local rc=$?
+  if [[ -n "$WT" ]]; then
+    git -C "$ROOT" worktree remove --force "$WT" >/dev/null 2>&1 || true
+    git -C "$ROOT" worktree prune >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$TMPD" ]]; then rm -rf "$TMPD" || true; fi
+  return $rc
+}
+trap cleanup EXIT
 
 # ── one link, made or reported ───────────────────────────────────────────────
 # Both binaries are the same artifact shape — a symlink from the prefix into this
@@ -137,9 +179,27 @@ fi
 # failure would surface as a puzzle at the next invocation rather than here,
 # where the person is watching.
 if [[ "$DRY" == yes ]]; then
-  echo "           --dry-run: 'make build' not run; $LINK would point at $TARGET"
+  if [[ -n "$TAG" ]]; then
+    echo "           --dry-run: would build $TAG in a temporary worktree; $LINK would point at $TARGET"
+  else
+    echo "           --dry-run: would build HEAD at $VERSION_STR; $LINK would point at $TARGET"
+  fi
 else
-  (cd "$ROOT" && make build) || { echo "install: 'make build' failed; nothing installed" >&2; exit 3; }
+  # THE TAG IS BUILT SOMEWHERE ELSE. A checkout of the tag in place would move
+  # the person's working tree, and a release install must not do that. The
+  # worktree is detached at the tag, so `git describe` inside it prints the bare
+  # number and `make build` stamps that number into the binary.
+  if [[ -n "$TAG" ]]; then
+    TMPD="$(mktemp -d "${TMPDIR:-/tmp}/loc-install.XXXXXX")"
+    WT="$TMPD/src"
+    git -C "$ROOT" worktree add --detach --quiet "$WT" "$TAG" || {
+      echo "install: could not make a worktree at $TAG; nothing installed" >&2; exit 3; }
+    SRC="$WT"
+  else
+    SRC="$ROOT"
+  fi
+  BUILT="$SRC/build/bin/loc"
+  (cd "$SRC" && make build) || { echo "install: 'make build' failed; nothing installed" >&2; exit 3; }
   [[ -x "$BUILT" ]] || { echo "install: the build produced no $BUILT" >&2; exit 3; }
   mkdir -p "$LIBDIR"
   if [[ -e "$TARGET" ]] && cmp -s "$BUILT" "$TARGET"; then
