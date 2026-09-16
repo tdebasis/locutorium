@@ -106,3 +106,33 @@ func TestEnvelopeDoesNotEscapeHTML(t *testing.T) {
 		t.Errorf("body was escaped: %s", b)
 	}
 }
+
+// A reader holds wire bytes and needs the id out of them to join its `read`
+// line to the sender's `sent` line. A round trip is the only check that
+// matters here: the id that comes back is the id that went out.
+func TestParseEnvelopeRoundTripsTheID(t *testing.T) {
+	e := NewEnvelope("ada", "bob", "msg", "she said \"hi\"\nand left")
+	raw, err := e.Marshal()
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	got, err := ParseEnvelope(raw)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got.ID != e.ID || got.From != e.From || got.To != e.To || got.Body != e.Body {
+		t.Errorf("round trip lost a field: got %+v, want %+v", got, e)
+	}
+}
+
+// A payload that is not an object is an ERROR and not a zero Envelope. An
+// empty id is a join key that matches every other empty id in the day's file,
+// so a caller that logged one would report reads of a message that is not
+// there.
+func TestParseEnvelopeRefusesWhatIsNotAnEnvelope(t *testing.T) {
+	for _, raw := range []string{``, `not json`, `"a string"`, `[1,2]`, `{`} {
+		if _, err := ParseEnvelope([]byte(raw)); err == nil {
+			t.Errorf("ParseEnvelope(%q) succeeded; want an error", raw)
+		}
+	}
+}
