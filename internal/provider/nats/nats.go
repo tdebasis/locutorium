@@ -89,7 +89,12 @@ func (p *Provider) connectWithin(dial time.Duration) error {
 		return nil
 	}
 	url := config.Value(config.NATSURL)
-	nc, err := natsgo.Connect(url,
+	// THE GUARD RUNS BEFORE THE DIAL. Nothing reaches the network when it
+	// fires. See refuseDefaultUnderTest in guard.go and the outage it records.
+	if err := refuseDefaultUnderTest(url); err != nil {
+		return err
+	}
+	nc, err := dialBroker(url,
 		natsgo.Name("loc"),
 		natsgo.Timeout(dial),
 		// THE ONLY PLACE A REFUSAL IS EVER SAID OUT LOUD. See noteRefusal.
