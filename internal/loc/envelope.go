@@ -85,3 +85,22 @@ func uuid4() string {
 	hex.Encode(out[24:36], b[10:16])
 	return string(out[:])
 }
+
+// ParseEnvelope reads one envelope back off the wire.
+//
+// A reader holds raw bytes, never the struct the sender built: the medium
+// carries Marshal's output and nothing else. The record needs the `id` out of
+// those bytes to join a `read` line to the `sent` line for the same message,
+// and a reader that picked the id out with a string search would find one
+// inside a body that quotes an envelope.
+//
+// A payload that is not an object is an error rather than a zero Envelope,
+// because an empty id is a join key that matches every other empty id in the
+// file.
+func ParseEnvelope(raw []byte) (Envelope, error) {
+	var e Envelope
+	if err := json.Unmarshal(raw, &e); err != nil {
+		return Envelope{}, err
+	}
+	return e, nil
+}
