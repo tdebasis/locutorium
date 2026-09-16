@@ -57,7 +57,10 @@ fi
 # else, so a maintainer's hand run is not red every day for a harmless reason.
 # A guard that is red every day is a guard nobody reads, and then a real hit is
 # waved through with the noise (#54).
-hits="$(grep -rniIE "$pattern" --exclude-dir=.git --exclude-dir=.idea --exclude-dir=.vscode \
+# A worktree's .git is a FILE, not a directory: it holds one line, an absolute
+# path to the real .git. --exclude-dir=.git does not match a file, so that line
+# was read and flagged. The file is never tracked, so excluding it loses nothing.
+hits="$(grep -rniIE "$pattern" --exclude-dir=.git --exclude=.git --exclude-dir=.idea --exclude-dir=.vscode \
   --exclude=check-clean.sh . || true)"
 
 if [[ -n "$hits" ]]; then
