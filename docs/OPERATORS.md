@@ -128,6 +128,11 @@ excludes its own shell, everything that started it, and everything it starts. If
 still standing afterwards the step fails, so a run never begins against processes that are not its
 own.
 
+**The suite refuses your live broker.** Under `go test`, the nats provider refuses the default
+`nats_url`, `nats://127.0.0.1:4222`. It refuses `localhost` and `::1` at that port too. A test that
+needs a broker must boot one and pin `nats_url` to its port. This holds on a machine that runs the
+Locutorium, where the default address is the live daemon.
+
 ## When something is wrong
 
 `loc status` (unread per endpoint, and whether a seat is registered) ·
