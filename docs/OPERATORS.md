@@ -97,6 +97,46 @@ There is no fallback from one notifier to another. A bell that could not ring is
 Identity comes from `LOC_IDENTITY` and from nothing else. A verb with no identity refuses
 (`loc_identity`). A refusal is correct; guessing is not.
 
+## The day's record
+
+`run/log/YYYY-MM-DD.jsonl` holds one JSON object per line, appended by every process on the machine.
+The day is the UTC day of the event. Each line is written in one call, so two processes never split
+a line between them. Read it with `grep`, or with `jq` one line at a time.
+
+There are two families of line. **Message events carry `uid`.** The `uid` is the message's id, and it
+is what joins the lines for one message.
+
+```json
+{"uid":"1f0c…","status":"sent","ts":"2026-09-16T17:02:11Z","from":"workshop.scribe","to":"workshop.clerk","body":"the ledger is ready"}
+{"uid":"1f0c…","status":"failed","ts":"2026-09-16T17:02:11Z","from":"workshop.scribe","to":"workshop.clerk","reason":"target not registered"}
+{"uid":"1f0c…","status":"read","ts":"2026-09-16T17:04:40Z","by":"workshop.clerk"}
+```
+
+`sent` says the message reached the medium. `failed` says `send` refused it, and the reason is one of
+`no identity`, `too long`, `target not registered` or `bus unreachable`. A `failed` line carries no
+body, because the message never left the sender. `read` says a reader took the message off its queue,
+and names who took it.
+
+A `sent` line with no `read` line under the same `uid` is a message nobody has collected yet.
+
+**Seat events carry `seat` and no `uid`.**
+
+```json
+{"seat":"workshop.scribe","status":"bell-failed","ts":"2026-09-16T17:02:12Z","reason":"exit status 3"}
+{"seat":"workshop.scribe","status":"queue-deleted","ts":"2026-09-16T18:40:00Z","reason":"orphan"}
+```
+
+`bell-failed` says the seat's notifier could not ring. The mail is still in the queue, and the seat
+finds it on its next `read`. The line names no message: the server is told that mail arrived and
+never which message arrived.
+
+`queue-deleted` says a queue is gone, so mail stops reaching that seat. The reason is one of `left`
+(the agent unsubscribed), `displaced` (another agent took the seat with `--force`), `expired` (the
+sweep found the registered process gone) or `orphan` (the sweep found a queue no row claims).
+
+The file holds message bodies in plain text. The writer creates the directory `0700` and the file
+`0600`, and it sets those modes only when it creates them.
+
 ## Rollback
 
 | what | how |
@@ -137,5 +177,6 @@ Locutorium, where the default address is the live daemon.
 
 `loc status` (unread per endpoint, and whether a seat is registered) ·
 `loc registry` (who is attending) · `run/<endpoint>.delivery.log` (what the
-listener did and when) · `loc read --peek` (look without taking) · `loc watch` (every envelope,
+listener did and when) · `run/log/YYYY-MM-DD.jsonl` (what happened to each message, and to each
+seat) · `loc read --peek` (look without taking) · `loc watch` (every envelope,
 read-only).

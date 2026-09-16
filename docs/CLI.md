@@ -108,8 +108,11 @@ unknown name is refused before anything is sent.
 
 - **Body limit is 4000 characters, not bytes.** Counted in codepoints, so emoji cost one each. An
   over-long body is refused *before* it reaches the medium — nothing is partially sent.
-- Prints `sent → queue.<endpoint>`. There is one form of that line and it does not vary with what is
-  running at the far end.
+- Prints `sent → queue.<endpoint> uid=<uuid>`. There is one form of that line and it does not vary
+  with what is running at the far end. The `uid` is the message's id. Use it to find the message in
+  the day's record, and to find the `read` line written under the same id when somebody takes it.
+- A refused send writes a `failed` line to the day's record. The line carries the `uid`, the reason,
+  and no body. See `OPERATORS.md`.
 - **`loc send` puts the message in the queue and rings nothing.** The seat's own server is the one
   thing that notifies, through the notifier its registered type names: `tmux` types the bell into the
   seat's pane, `claude` sends it through a one-shot courier, and `none` rings nothing at all — a seat
@@ -144,6 +147,12 @@ loc read --json
 
 Without a flag: presents your queue, then topics — and **consumes** all of it. A message is handed
 over exactly once.
+
+Each message taken from your **queue** writes a `read` line to the day's record. The line carries the
+message's `uid` and your endpoint name. It is written after the acknowledgement, so a recorded read
+is a read that happened. A **topic** message writes nothing: everyone attending reads it from their
+own position, so no one read is a fact about the message. `--peek` writes nothing, because it
+consumes nothing. See `OPERATORS.md`.
 
 Each message is **acknowledged only after it has been shown**, and the acknowledgement is what
 deletes it. So if presenting fails part way — a dead terminal, a broken pipe — the message is
