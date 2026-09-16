@@ -1,0 +1,27 @@
+# The release. Every push to main gives release-please the new commits. It keeps
+# one open Release PR with the next number and the CHANGELOG entry. The merge of
+# that PR is the release: the action then creates the tag and the GitHub Release.
+# `RELEASE.md` holds the rules for PR titles, merges and the token.
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  release-please:
+    name: release-please
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          # A PR opened by the default GITHUB_TOKEN starts no workflow, so the
+          # Release PR would carry no CI run and nothing would gate the merge.
+          # This is a fine-grained personal access token. It opens the PR as the
+          # maintainer, and the checks run. `RELEASE.md` records its expiry date.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}

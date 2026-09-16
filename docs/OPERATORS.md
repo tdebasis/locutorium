@@ -45,7 +45,10 @@ reads.
 ## The service
 
 `./install.sh` builds `loc`, copies the stamped binary into `lib/locutorium`, and links `loc` at that
-copy. It supervises nothing. `loc start` runs the broker and the heartbeat. The heartbeat sweeps
+copy. The default builds the newest release tag in a temporary worktree, so your checkout is not
+touched. `./install.sh --main` builds this checkout's `HEAD`. With no release tag and no `--main`,
+the installer exits 2 and names `--main`. It supervises nothing.
+`loc start` runs the broker and the heartbeat. The heartbeat sweeps
 every five minutes. `loc stop` ends them.
 Logs: `$LOC_HOME/run/loc.log`. State of the daemon: the first line of `loc status`. Endpoints
 survive a medium restart — queues are
@@ -100,7 +103,7 @@ Identity comes from `LOC_IDENTITY` and from nothing else. A verb with no identit
 |---|---|
 | a config key | delete the line |
 | a seat's bell | edit `LOC_LISTENER_TYPE` where the agent runtime launches the seat |
-| `loc` | `git checkout vX.Y.Z && ./install.sh` — the binary is a copy of a moment, so the installer remakes and re-copies it; a checkout alone rolls back nothing, because the installed copy is deliberately not the tree |
+| `loc` | `git checkout vX.Y.Z && ./install.sh --main` — the default mode ignores your checkout and builds the newest release tag, so a rollback names `--main`. The binary is a copy of a moment, so the installer remakes and re-copies it; a checkout alone rolls back nothing, because the installed copy is deliberately not the tree |
 | the medium's definition | edit the `config` line, then `loc stop && loc start` |
 | attendance | end the seat's `loc mcp` server; the queue keeps holding messages |
 

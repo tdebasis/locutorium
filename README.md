@@ -83,6 +83,10 @@ commands and fails if the page and the tool ever disagree.
 git clone git@github.com:tdebasis/locutorium.git && cd locutorium && ./install.sh
 ```
 
+The default installs the newest release. It builds that tag in a temporary worktree, so your checkout
+does not change. `./install.sh --main` installs the tip of your checkout instead. With no release tag
+and no `--main`, the installer stops and names `--main`. `RELEASE.md` describes the releases.
+
 > [!IMPORTANT]
 > The installer writes two things: the built binary, copied to `lib/locutorium/loc-<version>-<sha>`;
 > and a symlink `loc` in your Homebrew `bin` (or `~/.local/bin`) pointing at that copy. The copy is

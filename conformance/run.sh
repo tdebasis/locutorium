@@ -376,12 +376,18 @@ check "a two-hop symlink to loc finds its house" env LOC_IDENTITY=$(ep alice) "$
 # binary carries both inside itself, so there is nothing here to refuse.
 
 say "— the installer links loc and leaves when told —"
+# --main IS REQUIRED HERE. The suite tests the checkout it was launched from, so
+# the installer must build that checkout. With no flag install.sh builds the
+# newest release tag instead, and the next case would run a binary from another
+# commit. The uninstall carries --main for the same reason: the mode picks the
+# artifact NAME, and a name taken from the newest tag does not match the copy
+# that --main installed.
 check "install.sh links loc into a prefix" \
-  "$ROOT/install.sh" --prefix "$L/bin"
+  "$ROOT/install.sh" --main --prefix "$L/bin"
 check "the installed link runs loc" env LOC_IDENTITY=$(ep alice) "$L/bin/loc" topics
-inst2="$("$ROOT/install.sh" --prefix "$L/bin" 2>&1 || true)"
+inst2="$("$ROOT/install.sh" --main --prefix "$L/bin" 2>&1 || true)"
 if grep -q "nothing to do" <<<"$inst2"; then ok "a second install has nothing to do"; else bad "a second install has nothing to do"; fi
-"$ROOT/install.sh" --uninstall --prefix "$L/bin" >/dev/null 2>&1 || true
+"$ROOT/install.sh" --uninstall --main --prefix "$L/bin" >/dev/null 2>&1 || true
 check_not "uninstall removes the link it made" test -e "$L/bin/loc"
 
 say "— cold read —"
