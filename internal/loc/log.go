@@ -19,7 +19,10 @@ import (
 // present. An empty `uid` on a seat event would put every seat event in the
 // message family, under a key that matches no message.
 //
-// The line is built in memory and handed to Write ONCE. Many processes append
+// The line is built in memory and handed to Write ONCE. (One Go call, not
+// one syscall: os.File.Write retries a short write, and a short write on a
+// local regular file needs ENOSPC or EINTR — Assayer N1. Precision, not a
+// live defect.) Many processes append
 // to this same file — every `loc send` and every `loc read` on the deployment,
 // on whatever day it is — and a line written across two Write calls can have
 // another writer's line land between the two halves, corrupting both records
@@ -56,11 +59,16 @@ func LogEvent(at time.Time, event any) {
 
 // LogSent records a message that reached the medium.
 //
-// The day file comes from the machine's clock rather than from the envelope's
-// own stamp, which is what this call has always done. The two are the same
-// call to time.Now a few microseconds apart.
+// THE DAY FILE COMES FROM THE ENVELOPE'S OWN STAMP, not from the clock at the
+// moment of writing. The first cut of this call took the file day from
+// time.Now and the line's ts from the envelope, and called the two "a few
+// microseconds apart". They are not: send() runs the attendance check and the
+// publish between stamping the envelope and reaching this line, and across
+// midnight that put a line stamped yesterday into today's file (Assayer, F1,
+// 2026-09-16). The line and its file now name the same day, as LogRead and
+// logSeat already did.
 func LogSent(e Envelope) {
-	LogEvent(time.Now().UTC(), struct {
+	LogEvent(stampedAt(e), struct {
 		UID    string `json:"uid"`
 		Status string `json:"status"`
 		TS     string `json:"ts"`
@@ -89,7 +97,7 @@ func LogSent(e Envelope) {
 // `from` is written even when it is empty, because the empty sender IS the
 // reason on a `no identity` refusal and a missing key would hide it.
 func LogFailed(e Envelope, reason string) {
-	LogEvent(time.Now().UTC(), struct {
+	LogEvent(stampedAt(e), struct {
 		UID    string `json:"uid"`
 		Status string `json:"status"`
 		TS     string `json:"ts"`
@@ -165,4 +173,15 @@ func logSeat(seat, status, reason string, at time.Time) {
 		TS:     at.UTC().Format(tsLayout),
 		Reason: reason,
 	})
+}
+
+// stampedAt is the envelope's own stamp as a time, and the day its line
+// belongs in. An envelope that carries an unreadable stamp still gets a line:
+// this log loses no record over a malformed field, so the fallback is the
+// clock, which is what the caller would have used before F1.
+func stampedAt(e Envelope) time.Time {
+	if at, err := time.Parse(tsLayout, e.TS); err == nil {
+		return at.UTC()
+	}
+	return time.Now().UTC()
 }

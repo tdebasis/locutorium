@@ -257,3 +257,32 @@ func equal(a, b []string) bool {
 	}
 	return true
 }
+
+// The Assayer's F1 on the first cut of this file: LogSent and LogFailed took
+// the day file from time.Now and the line's ts from the envelope, and the two
+// are separated by the attendance check and the publish inside send(). A send
+// stamped one second before midnight could land, stamped yesterday, in
+// today's file. The test hands each call an envelope stamped on a day that is
+// not today, and asks which file it landed in.
+func TestASendLandsInTheDayItWasStamped(t *testing.T) {
+	t.Setenv("LOC_HOME", t.TempDir())
+
+	stamped := time.Date(2026, 9, 15, 23, 59, 59, 0, time.UTC)
+	e := NewEnvelope("workshop.scribe", "workshop.clerk", "msg", "late")
+	e.TS = stamped.Format(tsLayout)
+	LogSent(e)
+	LogFailed(e, "too long")
+
+	if lines := dayLines(t, time.Now().UTC()); time.Now().UTC().Format("2006-01-02") != "2026-09-15" && len(lines) != 0 {
+		t.Errorf("today's file holds %d lines, want none: the line is stamped 2026-09-15", len(lines))
+	}
+	lines := dayLines(t, stamped)
+	if len(lines) != 2 {
+		t.Fatalf("the stamped day's file holds %d lines, want 2 (sent, failed)", len(lines))
+	}
+	for i, want := range []string{"sent", "failed"} {
+		if lines[i]["status"] != want || lines[i]["ts"] != "2026-09-15T23:59:59Z" {
+			t.Errorf("line %d = %v %v; want %s stamped 2026-09-15T23:59:59Z", i, lines[i]["status"], lines[i]["ts"], want)
+		}
+	}
+}
