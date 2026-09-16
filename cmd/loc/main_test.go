@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -156,6 +157,28 @@ func assertResult(t *testing.T, gotCode int, gotOut, gotErr string, wantCode int
 	}
 }
 
+// assertSent is the send success line, whose uid is different every run.
+//
+// It is a shape and not a byte-exact string, and the shape is asserted
+// TIGHTLY: a uuid of the right form, not a trailing anything. `sent` used to
+// be one fixed line per endpoint, and a loose match here would let the uid go
+// missing, or come out empty, without a case noticing — which is the whole of
+// what the line now adds.
+func assertSent(t *testing.T, gotCode int, gotOut, gotErr, to string) {
+	t.Helper()
+	if gotCode != 0 {
+		t.Errorf("exit code %d, want 0", gotCode)
+	}
+	if gotErr != "" {
+		t.Errorf("stderr: got %q, want empty", gotErr)
+	}
+	want := regexp.MustCompile(`^sent → queue\.` + regexp.QuoteMeta(to) +
+		` uid=[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\n$`)
+	if !want.MatchString(gotOut) {
+		t.Errorf("stdout:\n got %q\nwant ~ /%s/", gotOut, want)
+	}
+}
+
 // ------------------------------------------------------------------- usage
 
 // Everything that means "you typed it wrong" prints the verb list on STDOUT
@@ -280,12 +303,15 @@ func TestVerbsDispatch(t *testing.T) {
 		args   []string
 		out    string
 		stdout string
+		// sentTo, when set, means the line carries a uid and is matched by
+		// shape instead of byte for byte.
+		sentTo string
 		check  func(t *testing.T, s *spy)
 	}{
 		{
 			name:   "send",
 			args:   []string{"send", "bob", "message-one"},
-			stdout: "sent → queue.bob\n",
+			sentTo: "bob",
 			check: func(t *testing.T, s *spy) {
 				if len(s.sends) != 1 || s.sends[0].target != "bob" {
 					t.Fatalf("SendQueue calls: %v", s.sends)
@@ -340,7 +366,11 @@ func TestVerbsDispatch(t *testing.T) {
 			d.spy.out = tc.out
 
 			code, out, errOut := exec(tc.args...)
-			assertResult(t, code, out, errOut, 0, tc.stdout, "")
+			if tc.sentTo != "" {
+				assertSent(t, code, out, errOut, tc.sentTo)
+			} else {
+				assertResult(t, code, out, errOut, 0, tc.stdout, "")
+			}
 			tc.check(t, d.spy)
 			if d.spy.closed != 1 {
 				t.Errorf("provider closed %d times, want 1", d.spy.closed)
@@ -511,7 +541,7 @@ func TestLegalTopicNamesArePublished(t *testing.T) {
 func TestABodyAtTheLimitIsAccepted(t *testing.T) {
 	d := newDeployment(t, "ada", "bob")
 	code, out, errOut := exec("send", "bob", strings.Repeat("a", loc.MaxBodyChars))
-	assertResult(t, code, out, errOut, 0, "sent → queue.bob\n", "")
+	assertSent(t, code, out, errOut, "bob")
 	if len(d.spy.sends) != 1 {
 		t.Errorf("SendQueue calls: %v", d.spy.sends)
 	}
@@ -572,7 +602,7 @@ func TestSendChecksTheBodyBeforeTheRegistry(t *testing.T) {
 func TestSendRequiresAttendanceOnlyWhenConfigured(t *testing.T) {
 	d := newDeployment(t, "ada", "bob")
 	code, out, errOut := exec("send", "bob", "hi")
-	assertResult(t, code, out, errOut, 0, "sent → queue.bob\n", "")
+	assertSent(t, code, out, errOut, "bob")
 
 	writeFile(t, filepath.Join(d.home, "config"), "provider = spy\nsend_requires_attendance = yes\n")
 	code, out, errOut = exec("send", "bob", "hi")

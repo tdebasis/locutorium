@@ -51,7 +51,7 @@ func TestPresence_SendRequiresAttendance_SubscribedPeerIsAttending(t *testing.T)
 	}
 
 	code, out, errOut := exec("send", e1, "to-an-attending-peer")
-	assertResult(t, code, out, errOut, 0, "sent → queue."+e1+"\n", "")
+	assertSent(t, code, out, errOut, e1)
 	if p.qcount(q1) != 1 {
 		t.Errorf("the accepted send must be in %s; have %d", q1, p.qcount(q1))
 	}

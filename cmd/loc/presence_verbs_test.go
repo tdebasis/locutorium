@@ -842,7 +842,7 @@ func TestSendDerivesAttendanceFromTheLiveSubscription(t *testing.T) {
 	d.spy.exists["workshop.scribe"] = true
 
 	code, out, errOut := exec("send", "workshop.scribe", "hello")
-	assertResult(t, code, out, errOut, 0, "sent → queue.workshop.scribe\n", "")
+	assertSent(t, code, out, errOut, "workshop.scribe")
 
 	// And the file listing a name changes nothing when nobody is attending it.
 	code, out, errOut = exec("send", "workshop.clerk", "hello")
