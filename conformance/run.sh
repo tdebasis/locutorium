@@ -390,6 +390,27 @@ if grep -q "nothing to do" <<<"$inst2"; then ok "a second install has nothing to
 "$ROOT/install.sh" --uninstall --main --prefix "$L/bin" >/dev/null 2>&1 || true
 check_not "uninstall removes the link it made" test -e "$L/bin/loc"
 
+say "— tag-mode install builds in a worktree, and that worktree must pass clean-check —"
+# NO --main HERE, ON PURPOSE (#97). With no mode flag install.sh builds the
+# newest tag in a temporary worktree, and a worktree's .git is a file holding an
+# absolute path. The --main cases above build in place and make no worktree, so
+# they never put that file in front of check-clean.sh; this is the coverage
+# whose absence hid the defect.
+TAGROOT="$(scratch_dir)"
+git clone --quiet "$ROOT" "$TAGROOT/clone"
+git -C "$TAGROOT/clone" tag v9.9.9-test
+check "tag-mode install succeeds on a clone under a home directory" \
+  "$TAGROOT/clone/install.sh" --prefix "$TAGROOT/bin"
+check "tag-mode install links loc" test -e "$TAGROOT/bin/loc"
+tagver="$("$TAGROOT/bin/loc" version 2>/dev/null || true)"
+if grep -q '9\.9\.9-test' <<<"$tagver"; then
+  ok "the tag-mode link reports the tag's own version"
+else
+  bad "the tag-mode link reports the tag's own version (got: $tagver)"
+fi
+"$TAGROOT/clone/install.sh" --uninstall --prefix "$TAGROOT/bin" >/dev/null 2>&1 || true
+check_not "tag-mode uninstall removes the link it made" test -e "$TAGROOT/bin/loc"
+
 say "— cold read —"
 check "endpoint with zero prior state reads cleanly" \
   env LOC_IDENTITY=$(ep carol) loc read
