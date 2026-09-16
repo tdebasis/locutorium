@@ -397,10 +397,35 @@ say "— tag-mode install builds in a worktree, and that worktree must pass clea
 # they never put that file in front of check-clean.sh; this is the coverage
 # whose absence hid the defect.
 TAGROOT="$(scratch_dir)"
-git clone --quiet "$ROOT" "$TAGROOT/clone"
-git -C "$TAGROOT/clone" tag v9.9.9-test
-check "tag-mode install succeeds on a clone under a home directory" \
-  "$TAGROOT/clone/install.sh" --prefix "$TAGROOT/bin"
+# TWO CLONES, AND THE SECOND ONE IS THE POINT. install.sh reads the tag list
+# from ORIGIN with `git ls-remote`, never from the clone it runs in, so a tag
+# made in the install clone is invisible to it and the install refuses with
+# exit 2. The tag goes on the upstream, and the install clone takes it from
+# there as any user's clone does.
+git clone --quiet "$ROOT" "$TAGROOT/upstream"
+git -C "$TAGROOT/upstream" tag v9.9.9-test
+git clone --quiet "$TAGROOT/upstream" "$TAGROOT/clone"
+# THE LIST IS WHAT MAKES THIS CASE ABLE TO FAIL. `make clean-check` runs the
+# checker only when a list is readable, and this suite exports a scratch
+# LOC_HOME that holds none, so without this line the check is skipped and the
+# case passes against the defect it exists to catch. One line, matching any
+# home directory on either runner.
+printf '/[Uu]sers/[a-z]|/home/[a-z]\n' > "$TAGROOT/list"
+taglog="$TAGROOT/install.log"
+if env LOC_FORBIDDEN_FILE="$TAGROOT/list" "$TAGROOT/clone/install.sh" \
+     --prefix "$TAGROOT/bin" >"$taglog" 2>&1; then
+  ok "tag-mode install succeeds with a word list installed"
+else
+  bad "tag-mode install succeeds with a word list installed (see $taglog)"
+fi
+# AND IT MUST HAVE RUN, NOT BEEN SKIPPED. The checker prints one line or the
+# other, and only "tree is clean" says the worktree's .git file was read and
+# accepted. Asserting the install's exit status alone passes a skipped check.
+if grep -q 'check-clean: tree is clean' "$taglog"; then
+  ok "the clean check ran inside the tag build"
+else
+  bad "the clean check ran inside the tag build (log says: $(grep -m1 'check-clean' "$taglog" || echo 'nothing'))"
+fi
 check "tag-mode install links loc" test -e "$TAGROOT/bin/loc"
 tagver="$("$TAGROOT/bin/loc" version 2>/dev/null || true)"
 if grep -q '9\.9\.9-test' <<<"$tagver"; then
@@ -408,7 +433,8 @@ if grep -q '9\.9\.9-test' <<<"$tagver"; then
 else
   bad "the tag-mode link reports the tag's own version (got: $tagver)"
 fi
-"$TAGROOT/clone/install.sh" --uninstall --prefix "$TAGROOT/bin" >/dev/null 2>&1 || true
+env LOC_FORBIDDEN_FILE="$TAGROOT/list" "$TAGROOT/clone/install.sh" \
+  --uninstall --prefix "$TAGROOT/bin" >/dev/null 2>&1 || true
 check_not "tag-mode uninstall removes the link it made" test -e "$TAGROOT/bin/loc"
 
 say "— cold read —"
