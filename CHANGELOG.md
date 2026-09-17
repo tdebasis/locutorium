@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.5](https://github.com/tdebasis/locutorium/compare/v0.0.4...v0.0.5) (2026-09-17)
+
+
+### Bug Fixes
+
+* **cli:** use the repository's fixture in a comment example ([#114](https://github.com/tdebasis/locutorium/issues/114)) ([58285af](https://github.com/tdebasis/locutorium/commit/58285af60f2a1e0788d97e67452e8f3c61faf798))
+
 ## [0.0.4](https://github.com/tdebasis/locutorium/compare/v0.0.3...v0.0.4) (2026-09-17)
 
 
