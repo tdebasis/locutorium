@@ -331,3 +331,42 @@ is the thing the cases needed in order to ask their question, so the question ca
 **Where authentication starts again.** Work from this entry and from the two files as they stand in
 git history at `main` `9322605`. They carry the shipped per-seat template, the granted template, and
 the harness that stands a deployment up under either one.
+
+---
+
+## 13. A test may never reach a live broker
+
+**Decision (2026-09-16):** The nats provider refuses the table-default `nats_url` when
+`testing.Testing()` is true. The guard runs before the dial, so a test binary that asks for
+`nats://127.0.0.1:4222` opens no socket. The guard reads the host and the port, so it refuses
+`localhost` and `::1` at that port as well.
+
+**Context.** On 2026-09-16 a `go test ./...` in this repository deleted every queue on the
+machine's live deployment. Two cases in `cmd/loc` made a scratch `LOC_HOME` and wrote no config
+file. With no file, a verb takes the key table's default `nats_url`. On a machine that runs the
+product, that address is the live broker. One case published a message onto it. The other ran a
+sweep, which deletes a queue that no row in its registry claims. The scratch registry was empty, so
+the sweep deleted all six live queues. Any message unread at that moment was lost. The next beat
+recreated the queues. The outage lasted about three minutes.
+
+**The guard is in the client, not in the harness.** Every connection the product opens goes through
+one function, `nats.Dial`: the provider's `connectWithin`, the listener in `WatchQueue`, and the
+daemon's `ensureTopics`. A refusal there holds in every package and needs no discipline from a test
+author. The first cut put the guard inside `connectWithin` alone, and `WatchQueue` dialled past it. The harness was the other candidate and it failed twice: the same class happened on
+2026-09-12, the answer then was a rule for test authors, and the rule did not survive to
+2026-09-16. `cmd/loc` `TestMain` already refused to BIND the default port. Neither that guard nor
+the scratch-home guard covered a CLIENT that dials.
+
+**Consequences:**
+
+- **A test that wants a broker boots its own** on a port the kernel picks, and pins `nats_url` to
+  it. `internal/loctest.Boot` does this.
+- **A test that wants no broker pins a closed port.** `internal/loctest.ClosedPort` reserves one and
+  gives it straight back.
+- **The shipped binary is unchanged.** `testing.Testing()` is false outside `go test`. The import of
+  `testing` adds no behaviour to the product.
+- **CI could never have caught this.** A CI runner has no live deployment, so the two cases passed
+  there. The defect was visible only on a machine that runs the product.
+- **The guard is not a sandbox.** It stops this one address. It does not stop a test that pins the
+  live broker on purpose. A broker that refuses an unauthenticated client is the real fix, and it is
+  a product change (issue #103, "Follow-up").

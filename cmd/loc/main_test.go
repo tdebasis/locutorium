@@ -10,12 +10,18 @@ import (
 	"testing"
 
 	"github.com/tdebasis/locutorium/internal/loc"
+	"github.com/tdebasis/locutorium/internal/loctest"
 	"github.com/tdebasis/locutorium/internal/provider"
 )
 
-// Nothing in this file reaches a medium. The verbs that need a provider get a
-// spy, selected the same way a real one is — by name, out of the deployment's
-// config — so the dispatch under test is the dispatch that ships.
+// Almost nothing in this file reaches a medium. The verbs that need a provider
+// get a spy, selected the same way a real one is — by name, out of the
+// deployment's config — so the dispatch under test is the dispatch that ships.
+//
+// ONE CASE OPENS THE REAL NATS PROVIDER:
+// TestVerbsTakeTheTableDefaultProviderWhenTheFileIsSilent. It pins nats_url to
+// a closed port, because the table's default is a live broker's address on a
+// developer's machine. See the comment in that case.
 
 type call struct {
 	target   string
@@ -591,12 +597,20 @@ func TestSendRequiresAttendanceOnlyWhenConfigured(t *testing.T) {
 // name and that refusal is unreachable from here.
 func TestVerbsTakeTheTableDefaultProviderWhenTheFileIsSilent(t *testing.T) {
 	home := t.TempDir()
+	// THE FILE IS SILENT ABOUT THE PROVIDER, AND THAT IS WHAT THIS CASE PINS.
+	// It is not silent about nats_url, and it may never be again. The table's
+	// default there is nats://127.0.0.1:4222, which on a machine that runs the
+	// product IS the live broker. On 2026-09-16 this case published `standup
+	// hi` onto a live deployment, and its neighbour in daemon_test.go swept
+	// every queue off the same broker. The port below is one the kernel handed
+	// out and then closed.
+	writeFile(t, filepath.Join(home, "config"), "nats_url = "+loctest.ClosedPort(t)+"\n")
 	t.Setenv("LOC_HOME", home)
 	t.Setenv("LOC_IDENTITY", "ada")
 	installed = nil
 
 	// V0 reads no credential, so the refusal a caller sees is the medium's
-	// own silence: nothing is listening at the table's default nats_url.
+	// own silence: nothing listens at the closed port above, by construction.
 	for _, c := range []struct {
 		args     []string
 		wantCode int

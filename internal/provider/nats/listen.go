@@ -1,6 +1,7 @@
 package nats
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -35,7 +36,7 @@ const listenReconnectWait = 1 * time.Second
 // deaf, which is the failure nobody notices. Each re-establishment calls
 // reconnected, because arrivals during the gap were seen by no one.
 func (p *Provider) WatchQueue(endpoint string, arrived, reconnected func()) (func(), error) {
-	nc, err := natsgo.Connect(config.Value(config.NATSURL),
+	nc, err := Dial(config.Value(config.NATSURL),
 		natsgo.Name("loc"),
 		natsgo.Timeout(ackTimeout),
 		natsgo.ErrorHandler(p.noteRefusal),
@@ -48,6 +49,9 @@ func (p *Provider) WatchQueue(endpoint string, arrived, reconnected func()) (fun
 		}),
 	)
 	if err != nil {
+		if errors.Is(err, ErrRefusedUnderTest) {
+			return nil, err
+		}
 		return nil, errConnect
 	}
 	sub, err := nc.Subscribe("queue."+endpoint, func(*natsgo.Msg) {

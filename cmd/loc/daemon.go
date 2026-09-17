@@ -15,7 +15,9 @@ import (
 	natsserver "github.com/nats-io/nats-server/v2/server"
 
 	natsgo "github.com/nats-io/nats.go"
+
 	"github.com/tdebasis/locutorium/internal/broker"
+	"github.com/tdebasis/locutorium/internal/provider/nats"
 
 	"github.com/tdebasis/locutorium/internal/config"
 	model "github.com/tdebasis/locutorium/internal/presence"
@@ -240,7 +242,7 @@ func pruneHeartbeats(beatDir string, days int, now time.Time) {
 // subjects topic.>, limits retention, the configured window, file storage, one
 // replica.
 func ensureTopics(clientURL string) error {
-	nc, err := natsgo.Connect(clientURL, natsgo.Name("loc-daemon"), natsgo.Timeout(readyWait))
+	nc, err := nats.Dial(clientURL, natsgo.Name("loc-daemon"), natsgo.Timeout(readyWait))
 	if err != nil {
 		return fmt.Errorf("cannot reach the broker just started: %v", err)
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -41,6 +42,30 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	// THE SCRATCH HOME CARRIES A CLOSED PORT. A case that makes no config of
+	// its own resolves nats_url to the table's default, nats://127.0.0.1:4222,
+	// and that is a live deployment's address on a developer's machine. On
+	// 2026-09-16 two cases in this package reached the live broker that way.
+	// One of them swept every queue off it. The floor writes a config into the
+	// scratch home, so a case that forgets one dials nothing.
+	//
+	// THE CLIENT-SIDE GUARD IS THE REAL FLOOR, NOT THIS. The nats provider
+	// refuses the default address under `go test` (internal/provider/nats/
+	// guard.go). This line only means a forgetful case gets a closed port
+	// rather than a refusal it did not expect.
+	//
+	// A case that needs a home with NO config at all still makes its own with
+	// t.TempDir. Two do, and neither reads this one.
+	closed, err := closedLoopbackURL()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cannot reserve a closed port: %v\n", err)
+		os.Exit(1)
+	}
+	if err := os.WriteFile(filepath.Join(home, "config"), []byte("nats_url = "+closed+"\n"), 0o600); err != nil {
+		fmt.Fprintf(os.Stderr, "cannot write the scratch config: %v\n", err)
+		os.Exit(1)
+	}
+
 	// A SCRATCH HOME IS NOT A SCRATCH PORT. The key table defaults nats_url to
 	// nats://127.0.0.1:4222, which is a live deployment's address on a
 	// developer's machine. A case that makes a home of its own and writes no
@@ -65,6 +90,19 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	os.RemoveAll(home)
 	os.Exit(code)
+}
+
+// closedLoopbackURL asks the kernel for a loopback port and gives it straight
+// back, then names it as a nats URL. Nothing listens there.
+//
+// It is loctest.ClosedPort without the *testing.T, because TestMain has none.
+func closedLoopbackURL() (string, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", err
+	}
+	addr := l.Addr().String()
+	return "nats://" + addr, l.Close()
 }
 
 // under reports whether path is dir or sits inside it.

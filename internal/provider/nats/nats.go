@@ -16,6 +16,7 @@
 package nats
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -89,7 +90,9 @@ func (p *Provider) connectWithin(dial time.Duration) error {
 		return nil
 	}
 	url := config.Value(config.NATSURL)
-	nc, err := natsgo.Connect(url,
+	// Dial carries the guard against the default broker under go test; see
+	// guard.go and the outage it records.
+	nc, err := Dial(url,
 		natsgo.Name("loc"),
 		natsgo.Timeout(dial),
 		// THE ONLY PLACE A REFUSAL IS EVER SAID OUT LOUD. See noteRefusal.
@@ -99,6 +102,12 @@ func (p *Provider) connectWithin(dial time.Duration) error {
 		natsgo.NoReconnect(),
 	)
 	if err != nil {
+		// The guard's refusal is said as itself: it names the address on
+		// purpose, and "cannot reach the medium" would tell a test the
+		// opposite of what happened.
+		if errors.Is(err, ErrRefusedUnderTest) {
+			return err
+		}
 		// The client's error text never carries the password, but it can
 		// carry the URL with a userinfo component if one were ever set there,
 		// so callers wrap this rather than print it.
@@ -221,6 +230,11 @@ func (p *Provider) Topics(w io.Writer) error {
 	return nil
 }
 
+// topicSubjects answers nil for a medium that cannot be reached, and Topics
+// prints that as quiet by design. The guard's refusal under go test does NOT
+// arrive here as quiet: Topics calls connect first and returns every error
+// that is not errConnect, and the refusal is passed through as itself
+// (Assayer N4, 2026-09-16).
 func (p *Provider) topicSubjects() map[string]uint64 {
 	if err := p.connect(); err != nil {
 		return nil

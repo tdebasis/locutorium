@@ -17,6 +17,7 @@ import (
 	natsgo "github.com/nats-io/nats.go"
 
 	"github.com/tdebasis/locutorium/internal/config"
+	"github.com/tdebasis/locutorium/internal/loctest"
 	model "github.com/tdebasis/locutorium/internal/presence"
 )
 
@@ -401,7 +402,13 @@ func TestABeatRecordsASweepThatFailed(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("LOC_HOME", home)
 	t.Setenv("LOC_IDENTITY", "house.keeper")
-	// No config, no broker, no credentials: the sweep cannot run.
+	// THE SWEEP MUST FAIL, AND IT MUST FAIL AGAINST NOTHING. This case wrote
+	// no config at all, so the sweep took the table's default nats_url. On
+	// 2026-09-16 that address was the live broker on this machine. The sweep
+	// ran against it holding this scratch registry, which is empty, and its
+	// orphan pass deleted all six live queues. The port below is one the
+	// kernel handed out and then closed, so there is no broker to reach.
+	writeFile(t, filepath.Join(home, "config"), "nats_url = "+loctest.ClosedPort(t)+"\n")
 	beatDir := filepath.Join(home, "run", "heartbeat")
 	beatOnce(&strings.Builder{}, beatDir)
 	lines := beatLines(t, filepath.Join(beatDir, time.Now().Format("2006-01-02")+".log"))
