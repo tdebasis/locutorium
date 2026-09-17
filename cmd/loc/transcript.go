@@ -310,14 +310,14 @@ func outcomes(msgs []*message, seatEvents []*logEvent) (map[string]string, map[*
 	return words, claimed
 }
 
-// lastSeatEvent is the newest thing that happened to the recipient's seat
-// after this message was sent, or nil.
+// lastSeatEvent is the seat event that decides a pending message's fate, or
+// nil: the earliest queue deletion after the send, else the latest bell
+// failure after the send.
 //
 // THE JOIN IS `seat == to` AND `ts > sent ts`, and the second half is what
 // makes it mean anything. A bell that failed an hour before this message
-// existed says nothing about this message. Where both a failed bell and a
-// deleted queue apply, the later one wins: the queue went after the bell did,
-// so the message is lost rather than merely unannounced.
+// existed says nothing about this message. The first cut let the later of a
+// bell failure and a deletion win; the body below says why that was wrong.
 func lastSeatEvent(m *message, seatEvents []*logEvent) *logEvent {
 	// A QUEUE DELETION IS TERMINAL. The message was in that queue, and the
 	// queue is gone, so nothing after it can bring the message back: a bell

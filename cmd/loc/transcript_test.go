@@ -566,6 +566,19 @@ func TestTranscript_ALostMessageStaysLostAfterALaterBellFailure(t *testing.T) {
 		t.Errorf("a deletion followed by a bell failure did not stay lost:\n%s", out)
 	}
 
+	// THE EARLIEST DELETION, not the latest (Assayer N3). A second deletion
+	// of the same seat's queue, after a new registration, is about a later
+	// occupant; the message was lost the first time.
+	home = scratchRecord(t)
+	seedDay(t, home, "2026-09-16",
+		sentLine("u1", "2026-09-16T10:00:00Z", "workshop.scribe", "workshop.clerk", "waiting"),
+		seatLine("workshop.clerk", "queue-deleted", "2026-09-16T10:05:00Z", "left"),
+		seatLine("workshop.clerk", "queue-deleted", "2026-09-16T12:00:00Z", "expired"))
+	out, _ = transcribe(t)
+	if !strings.Contains(out, "lost: queue deleted 10:05:00Z (left)") {
+		t.Errorf("the earliest deletion should decide, not the latest:\n%s", out)
+	}
+
 	home = scratchRecord(t)
 	seedDay(t, home, "2026-09-16",
 		sentLine("u1", "2026-09-16T10:00:00Z", "workshop.scribe", "workshop.clerk", "waiting"),
