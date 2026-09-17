@@ -714,6 +714,7 @@ func seatLines(w io.Writer, pr provider.Presence) error {
 	if err != nil {
 		return err
 	}
+	bells := bellFailures(rows)
 	trouble := map[string]string{}
 	var orphans []string
 	for _, f := range model.Findings(rows, unreadable, queues) {
@@ -742,6 +743,13 @@ func seatLines(w io.Writer, pr provider.Presence) error {
 		if !wrong {
 			state = "row ok, queue ok"
 		}
+		// The bell field is appended to whatever the row already says. A seat
+		// can have a missing queue AND a dead bell, and the operator needs
+		// both: the next beat repairs the one and repairs nothing about the
+		// other.
+		if ev, ok := bells[e]; ok {
+			state += fmt.Sprintf(", bell FAILED %s: %s", ev.TS, ev.Reason)
+		}
 		if _, err := fmt.Fprintf(w, "%s: %s\n", e, state); err != nil {
 			return err
 		}
@@ -752,4 +760,81 @@ func seatLines(w io.Writer, pr provider.Presence) error {
 		}
 	}
 	return nil
+}
+
+// bellFailures is the THIRD FACT of the report: for each registered seat, the
+// bell failure that still stands.
+//
+// `row ok, queue ok` answers two questions — the registry row exists, and the
+// queue exists. Neither of them says the seat's operator can be told that mail
+// arrived. On 2026-09-11 two seats were registered and attending with a dead
+// bell, and `status` said nothing was wrong (#79). The message log carries a
+// `bell-failed` seat event, and this reads it.
+//
+// A failure stands when it is LATER THAN THE REGISTRATION and no `read` by
+// that seat came after it. The registration bound drops a failure from a
+// previous occupant of the endpoint, whose bell is not this seat's bell. The
+// read bound drops a failure the seat has already answered: a seat that took
+// its mail has shown it can be reached, whatever the bell did.
+//
+// The last `bell-failed` wins, and "last" is the order the lines were
+// appended in rather than the order of their stamps. The log is append-only
+// and every writer stamps a line as it writes it, so the two agree; where a
+// clock has stepped, the record's own order is the one this reports.
+func bellFailures(rows []*model.Registration) map[string]loc.Event {
+	out := map[string]loc.Event{}
+	// A LOG THAT CANNOT BE READ ADDS NOTHING AND FAILS NOTHING. An absent
+	// directory, an unreadable one — the report still owes the operator the
+	// two facts it has always given, and a deployment that has never sent a
+	// message has no log at all. Losing the field is the right cost here;
+	// losing the report is not.
+	events, err := loc.ReadEvents(loc.LogDir())
+	if err != nil {
+		return out
+	}
+	failed := map[string]loc.Event{}
+	lastRead := map[string]time.Time{}
+	for _, ev := range events {
+		at, ok := ev.At()
+		if !ok {
+			continue
+		}
+		switch {
+		case ev.Seat != "" && ev.Status == "bell-failed":
+			failed[ev.Seat] = ev
+		case ev.UID != "" && ev.Status == "read" && ev.By != "":
+			if at.After(lastRead[ev.By]) {
+				lastRead[ev.By] = at
+			}
+		}
+	}
+	for _, r := range rows {
+		ev, ok := failed[r.Endpoint]
+		if !ok {
+			continue
+		}
+		at, _ := ev.At() // parsed above; a line that failed it is not in the map
+		// A registration this code cannot parse is not a bound it can apply,
+		// so the failure is not reported rather than reported unbounded.
+		reg, err := time.Parse(time.RFC3339, r.Registered)
+		if err != nil {
+			continue
+		}
+		// THE TWO STAMPS HAVE DIFFERENT PRECISION. A registration is written
+		// in milliseconds; a bell-failed line in whole seconds. The server
+		// registers and then rings the backlog with no window, so a notifier
+		// that is dead at startup fails within the same second, and a strict
+		// "after the registration" comparison hides exactly the failure #79
+		// was opened for (Assayer F1, 2026-09-16: 82ms after → hidden). So
+		// the failure is hidden only when it is before the registration's
+		// own second.
+		if at.Before(reg.Truncate(time.Second)) {
+			continue
+		}
+		if lastRead[r.Endpoint].After(at) {
+			continue
+		}
+		out[r.Endpoint] = ev
+	}
+	return out
 }
