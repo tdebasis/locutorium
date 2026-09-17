@@ -817,7 +817,18 @@ func bellFailures(rows []*model.Registration) map[string]loc.Event {
 		// A registration this code cannot parse is not a bound it can apply,
 		// so the failure is not reported rather than reported unbounded.
 		reg, err := time.Parse(time.RFC3339, r.Registered)
-		if err != nil || !at.After(reg) {
+		if err != nil {
+			continue
+		}
+		// THE TWO STAMPS HAVE DIFFERENT PRECISION. A registration is written
+		// in milliseconds; a bell-failed line in whole seconds. The server
+		// registers and then rings the backlog with no window, so a notifier
+		// that is dead at startup fails within the same second, and a strict
+		// "after the registration" comparison hides exactly the failure #79
+		// was opened for (Assayer F1, 2026-09-16: 82ms after → hidden). So
+		// the failure is hidden only when it is before the registration's
+		// own second.
+		if at.Before(reg.Truncate(time.Second)) {
 			continue
 		}
 		if lastRead[r.Endpoint].After(at) {

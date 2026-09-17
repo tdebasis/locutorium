@@ -254,3 +254,32 @@ func TestStatusHidesTheBellWhenTheRegistrationStampIsUnreadable(t *testing.T) {
 		t.Errorf("row = %q; a failure was reported against an unreadable registration", got)
 	}
 }
+
+// THE #79 CASE ITSELF. The server registers and then rings the backlog with
+// no window, so a notifier that is dead at startup fails within the same
+// second as the registration. The registration is stamped in milliseconds
+// and the failure in whole seconds, so the failure's stamp truncates to a
+// time BEFORE the registration's, and a strict "after" comparison hides the
+// one failure this field exists for (Assayer F1, 2026-09-16: 82ms after the
+// registration → bare row).
+//
+// liveRow registers at 09:12:04.318Z. A failure stamped 09:12:04Z is that
+// same second and shows. FIRE CONTROL: 09:12:03Z is before the registration's
+// second and stays hidden, so the case tests the bound and not the wiring.
+func TestStatusShowsABellThatFailedInTheRegistrationsOwnSecond(t *testing.T) {
+	d := newPresenceDeployment(t)
+	wholeSeat(t, d, "workshop.scribe")
+
+	seedDayLog(t, d, "2026-01-14",
+		bellFailedLine("workshop.scribe", "2026-01-14T09:12:03Z", "notifier exited 127"))
+	if got := seatRow(t, d, "workshop.scribe"); got != "workshop.scribe: row ok, queue ok" {
+		t.Errorf("control: a failure the second before the registration was reported: %q", got)
+	}
+
+	seedDayLog(t, d, "2026-01-14",
+		bellFailedLine("workshop.scribe", "2026-01-14T09:12:04Z", "notifier exited 127"))
+	want := "workshop.scribe: row ok, queue ok, bell FAILED 2026-01-14T09:12:04Z: notifier exited 127"
+	if got := seatRow(t, d, "workshop.scribe"); got != want {
+		t.Errorf("row = %q\nwant  %q\n(a failure in the registration's own second is the startup case)", got, want)
+	}
+}
