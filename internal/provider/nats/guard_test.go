@@ -162,7 +162,13 @@ func TestWatchQueueDialsThroughTheGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := &Provider{}
-	if _, err := p.WatchQueue("workshop.scribe", nil, nil); err == nil || !strings.Contains(err.Error(), "refusing to dial") {
+	stop, err := p.WatchQueue("workshop.scribe", nil, nil)
+	if stop != nil {
+		// Only reachable if BOTH seams regress at once, and then this arm has
+		// opened a live connection; close it before failing (Assayer N5).
+		stop()
+	}
+	if err == nil || !strings.Contains(err.Error(), "refusing to dial") {
 		t.Fatalf("WatchQueue at the default under go test: err = %v, want the guard's refusal", err)
 	}
 	if len(r.urls) != 0 {

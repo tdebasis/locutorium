@@ -230,6 +230,11 @@ func (p *Provider) Topics(w io.Writer) error {
 	return nil
 }
 
+// topicSubjects answers nil for a medium that cannot be reached, and Topics
+// prints that as quiet by design. The guard's refusal under go test does NOT
+// arrive here as quiet: Topics calls connect first and returns every error
+// that is not errConnect, and the refusal is passed through as itself
+// (Assayer N4, 2026-09-16).
 func (p *Provider) topicSubjects() map[string]uint64 {
 	if err := p.connect(); err != nil {
 		return nil
