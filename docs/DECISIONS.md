@@ -423,7 +423,7 @@ this code is in a position to make.
   attender, and it would still be incomplete while one of them has not read.
 - The record's day file is the UTC day of the event, and the event's own stamp names the same day. A
   line stamped just after midnight sits in the new day's file.
-- **The bell half of issue #85 was retired by the Convener on 2026-09-16.** That work proposed a
+- **The bell half of issue #85 was retired by the project owner on 2026-09-16.** That work proposed a
   per-message bell and a database under it. The events keyed by `uid` are the surviving half, and
   they are here rather than in a table.
 - A line is still written in one call, as entry 10 requires. Every new kind of line is built in
