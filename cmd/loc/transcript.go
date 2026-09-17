@@ -162,7 +162,7 @@ type renderable struct {
 // first about as often. parseFlags refuses a word it was not expecting, so
 // the word is taken off here first and the flags are parsed without it. A
 // flag's VALUE is not a bare word, which is why the value flags are named:
-// `--seat conclave.forge` must not read `conclave.forge` as a date.
+// `--seat workshop.scribe` must not read `workshop.scribe` as a date.
 func takeDate(args []string, valueFlags map[string]bool) (string, []string) {
 	for i := 0; i < len(args); i++ {
 		if strings.HasPrefix(args[i], "-") {
