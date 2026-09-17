@@ -319,16 +319,37 @@ func outcomes(msgs []*message, seatEvents []*logEvent) (map[string]string, map[*
 // deleted queue apply, the later one wins: the queue went after the bell did,
 // so the message is lost rather than merely unannounced.
 func lastSeatEvent(m *message, seatEvents []*logEvent) *logEvent {
-	var found *logEvent
+	// A QUEUE DELETION IS TERMINAL. The message was in that queue, and the
+	// queue is gone, so nothing after it can bring the message back: a bell
+	// that fails an hour later is a fact about the seat, not about mail that
+	// no longer exists. So the EARLIEST deletion after the send decides, and
+	// a bell failure counts only while no deletion has happened. The first
+	// cut took the newest seat event of either kind, and a session end (every
+	// one logs `left`) followed by a dead bell read as pending (Assayer F1,
+	// 2026-09-16).
+	//
+	// A seat event stamped at or before the send belongs to whatever was in
+	// the queue before this message and never attaches (Assayer F2).
+	var deleted, bell *logEvent
 	for _, e := range seatEvents {
 		if e.Seat != m.to || e.TS <= m.sentTS {
 			continue
 		}
-		if found == nil || e.TS > found.TS || (e.TS == found.TS && e.seq > found.seq) {
-			found = e
+		switch e.Status {
+		case "queue-deleted":
+			if deleted == nil || e.TS < deleted.TS || (e.TS == deleted.TS && e.seq < deleted.seq) {
+				deleted = e
+			}
+		case "bell-failed":
+			if bell == nil || e.TS > bell.TS || (e.TS == bell.TS && e.seq > bell.seq) {
+				bell = e
+			}
 		}
 	}
-	return found
+	if deleted != nil {
+		return deleted
+	}
+	return bell
 }
 
 // keepMessage applies the filters, all of which narrow and none of which

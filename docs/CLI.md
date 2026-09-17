@@ -430,7 +430,9 @@ The row gives three facts. Each fact has its own mechanism. No fact follows from
 mail, because nothing rings for its operator. Two seats ran in that state for a day on 2026-09-11.
 
 `status` adds the `bell FAILED` field when the message log holds a `bell-failed` event for the seat.
-The event must be later than the seat's registration; an older one belongs to a previous occupant of
+The event must not be before the second of the seat's registration (a registration is stamped in
+milliseconds, a bell failure in whole seconds, and a bell dead at startup fails in that same second);
+an older one belongs to a previous occupant of
 the endpoint. A `read` by that seat after the event removes the field again — the seat took its
 mail, so something reaches it. The log is `$LOC_HOME/run/log/<day>.jsonl`. A log that `status`
 cannot read adds no field, and it does not fail the report.

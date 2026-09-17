@@ -45,7 +45,7 @@ func sentLine(uid, ts, from, to, body string) string {
 		`","from":"` + from + `","to":"` + to + `","body":"` + body + `"}`
 }
 
-func readLine(uid, ts, by string) string {
+func readEventLine(uid, ts, by string) string {
 	return `{"uid":"` + uid + `","status":"read","ts":"` + ts + `","by":"` + by + `"}`
 }
 
@@ -88,7 +88,7 @@ func TestTranscript_EveryOutcomeWord(t *testing.T) {
 	}{
 		{
 			"read",
-			[]string{readLine("u1", "2026-09-16T14:12:40Z", to)},
+			[]string{readEventLine("u1", "2026-09-16T14:12:40Z", to)},
 			"read 14:12:40Z by workshop.clerk",
 		},
 		{
@@ -176,7 +176,7 @@ func TestTranscript_ADateShowsAReadFromTheNextDaysFile(t *testing.T) {
 	seedDay(t, home, "2026-09-16",
 		sentLine("u1", "2026-09-16T23:59:58Z", "workshop.scribe", "workshop.clerk", "last word"))
 	seedDay(t, home, "2026-09-17",
-		readLine("u1", "2026-09-17T00:00:01Z", "workshop.clerk"))
+		readEventLine("u1", "2026-09-17T00:00:01Z", "workshop.clerk"))
 
 	out, _ := transcribe(t, "2026-09-16")
 	if !strings.Contains(out, "last word") {
@@ -210,7 +210,7 @@ func TestTranscript_UIDShowsOneMessageAndItsEvents(t *testing.T) {
 	seedDay(t, home, "2026-09-16",
 		sentLine("u1", "2026-09-16T14:00:00Z", "workshop.scribe", "workshop.clerk", "wanted"),
 		sentLine("u2", "2026-09-16T14:01:00Z", "workshop.scribe", "workshop.clerk", "not wanted"),
-		readLine("u1", "2026-09-16T14:02:00Z", "workshop.clerk"))
+		readEventLine("u1", "2026-09-16T14:02:00Z", "workshop.clerk"))
 
 	all, _ := transcribe(t)
 	if !strings.Contains(all, "not wanted") {
@@ -248,7 +248,7 @@ func TestTranscript_SeatShowsItsMessagesAndItsOwnEvents(t *testing.T) {
 	home := scratchRecord(t)
 	seedDay(t, home, "2026-09-16",
 		sentLine("u1", "2026-09-16T14:00:00Z", "workshop.scribe", "workshop.clerk", "to the clerk"),
-		readLine("u1", "2026-09-16T14:00:05Z", "workshop.clerk"),
+		readEventLine("u1", "2026-09-16T14:00:05Z", "workshop.clerk"),
 		// Later than every message to this seat, so it joins to none of them.
 		seatLine("workshop.clerk", "bell-failed", "2026-09-16T15:00:00Z", "no pane"),
 		sentLine("u2", "2026-09-16T16:00:00Z", "workshop.scribe", "workshop.other", "not the clerk"))
@@ -301,7 +301,7 @@ func TestTranscript_PendingExcludesATopicMessage(t *testing.T) {
 		sentLine("u1", "2026-09-16T14:00:00Z", "workshop.scribe", "workshop.clerk", "still owed"),
 		sentLine("u2", "2026-09-16T14:01:00Z", "workshop.scribe", "#standup", "a room word"),
 		sentLine("u3", "2026-09-16T14:02:00Z", "workshop.scribe", "workshop.clerk", "collected"),
-		readLine("u3", "2026-09-16T14:03:00Z", "workshop.clerk"))
+		readEventLine("u3", "2026-09-16T14:03:00Z", "workshop.clerk"))
 
 	all, _ := transcribe(t)
 	if !strings.Contains(all, "a room word") {
@@ -329,7 +329,7 @@ func TestTranscript_JSONCarriesTheEventsInOrder(t *testing.T) {
 	home := scratchRecord(t)
 	seedDay(t, home, "2026-09-16",
 		sentLine("u1", "2026-09-16T14:00:00Z", "workshop.scribe", "workshop.clerk", "the ledger"),
-		readLine("u1", "2026-09-16T14:00:40Z", "workshop.clerk"))
+		readEventLine("u1", "2026-09-16T14:00:40Z", "workshop.clerk"))
 
 	out, errOut := transcribe(t, "--json")
 	if errOut != "" {
@@ -542,5 +542,65 @@ func TestTranscript_AnUnreadableFileIsNamedAndSkipped(t *testing.T) {
 	}
 	if !strings.Contains(errOut, shut) {
 		t.Errorf("stderr does not name the unreadable file:\n%s", errOut)
+	}
+}
+
+// ------------------------------------------------- seat events: the two bounds
+
+// A QUEUE DELETION IS TERMINAL. A bell that fails after the queue went is a
+// fact about the seat, not about mail that no longer exists, so a lost
+// message stays lost. The first cut took the newest seat event and read this
+// as pending; every session end logs `left`, so a restarted seat with a dead
+// bell hit it (Assayer F1, 2026-09-16).
+//
+// FIRE CONTROL: the same log without the deletion reads as the bell failure,
+// so the case is deciding between the two and not missing the bell.
+func TestTranscript_ALostMessageStaysLostAfterALaterBellFailure(t *testing.T) {
+	home := scratchRecord(t)
+	seedDay(t, home, "2026-09-16",
+		sentLine("u1", "2026-09-16T10:00:00Z", "workshop.scribe", "workshop.clerk", "waiting"),
+		seatLine("workshop.clerk", "queue-deleted", "2026-09-16T10:05:00Z", "left"),
+		seatLine("workshop.clerk", "bell-failed", "2026-09-16T11:00:00Z", "no pane"))
+	out, _ := transcribe(t)
+	if !strings.Contains(out, "lost: queue deleted 10:05:00Z (left)") {
+		t.Errorf("a deletion followed by a bell failure did not stay lost:\n%s", out)
+	}
+
+	home = scratchRecord(t)
+	seedDay(t, home, "2026-09-16",
+		sentLine("u1", "2026-09-16T10:00:00Z", "workshop.scribe", "workshop.clerk", "waiting"),
+		seatLine("workshop.clerk", "bell-failed", "2026-09-16T11:00:00Z", "no pane"))
+	out, _ = transcribe(t)
+	if !strings.Contains(out, "pending, bell failed 11:00:00Z: no pane") {
+		t.Errorf("control: without the deletion the bell failure should decide:\n%s", out)
+	}
+}
+
+// A seat event stamped at or before the send belongs to whatever was in the
+// queue before this message. It never attaches. No arm held this bound before
+// (Assayer F2, 2026-09-16): dropping it left the suite green.
+//
+// FIRE CONTROL: the same event one second after the send does attach.
+func TestTranscript_ASeatEventBeforeTheSendDoesNotAttach(t *testing.T) {
+	home := scratchRecord(t)
+	seedDay(t, home, "2026-09-16",
+		seatLine("workshop.clerk", "queue-deleted", "2026-09-16T09:59:00Z", "orphan"),
+		sentLine("u1", "2026-09-16T10:00:00Z", "workshop.scribe", "workshop.clerk", "waiting"),
+		seatLine("workshop.clerk", "bell-failed", "2026-09-16T10:00:00Z", "no pane"))
+	out, _ := transcribe(t)
+	if !strings.Contains(out, "  pending\n") && !strings.Contains(out, " pending\n") {
+		t.Errorf("a seat event at or before the send attached; want plain pending:\n%s", out)
+	}
+	if strings.Contains(out, "lost") || strings.Contains(out, "bell failed") {
+		t.Errorf("an older seat event attached to a later message:\n%s", out)
+	}
+
+	home = scratchRecord(t)
+	seedDay(t, home, "2026-09-16",
+		sentLine("u1", "2026-09-16T10:00:00Z", "workshop.scribe", "workshop.clerk", "waiting"),
+		seatLine("workshop.clerk", "bell-failed", "2026-09-16T10:00:01Z", "no pane"))
+	out, _ = transcribe(t)
+	if !strings.Contains(out, "pending, bell failed 10:00:01Z: no pane") {
+		t.Errorf("control: the same event one second after the send should attach:\n%s", out)
 	}
 }
