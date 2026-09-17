@@ -35,6 +35,8 @@ messages
   publish <topic> <body>    speak in a topic (@name rings that endpoint)
   read [--peek]             your queue backlog + topic conversations
   topics                    what conversations are active right now
+  transcript [--seat <e>] [--uid <id>] [--pending] [--json] [date]
+                            the day's record, joined by message
 
 presence — called by whoever launches agents
   subscribe <endpoint> --pid <n> --type <t> --version <v>
@@ -125,10 +127,18 @@ func (e exitStatus) Error() string { return fmt.Sprintf("exit status %d", int(e)
 //
 // THIS TOOL HAS EXACTLY TWO OUTCOMES, and which one it is gets decided here
 // rather than wherever the problem was noticed: 0, or `loc: <what>` on stderr
-// and 1. Nothing below this function writes to stderr or picks a code, so the
-// error shape the conformance suite diffs cannot drift one verb at a time.
+// and 1. Nothing below this function picks a code, and nothing below it writes
+// a FAILURE, so the error shape the conformance suite diffs cannot drift one
+// verb at a time.
+//
+// A verb may still write a NOTICE to stderr, and one does. `transcript` names
+// each corrupt line it skipped and then prints the rest of the record: the
+// read succeeded, so it is not a failure and must not take the exit code, and
+// the notice must not land in the middle of the report on stdout. That is the
+// second stream's job. stderr is handed down for it rather than reached for
+// through the package, so a test drives it the same way it drives stdout.
 func run(args []string, stdout, stderr io.Writer) int {
-	err := dispatch(args, stdout)
+	err := dispatch(args, stdout, stderr)
 	var status exitStatus
 	switch {
 	case err == nil:
@@ -144,8 +154,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-// dispatch runs one verb, writing whatever it has to say to w.
-func dispatch(args []string, w io.Writer) error {
+// dispatch runs one verb, writing whatever it has to say to w. errw is the
+// second stream, for the one verb that has a notice to make alongside a
+// successful read.
+func dispatch(args []string, w, errw io.Writer) error {
 	if len(args) == 0 {
 		return errUsage
 	}
@@ -210,6 +222,9 @@ func dispatch(args []string, w io.Writer) error {
 
 	case "read":
 		return readVerb(w, rest)
+
+	case "transcript":
+		return transcriptVerb(w, errw, rest)
 
 	case "start":
 		return startVerb(w, rest)

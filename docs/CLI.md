@@ -199,6 +199,73 @@ This build presents the queue and the topics, and **no spools**. The files `run/
 and `.wake.spool.raw` belonged to the deleted shell tool. No separate listener process exists here.
 The seat's own `mcp` server is the listener, and it writes no spool.
 
+## transcript
+
+```
+loc transcript
+loc transcript --seat <endpoint>
+loc transcript --uid <uuid>
+loc transcript --pending
+loc transcript --json
+loc transcript 2026-09-16
+```
+
+The day's record, read back as messages. It reads every `$LOC_HOME/run/log/*.jsonl` file. It joins
+the lines by `uid`. It prints one block per message, oldest first.
+
+```
+2026-09-16T14:12:22Z workshop.scribe → workshop.clerk  read 14:12:40Z by workshop.clerk
+  the ledger is ready
+```
+
+The first line holds the send stamp, the sender, the recipient and the outcome. The lines under it
+hold the body as it was sent. A refused message carries no body, so it has no second line.
+
+**It writes nothing.** It opens the log files for reading and nothing else. It touches no medium,
+so it answers when the broker is the thing that is wrong.
+
+**The outcome is derived. The record does not store it.** A `sent` line is written before anybody
+reads, and the `read` line that answers it lands in the file for the day the reader was in. The
+outcome comes from the last event under that `uid`, in file order and then line order.
+
+| outcome | when |
+|---|---|
+| `read <ts> by <seat>` | the last event is `read` |
+| `pending` | the last event is `sent` |
+| `pending, bell failed <ts>: <reason>` | pending, and the recipient's seat has a later `bell-failed` |
+| `lost: queue deleted <ts> (<reason>)` | pending, and the recipient's seat has a later `queue-deleted` |
+| `failed: <reason>` | the last event is `failed` |
+
+A seat event joins a message on two facts: the seat is the recipient, and the event is later than
+the send. Where both a failed bell and a deleted queue apply, the later one wins. A stamp on the
+day of the send prints as a time. A stamp on any other day prints whole, so a read after midnight
+is never read as a read before the send.
+
+Flags:
+
+- `--seat <endpoint>` shows the messages that seat sent or was sent. It also shows that seat's own
+  events, one line each, in time order among the blocks. An event already named in a message's
+  outcome is not printed again.
+- `--uid <uuid>` shows one message. It also prints that message's raw log lines under the body, so
+  you can disagree with the outcome.
+- `--pending` shows only the messages whose last event is `sent`. It excludes topic messages: a
+  room message is read from each attender's own cursor, so it never gets a `read` line and would
+  sit in this list for ever.
+- `--json` prints one JSON object per message, one per line, with the fields `uid`, `from`, `to`,
+  `sent_ts`, `body`, `outcome` and `events`. The `events` field holds the raw log lines in order.
+  This flag prints no seat lines and no empty-record line.
+- `date` limits the output to the messages **sent** on that UTC day. Write it `YYYY-MM-DD`. Their
+  later events are still read from every file.
+
+A record with no messages in it prints `(no messages in the record)` and exits **0**.
+
+A line that is not a JSON object is skipped. The verb names the file and the line number on
+standard error, then prints the rest. One truncated line must not hide the day under it. A log file
+it cannot open is named the same way and skipped the same way. Neither one changes the exit code:
+the read succeeded.
+
+See `OPERATORS.md` §The day's record for the lines themselves.
+
 ## sub / unsub
 
 **This build has no `sub` and no `unsub` verb.** They belonged to the shell tool, which was deleted
@@ -363,7 +430,9 @@ The row gives three facts. Each fact has its own mechanism. No fact follows from
 mail, because nothing rings for its operator. Two seats ran in that state for a day on 2026-09-11.
 
 `status` adds the `bell FAILED` field when the message log holds a `bell-failed` event for the seat.
-The event must be later than the seat's registration; an older one belongs to a previous occupant of
+The event must not be before the second of the seat's registration (a registration is stamped in
+milliseconds, a bell failure in whole seconds, and a bell dead at startup fails in that same second);
+an older one belongs to a previous occupant of
 the endpoint. A `read` by that seat after the event removes the field again — the seat took its
 mail, so something reaches it. The log is `$LOC_HOME/run/log/<day>.jsonl`. A log that `status`
 cannot read adds no field, and it does not fail the report.

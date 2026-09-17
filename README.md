@@ -117,7 +117,7 @@ prints every default it wrote. It also runs the heartbeat, which sweeps every fi
 </details>
 
 <details>
-<summary><b>The eight everyday verbs</b></summary>
+<summary><b>The nine everyday verbs</b></summary>
 
 | verb | in the house | what it does |
 |---|---|---|
@@ -128,9 +128,10 @@ prints every default it wrote. It also runs the heartbeat, which sweeps every fi
 | `loc topics` | the rooms alive now | active topics in the window |
 | `loc registry` | who is at the door | asks an instance's host over the bus; under per-seat servers nobody answers and it fails |
 | `loc watch` | the gallery | every envelope as it passes, read-only |
+| `loc transcript` | the day, read back | the message log joined by message: who sent what, and whether it was read |
 | `loc version` | the number | prints what this build was stamped as |
 
-`loc` dispatches fifteen verbs. `docs/CLI.md` lists all of them.
+`loc` dispatches sixteen verbs. `docs/CLI.md` lists all of them.
 
 </details>
 
@@ -143,6 +144,8 @@ prints every default it wrote. It also runs the heartbeat, which sweeps every fi
 <img src="docs/art/attendance.png" alt="an older drawing of attendance: a send reaches the queue, a background listener drains it to a file, and a knock follows. The picture is stale. This build has neither the listener nor the file, and the seat's own mcp server rings the bell instead." width="920">
 
 **Talk in a room.** `loc publish <topic> <body>` speaks in a topic. Every attending endpoint sees the conversation from its own cursor. A `@name` mention is delivered to the topic and announced to nobody. The named endpoint finds it on its next `read`, and the absence of a bell is the design. Topics expire at the edge of the window (`topic_window`, default 7 days). Retention tears them down, and nothing needs cleaning.
+
+**Read the record back.** `loc transcript` joins the day's log by message. One block per message: who sent it, to whom, the body, and whether anybody read it. `--pending` is the mail nobody has taken. It writes nothing and opens no medium.
 
 **Check health.** `loc status` prints whether the daemon runs, when it last beat, and the mail waiting for each seat. The `doctor` verb is gone, and nothing replaced its four checks.
 
