@@ -343,6 +343,7 @@ beat and the two can never disagree about what is wrong:
 
 ```
 workshop.scribe: row ok, queue ok
+workshop.crier: row ok, queue ok, bell FAILED 2026-09-16T22:47:36Z: notifier exited 127
 workshop.clerk: queue missing, next beat repairs it
 atelier.scribe: pid dead, next beat reaps it
 workshop.legacy: row unreadable: <reason>
@@ -351,6 +352,21 @@ atelier.stray: queue with no row, next beat removes it
 
 **It performs none of those repairs.** Run it twice and the answer is the same, because a read that
 fixed what it reported would destroy the evidence the operator asked for.
+
+The row gives three facts. Each fact has its own mechanism. No fact follows from another.
+
+- *Registered* — the ledger holds a row for this seat. The seat exists.
+- *Attending* — the queue exists. A message to this seat has somewhere to wait.
+- *Notifiable* — the bell reaches this seat's operator. The operator learns that mail arrived.
+
+`row ok` does not mean `can be told`. A seat can hold a row and a queue, and still take no more
+mail, because nothing rings for its operator. Two seats ran in that state for a day on 2026-09-11.
+
+`status` adds the `bell FAILED` field when the message log holds a `bell-failed` event for the seat.
+The event must be later than the seat's registration; an older one belongs to a previous occupant of
+the endpoint. A `read` by that seat after the event removes the field again — the seat took its
+mail, so something reaches it. The log is `$LOC_HOME/run/log/<day>.jsonl`. A log that `status`
+cannot read adds no field, and it does not fail the report.
 
 Then the unread count for each **registered seat**. The roster is the ledger, not the `endpoints`
 file: a seat exists because it subscribed. If the medium is unreachable this prints `?` rather than
