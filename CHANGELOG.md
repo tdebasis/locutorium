@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.4](https://github.com/tdebasis/locutorium/compare/v0.0.3...v0.0.4) (2026-09-17)
+
+
+### Features
+
+* **cli:** add loc transcript to read the message log back ([#112](https://github.com/tdebasis/locutorium/issues/112)) ([414d954](https://github.com/tdebasis/locutorium/commit/414d9546362a5af3c652ca3fb2ca03057b47e844))
+* **status:** report a failed bell from the message log ([#110](https://github.com/tdebasis/locutorium/issues/110)) ([f7fc43e](https://github.com/tdebasis/locutorium/commit/f7fc43ee0ef66fcea2ea5c3cb37f1229fc7566da))
+
 ## [0.0.3](https://github.com/tdebasis/locutorium/compare/v0.0.2...v0.0.3) (2026-09-17)
 
 
