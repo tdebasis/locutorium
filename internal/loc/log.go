@@ -5,8 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"time"
-
-	"github.com/tdebasis/locutorium/internal/config"
 )
 
 // LogEvent appends one event to the day's message log.
@@ -38,7 +36,7 @@ import (
 // must not turn a delivered message into a failed one, or a message that was
 // shown into one that is handed over twice.
 func LogEvent(at time.Time, event any) {
-	dir := filepath.Join(config.Home(), "run", "log")
+	dir := LogDir()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return
 	}
