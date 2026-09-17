@@ -370,3 +370,61 @@ the scratch-home guard covered a CLIENT that dials.
 - **The guard is not a sandbox.** It stops this one address. It does not stop a test that pins the
   live broker on purpose. A broker that refuses an unauthenticated client is the real fix, and it is
   a product change (issue #103, "Follow-up").
+
+---
+
+## 14. Why the record stays JSON lines, and what the events are keyed by
+
+**Context:** Entry 10 above laid one file per day, append-only, JSON lines. Every line said `sent`.
+Nothing said what happened next.
+
+The receiving side wrote plain text to a second file, `run/<endpoint>.delivery.log`. A line there
+said `read <endpoint> handed=9`. It did not say which nine messages, and the two files shared no
+key. So a deployment could not answer one question: was a message read, and when. A sender saw
+`sent` and nothing more.
+
+A database was designed for this. It would have held messages, reads and bells in tables, and it
+would have answered the question with a query. It was not built.
+
+**Decision:** The record stays JSON lines. The same file takes more kinds of line.
+
+The reason is what the record is for. An operator reads it with `grep` on a machine they are already
+logged in to, at the moment something is wrong. A SQLite file needs a client, and it needs the
+schema. A text line is read by every tool on the machine and by the person looking over the
+operator's shoulder. The volume is a house of agents talking, which is thousands of lines a day and
+not millions.
+
+There are two families of line, and a reader tells them apart by which key is present.
+
+**Message events carry `uid`.** `sent` is what entry 10 laid. `failed` is a send that was refused,
+with one of four reasons: `no identity`, `too long`, `target not registered`, `bus unreachable`.
+`read` is a message taken off a queue, with the reader's name. The three share the message's id, so
+the lines for one message join on it.
+
+**Seat events carry `seat` and no `uid`.** `bell-failed` is a notifier that could not ring.
+`queue-deleted` is a queue that some process destroyed, with one of four reasons: `left`,
+`displaced`, `expired`, `orphan`.
+
+**A bell failure names no message. This is a limit of the code.** The seat's server
+is told that mail arrived and is never told which message arrived: the watch hands it an arrival,
+and the count comes from a separate question to the store. A per-message bell event is not a claim
+this code is in a position to make.
+
+**Consequences:**
+
+- A message sent at one seat and read at another has two lines with the same `uid`. The second line
+  says when it was read and by whom.
+- `loc send` prints the `uid` on its success line. A sender that was never told the `uid` would have
+  to match on a body to find the `read` line.
+- A `read` line is written after the acknowledgement and never before it. A line saying a message
+  was read, written for a message still in the queue, is a claim the next read disproves.
+- **A topic message gets no `read` line.** Everyone attending reads a room from their own position,
+  so one reader taking it is not a fact about the message. The complete answer would be one line per
+  attender, and it would still be incomplete while one of them has not read.
+- The record's day file is the UTC day of the event, and the event's own stamp names the same day. A
+  line stamped just after midnight sits in the new day's file.
+- **The bell half of issue #85 was retired by the Convener on 2026-09-16.** That work proposed a
+  per-message bell and a database under it. The events keyed by `uid` are the surviving half, and
+  they are here rather than in a table.
+- A line is still written in one call, as entry 10 requires. Every new kind of line is built in
+  memory first.

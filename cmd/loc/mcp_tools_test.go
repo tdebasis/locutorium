@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -166,7 +167,17 @@ func TestMCPTools_EachToolIsTheVerbItIsNamedFor(t *testing.T) {
 	t.Run("send", func(t *testing.T) {
 		got := s.text(t, "send", map[string]any{"to": e1, "body": "one"})
 		want := cli(t, "send", e1, "two")
-		if got != want {
+		// Two sends are two messages, and each success line names its own
+		// uid (#100). The arm holds that the tool says what the verb says,
+		// so the two ids are masked before the lines are compared, and each
+		// is checked to be a real one so the mask cannot hide a missing id.
+		uid := regexp.MustCompile(`uid=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
+		for name, line := range map[string]string{"the send tool": got, "loc send": want} {
+			if !uid.MatchString(line) {
+				t.Errorf("%s said %q; want a uid on the success line", name, line)
+			}
+		}
+		if uid.ReplaceAllString(got, "uid=<uid>") != uid.ReplaceAllString(want, "uid=<uid>") {
 			t.Errorf("the send tool said %q; loc send says %q", got, want)
 		}
 	})

@@ -34,6 +34,15 @@ import (
 // because the loop ends on the first miss and a dry queue is the common case.
 const fetchWait = 1 * time.Second
 
+// readNow is the clock a `read` event is stamped with.
+//
+// IT IS A VARIABLE SO A CASE CAN PUT AN EVENT ON A DAY OF ITS CHOOSING. The
+// day roll is a real property of the record — a read at 00:00:01 belongs in
+// the new day's file, beside nothing, and not at the foot of yesterday's —
+// and the only other way to exercise it is to wait for midnight. The shipped
+// binary reads the machine's clock through it and nothing replaces it.
+var readNow = func() time.Time { return time.Now().UTC() }
+
 // peekTrailer is what stands where the rooms would be. A peek that printed a
 // bare topics heading would say the rooms are empty; they are simply not
 // looked at, because looking at one currently consumes from it.
@@ -126,9 +135,26 @@ func readMode(p provider.Provider, w io.Writer, peek bool, jsonOut bool) error {
 	}
 
 	// A queue is never filtered: it carries only mail.
+	//
+	// THE QUEUE IS THE ONLY PLANE THAT RECORDS A READ. A queue message is
+	// delivered to one endpoint and consumed once, so "this message was read,
+	// by this seat" is a fact about the message. A topic message is read from
+	// every attending seat's own position, so the same statement about a room
+	// would need one line per attender and would still not be complete while
+	// one of them has not read yet. Both forms of `read` and the MCP read tool
+	// reach this line, because all three come through readMode.
 	if err := drain(w, m, got, func() (provider.Message, bool, error) {
 		return r.NextQueued(me, fetchWait)
-	}, nil, show); err != nil {
+	}, nil, show, func(raw []byte) {
+		e, err := loc.ParseEnvelope(raw)
+		if err != nil {
+			// Not an envelope, so there is no uid to join on. A line with an
+			// empty uid would join to every other unparseable payload in the
+			// day's file.
+			return
+		}
+		loc.LogRead(e.ID, me, readNow())
+	}); err != nil {
 		return err
 	}
 
@@ -143,7 +169,7 @@ func readMode(p provider.Provider, w io.Writer, peek bool, jsonOut bool) error {
 	}
 	return drain(w, m, got, func() (provider.Message, bool, error) {
 		return r.NextTopic(me, fetchWait)
-	}, isPresenceEvent, show)
+	}, isPresenceEvent, show, nil)
 }
 
 // isPresenceEvent reports whether a topic payload is a presence event rather
@@ -189,19 +215,33 @@ func isPresenceEvent(raw []byte) bool {
 // show is how one envelope reaches the caller — present's rendered markdown,
 // or presentJSON's raw bytes — so the one loop that drains and acknowledges
 // serves both forms of `read` identically.
-func drain(w io.Writer, m provider.Message, got bool, next func() (provider.Message, bool, error), skip func([]byte) bool, show func(io.Writer, []byte) error) error {
+//
+// after, when non-nil, is the record of what just happened, and it runs AFTER
+// a successful Ack and for a payload that was shown. The order is the same
+// order the ack itself is in: a line saying a message was read, written for a
+// message that is still in the queue, is a claim the next read disproves. A
+// payload the skip predicate passed over was consumed and never handed to
+// anybody, so it is not something a reader read. after returns nothing,
+// because a record that could fail the read it describes would be a record
+// that costs mail.
+func drain(w io.Writer, m provider.Message, got bool, next func() (provider.Message, bool, error), skip func([]byte) bool, show func(io.Writer, []byte) error, after func(raw []byte)) error {
 	var err error
 	for got {
 		// The write, then the ack that deletes what it carried — and a write
 		// that failed returns here at once, with nothing acknowledged, so the
 		// message it never showed is still owed to this reader.
-		if skip == nil || !skip(m.Data()) {
-			if err = show(w, m.Data()); err != nil {
+		raw := m.Data()
+		shown := skip == nil || !skip(raw)
+		if shown {
+			if err = show(w, raw); err != nil {
 				return err
 			}
 		}
 		if err = m.Ack(); err != nil {
 			return err
+		}
+		if shown && after != nil {
+			after(raw)
 		}
 		if m, got, err = next(); err != nil {
 			return err

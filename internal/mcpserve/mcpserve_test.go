@@ -34,6 +34,8 @@ const (
 	seat       = "workshop.scribe"
 	clientName = "acme-runtime"
 	clientVer  = "9.9.9"
+	// fakeUID stands where a real send's message id goes.
+	fakeUID = "2f9a1c40-8b57-4d6e-9a31-0c4e7b8d5a12"
 )
 
 // ── the fake tool around the server ─────────────────────────────────────────
@@ -77,7 +79,9 @@ func (f *fake) deps() Deps {
 			if f.sendErr != nil {
 				return f.sendErr
 			}
-			_, err := fmt.Fprintf(w, "sent → queue.%s\n", to)
+			// The shape the real verb prints, uid and all, with a fixed uid so
+			// the tool's own output stays assertable byte for byte.
+			_, err := fmt.Fprintf(w, "sent → queue.%s uid=%s\n", to, fakeUID)
 			return err
 		},
 		Read: func(w io.Writer, peek bool) error {
@@ -419,7 +423,7 @@ func TestTools_EachIsTheVerbAndTheEventsBracketIt(t *testing.T) {
 	if got := toolText(t, call("status", map[string]any{"endpoint": "workshop.clerk"})); got != "status of \"workshop.clerk\"\n" {
 		t.Errorf("status of an endpoint said %q", got)
 	}
-	if got := toolText(t, call("send", map[string]any{"to": "workshop.clerk", "body": "hello"})); got != "sent → queue.workshop.clerk\n" {
+	if got := toolText(t, call("send", map[string]any{"to": "workshop.clerk", "body": "hello"})); got != "sent → queue.workshop.clerk uid="+fakeUID+"\n" {
 		t.Errorf("send said %q", got)
 	}
 

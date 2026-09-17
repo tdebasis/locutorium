@@ -240,14 +240,26 @@ func withProvider(fn func(provider.Provider) error) error {
 // send puts one envelope in one endpoint's queue.
 //
 // The order of the checks is the point: identity, then length, then
-// attendance. Everything that can refuse a message does so BEFORE the
-// envelope exists, so a refusal never leaves a half-sent thing behind.
+// attendance. A caller who is nobody is told that rather than being told
+// about the body they sent.
+//
+// THE ENVELOPE IS BUILT BEFORE THE FIRST CHECK, AND THAT IS A REVERSAL. It
+// used to be built last, so that a refusal never left a half-sent thing
+// behind. Nothing here is half-sent: an envelope is a struct and a uuid until
+// SendQueue takes it, and SendQueue is still the last thing that runs. What
+// building it early buys is a NAME FOR EACH REFUSAL. A turned-away message
+// used to leave no trace at all — a line on standard error, and a record that
+// held nothing — so a seat that was refused four times in a minute and a seat
+// that sent nothing looked the same to whoever read the day's file.
 func send(p provider.Provider, w io.Writer, to, body string) error {
-	from, err := loc.Identity()
-	if err != nil {
-		return err
+	from, idErr := loc.Identity()
+	e := loc.NewEnvelope(from, to, "msg", body)
+	if idErr != nil {
+		loc.LogFailed(e, "no identity")
+		return idErr
 	}
 	if err := loc.CheckBody(body); err != nil {
+		loc.LogFailed(e, "too long")
 		return err
 	}
 	// WHERE ATTENDANCE COMES FROM. On a medium that carries presence, a queue
@@ -259,13 +271,21 @@ func send(p provider.Provider, w io.Writer, to, body string) error {
 	pr, hasPresence := p.(provider.Presence)
 	if hasPresence {
 		if err := model.ValidEndpoint(to); err != nil {
+			// A name that cannot be an endpoint holds no queue, so the record
+			// says the same thing here as it does for a name that is spelt
+			// legally and is simply not attending.
+			loc.LogFailed(e, "target not registered")
 			return err
 		}
 		attended, err := pr.QueueExists(to)
 		if err != nil {
+			// The question could not be asked, which is a fact about the
+			// medium and not about the recipient.
+			loc.LogFailed(e, "bus unreachable")
 			return err
 		}
 		if !attended {
+			loc.LogFailed(e, "target not registered")
 			return fmt.Errorf("nobody is attending '%s': no live subscription, "+
 				"so no queue to deliver to", to)
 		}
@@ -287,16 +307,23 @@ func send(p provider.Provider, w io.Writer, to, body string) error {
 	// QueueExists refusal, from a live fact instead of a file. Without presence
 	// the pidfile is still the only answer available, and stays the one used.
 	if !hasPresence && config.Value(config.SendRequiresAttendance) == "yes" && !loc.ListenerAlive(to) {
+		loc.LogFailed(e, "target not registered")
 		return fmt.Errorf("not attending: '%s' has no live listener "+
 			"(say-semantics: a send expects an attending peer; "+
 			"use a durable channel for messages meant to wait)", to)
 	}
-	e := loc.NewEnvelope(from, to, "msg", body)
 	env, err := e.Marshal()
 	if err != nil {
+		// Marshal fails only if an envelope field stops being a string, so
+		// this is a build defect rather than one of the four refusals. The
+		// message did not reach the medium, which is what `bus unreachable`
+		// says, and a line under the closest word beats a refusal that
+		// leaves no line at all.
+		loc.LogFailed(e, "bus unreachable")
 		return err
 	}
 	if err := p.SendQueue(to, env); err != nil {
+		loc.LogFailed(e, "bus unreachable")
 		return err
 	}
 	loc.LogSent(e)
@@ -307,7 +334,11 @@ func send(p provider.Provider, w io.Writer, to, body string) error {
 	// its mail on the next read. A sender that rang as well would be a second
 	// bell that cannot coalesce, is not capped, and does not know what else is
 	// waiting for that seat.
-	fmt.Fprintf(w, "sent → queue.%s\n", to)
+	// THE UID IS ON THE SUCCESS LINE so the sender can find its own message
+	// in the day's file. The record now carries a `read` line under the same
+	// uid, and a sender that was never told the uid would have to match on a
+	// body to find out whether anybody took what it sent.
+	fmt.Fprintf(w, "sent → queue.%s uid=%s\n", to, e.ID)
 	return nil
 }
 

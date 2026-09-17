@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/tdebasis/locutorium/internal/config"
+	"github.com/tdebasis/locutorium/internal/loc"
 )
 
 // THE BELL. A seat is woken, never fed.
@@ -173,6 +174,20 @@ func (b *bell) fire() {
 	// way to hammer the pane once it is fixed.
 	if err := b.s.d.Notify.Ring(b.s.d.Endpoint, b.s.address, fmt.Sprintf(bellLine, n)); err != nil {
 		b.s.warn(fmt.Sprintf("bell failed %s: %v", b.s.d.Endpoint, err))
+		// THE WARNING AND THE EVENT GO TO DIFFERENT READERS. The warning
+		// lands in this seat's own delivery log, which is plain text and is
+		// found by somebody who already suspects this seat. The event lands
+		// in the day's record beside the `sent` line for the mail that could
+		// not be announced, which is where a sender asking "why has nobody
+		// answered me" is already looking.
+		//
+		// It carries no uid. The watch reports an arrival and Unread reports
+		// a count, so the server knows that mail is waiting and never which
+		// message is waiting (WatchQueue, internal/provider/provider.go).
+		//
+		// The clock is the server's injected one, the same clock the breaker
+		// rolls its buckets on, so a case that pins time pins this line too.
+		loc.LogBellFailed(b.s.d.Endpoint, err.Error(), b.s.d.Now())
 		return
 	}
 	b.s.log(fmt.Sprintf("wake %s count=%d", b.s.d.Endpoint, n))

@@ -45,9 +45,9 @@ func TestSend_PutsTheMessageInTheQueueAndPrintsTheShippedLine(t *testing.T) {
 			}
 
 			out := sendAs(t, "host", e1, "the clerk has a question")
-			if want := "sent → queue." + e1 + "\n"; out != want {
-				t.Errorf("send printed %q; the shipped line is %q, and it does not vary "+
-					"with what is running at the far end", out, want)
+			if want := "sent → queue." + e1 + " uid="; !strings.HasPrefix(out, want) || !strings.HasSuffix(out, "\n") {
+				t.Errorf("send printed %q; the shipped line starts %q and carries the uid, "+
+					"and it does not vary with what is running at the far end", out, want)
 			}
 
 			// AND THE MESSAGE IS THERE. A send that printed the right line and

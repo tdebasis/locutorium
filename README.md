@@ -46,7 +46,7 @@ It is for the moment a coordinator says *"builder, the tests are green — tag i
 
 ```console
 $ LOC_IDENTITY=ada loc send bob "the build is green; the tag is yours"
-sent → queue.bob
+sent → queue.bob uid=9f1c2a3b-4d5e-4f60-8a71-2b3c4d5e6f70
 $ LOC_IDENTITY=ada loc publish standup "@bob please look at the restore proof"
 published → #standup
 $ LOC_IDENTITY=bob loc read

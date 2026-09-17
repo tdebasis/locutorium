@@ -309,6 +309,21 @@ func unsubscribeVerb(args []string) error {
 		if err := pr.DeleteQueue(endpoint); err != nil {
 			return err
 		}
+		// WHICH OF THE THREE DEPARTURES THIS WAS. The verb already knows, and
+		// nothing downstream can work it out: the queue is gone, and the row
+		// went with it. `--reason expiry` is a registration that aged out.
+		// A `--force` over a live incumbent is one agent taking a seat from
+		// another, which is the case somebody comes looking for when a seat
+		// stops receiving mail it was sent. Everything else is an agent
+		// leaving its own seat, which is the ordinary end of a session.
+		why := "left"
+		switch {
+		case reason == "expiry":
+			why = "expired"
+		case force && reg != nil && reg.Alive():
+			why = "displaced"
+		}
+		loc.LogQueueDeleted(endpoint, why, time.Now().UTC())
 		return emitDeparture(pr, endpoint, reason)
 	})
 }
@@ -372,6 +387,9 @@ func sweepVerb(w io.Writer, args []string) (changes int, err error) {
 				if err := pr.DeleteQueue(f.Endpoint); err != nil {
 					return err
 				}
+				// `expired` and not `left`: the row outlived the process it
+				// named. Nobody unsubscribed, so no agent decided this.
+				loc.LogQueueDeleted(f.Endpoint, "expired", time.Now().UTC())
 				if err := model.Remove(f.Endpoint); err != nil {
 					return err
 				}
@@ -389,6 +407,11 @@ func sweepVerb(w io.Writer, args []string) (changes int, err error) {
 				if err := pr.DeleteQueue(f.Endpoint); err != nil {
 					return err
 				}
+				// A queue no row claims. The line is written for exactly the
+				// question this pass is dangerous for: a queue that held mail
+				// is gone, and the record has to say a sweep took it rather
+				// than leaving it to be guessed at.
+				loc.LogQueueDeleted(f.Endpoint, "orphan", time.Now().UTC())
 				changes++
 				if _, err := fmt.Fprintf(w, "%s: queue deleted, no row holds it\n", f.Endpoint); err != nil {
 					return err
