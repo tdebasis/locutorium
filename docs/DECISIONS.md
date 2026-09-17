@@ -349,9 +349,10 @@ sweep, which deletes a queue that no row in its registry claims. The scratch reg
 the sweep deleted all six live queues. Any message unread at that moment was lost. The next beat
 recreated the queues. The outage lasted about three minutes.
 
-**The guard is in the client, not in the harness.** Every package that speaks NATS dials through one
-function, `connectWithin`. A refusal there holds in every package and needs no discipline from a
-test author. The harness was the other candidate and it failed twice: the same class happened on
+**The guard is in the client, not in the harness.** Every connection the product opens goes through
+one function, `nats.Dial`: the provider's `connectWithin`, the listener in `WatchQueue`, and the
+daemon's `ensureTopics`. A refusal there holds in every package and needs no discipline from a test
+author. The first cut put the guard inside `connectWithin` alone, and `WatchQueue` dialled past it. The harness was the other candidate and it failed twice: the same class happened on
 2026-09-12, the answer then was a rule for test authors, and the rule did not survive to
 2026-09-16. `cmd/loc` `TestMain` already refused to BIND the default port. Neither that guard nor
 the scratch-home guard covered a CLIENT that dials.

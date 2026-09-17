@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -24,6 +25,22 @@ var underTest = testing.Testing
 // be able to prove that the guard refuses BEFORE anything reaches the network.
 var dialBroker = natsgo.Connect
 
+// ErrRefusedUnderTest is what Dial returns when the guard fires. Callers that
+// fold every dial error into errConnect let this one through, because "cannot
+// reach the medium" is the opposite of what happened: the medium was reachable
+// and the guard stopped the dial. A test that hit the guard has to be told so.
+var ErrRefusedUnderTest = fmt.Errorf("refused under go test")
+
+// Dial is the one way this module opens a connection. It refuses the default
+// broker under `go test` and otherwise dials. Every caller in the module and
+// the daemon uses it; a new natsgo.Connect anywhere else is a defect.
+func Dial(url string, opts ...natsgo.Option) (*natsgo.Conn, error) {
+	if err := refuseDefaultUnderTest(url); err != nil {
+		return nil, err
+	}
+	return dialBroker(url, opts...)
+}
+
 // refuseDefaultUnderTest refuses the product's default broker address when a
 // test binary asks for it. It answers nil in the shipped binary.
 //
@@ -35,8 +52,11 @@ var dialBroker = natsgo.Connect
 // that no row in its registry claims, the scratch registry was empty, and all
 // six live queues went. Any message unread at that moment was lost. The same
 // class happened on 2026-09-12, and the answer then was discipline in the
-// harness. Discipline failed twice. Every package that speaks NATS dials
-// through connectWithin, so the refusal belongs here.
+// harness. Discipline failed twice. Every connection this module opens goes
+// through Dial below — connectWithin, WatchQueue's long-lived listener and
+// the daemon's ensureTopics — so the refusal sits on that one seam and no
+// call site can walk around it. The first cut of this guard sat inside
+// connectWithin only, and WatchQueue dialled past it (Assayer F1, 2026-09-16).
 //
 // LOCALHOST IS THE DEFAULT TOO. The comparison reads the host and the port that
 // url.Parse finds, not the two strings. 127.0.0.1, ::1 and localhost name one
@@ -48,15 +68,20 @@ func refuseDefaultUnderTest(raw string) error {
 		return nil
 	}
 	def := config.Default(config.NATSURL)
-	if !sameBroker(raw, def) {
-		return nil
+	// THE VALUE IS A LIST. The nats client splits nats_url on commas and dials
+	// each server in turn, so a list that names the default anywhere reaches
+	// it. Every entry is checked (Assayer F2, 2026-09-16).
+	for _, one := range strings.Split(raw, ",") {
+		if sameBroker(one, def) {
+			return fmt.Errorf("%w: refusing to dial %s: it names the default %s, "+
+				"and on a machine that runs the Locutorium that is the live broker. "+
+				"A test must pin %s in its own scratch config, to a closed port or to a "+
+				"broker it booted on a port the kernel picked. On 2026-09-16 a test run "+
+				"against this address deleted every queue on a live deployment",
+				ErrRefusedUnderTest, strings.TrimSpace(one), config.NATSURL, config.NATSURL)
+		}
 	}
-	return fmt.Errorf("refusing to dial %s under go test: it is the default %s, "+
-		"and on a machine that runs the Locutorium it is the live broker. "+
-		"A test must pin %s in its own scratch config, to a closed port or to a "+
-		"broker it booted on a port the kernel picked. On 2026-09-16 a test run "+
-		"against this address deleted every queue on a live deployment",
-		raw, config.NATSURL, config.NATSURL)
+	return nil
 }
 
 // sameBroker reports whether two nats URLs name one broker on this machine.
@@ -73,7 +98,7 @@ func sameBroker(a, b string) bool {
 	if !ok {
 		return false
 	}
-	if ua.Port() != ub.Port() {
+	if portOf(ua) != portOf(ub) {
 		return false
 	}
 	ha, hb := strings.ToLower(ua.Hostname()), strings.ToLower(ub.Hostname())
@@ -100,11 +125,28 @@ func parseBroker(raw string) (*url.URL, bool) {
 	return u, true
 }
 
+// portOf is the port as a number, with the nats client's default when the
+// address names none. `nats://localhost` and `127.0.0.1:04222` are both the
+// default broker to the client, so they are to the guard (Assayer F2, N1).
+func portOf(u *url.URL) int {
+	p := u.Port()
+	if p == "" {
+		return 4222
+	}
+	n, err := strconv.Atoi(p)
+	if err != nil {
+		return -1
+	}
+	return n
+}
+
 // loopbackHost reports whether a host name reaches this machine and no other.
 func loopbackHost(h string) bool {
 	if h == "localhost" {
 		return true
 	}
+	// 0.0.0.0 and :: are "this host" to a dialler on this host, so they reach
+	// the same listener (Assayer N1).
 	ip := net.ParseIP(h)
-	return ip != nil && ip.IsLoopback()
+	return ip != nil && (ip.IsLoopback() || ip.IsUnspecified())
 }

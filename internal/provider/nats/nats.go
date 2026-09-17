@@ -16,6 +16,7 @@
 package nats
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -89,12 +90,9 @@ func (p *Provider) connectWithin(dial time.Duration) error {
 		return nil
 	}
 	url := config.Value(config.NATSURL)
-	// THE GUARD RUNS BEFORE THE DIAL. Nothing reaches the network when it
-	// fires. See refuseDefaultUnderTest in guard.go and the outage it records.
-	if err := refuseDefaultUnderTest(url); err != nil {
-		return err
-	}
-	nc, err := dialBroker(url,
+	// Dial carries the guard against the default broker under go test; see
+	// guard.go and the outage it records.
+	nc, err := Dial(url,
 		natsgo.Name("loc"),
 		natsgo.Timeout(dial),
 		// THE ONLY PLACE A REFUSAL IS EVER SAID OUT LOUD. See noteRefusal.
@@ -104,6 +102,12 @@ func (p *Provider) connectWithin(dial time.Duration) error {
 		natsgo.NoReconnect(),
 	)
 	if err != nil {
+		// The guard's refusal is said as itself: it names the address on
+		// purpose, and "cannot reach the medium" would tell a test the
+		// opposite of what happened.
+		if errors.Is(err, ErrRefusedUnderTest) {
+			return err
+		}
 		// The client's error text never carries the password, but it can
 		// carry the URL with a userinfo component if one were ever set there,
 		// so callers wrap this rather than print it.

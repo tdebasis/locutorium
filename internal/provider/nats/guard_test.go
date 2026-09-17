@@ -2,6 +2,7 @@ package nats
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -116,6 +117,13 @@ func TestSameBrokerReadsTheHostAndThePort(t *testing.T) {
 		{"nats://LOCALHOST:4222", true},
 		{"nats://[::1]:4222", true},
 		{"127.0.0.1:4222", true},
+		// The nats client fills in the port and reads these names as this host,
+		// so the guard does too (Assayer F2 and N1, 2026-09-16).
+		{"127.0.0.1", true},
+		{"nats://localhost", true},
+		{"nats://0.0.0.0:4222", true},
+		{"nats://[::]:4222", true},
+		{"nats://127.0.0.1:04222", true},
 		{"nats://127.0.0.1:4223", false},
 		{"nats://10.0.0.4:4222", false},
 		{"nats://example.test:4222", false},
@@ -124,5 +132,40 @@ func TestSameBrokerReadsTheHostAndThePort(t *testing.T) {
 		if got := sameBroker(c.raw, config.Default(config.NATSURL)); got != c.want {
 			t.Errorf("sameBroker(%q) = %v, want %v", c.raw, got, c.want)
 		}
+	}
+}
+
+// The nats client dials each server in a comma list. A list that names the
+// default anywhere reaches it, so the guard reads every entry (Assayer F2).
+func TestAListThatNamesTheDefaultAnywhereIsRefused(t *testing.T) {
+	r := pin(t, true)
+	err := refuseDefaultUnderTest("nats://10.0.0.4:4222, nats://127.0.0.1:4222")
+	if err == nil {
+		t.Fatal("a list carrying the default was not refused")
+	}
+	if got := refuseDefaultUnderTest("nats://10.0.0.4:4222,nats://10.0.0.5:4222"); got != nil {
+		t.Errorf("a list with no default was refused: %v", got)
+	}
+	if len(r.urls) != 0 {
+		t.Errorf("the guard dialled %v; it must refuse before the dial", r.urls)
+	}
+}
+
+// WatchQueue opens its own long-lived connection and does not pass through
+// connectWithin. The first cut of the guard sat inside connectWithin, so the
+// listener dialled the default past it (Assayer F1). It now dials through Dial.
+func TestWatchQueueDialsThroughTheGuard(t *testing.T) {
+	r := pin(t, true)
+	home := t.TempDir()
+	t.Setenv("LOC_HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "config"), []byte("nats_url = "+config.Default(config.NATSURL)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := &Provider{}
+	if _, err := p.WatchQueue("workshop.scribe", nil, nil); err == nil || !strings.Contains(err.Error(), "refusing to dial") {
+		t.Fatalf("WatchQueue at the default under go test: err = %v, want the guard's refusal", err)
+	}
+	if len(r.urls) != 0 {
+		t.Errorf("WatchQueue dialled %v past the guard", r.urls)
 	}
 }
