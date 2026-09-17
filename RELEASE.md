@@ -29,6 +29,11 @@ release nothing. Add `!` after the type to mark a breaking change, for example
 
 After `0.1.0`, `feat` moves the middle digit, and `fix` and `perf` move the last digit. `!` also moves the middle digit, until a release reaches `1.0.0`.
 
+A title with no type releases nothing, and the tool says nothing about it. On 2026-09-16 three pull
+requests merged with plain-sentence titles (#104, #105, #107). The workflow ran after each merge and
+opened no Release PR. The recovery was one more pull request with a typed title. Check the title
+before the merge, not after.
+
 ## Merges
 
 Squash merge every pull request. The squash commit takes the PR title, so the title reaches the tool.
