@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.3](https://github.com/tdebasis/locutorium/compare/v0.0.2...v0.0.3) (2026-09-17)
+
+
+### Features
+
+* **log:** release the event log and the test guard ([#108](https://github.com/tdebasis/locutorium/issues/108)) ([c435933](https://github.com/tdebasis/locutorium/commit/c4359335d3a53ef1709826a7fc6ee7ccf73baba7))
+
 ## [0.0.2](https://github.com/tdebasis/locutorium/compare/v0.0.1...v0.0.2) (2026-09-16)
 
 
