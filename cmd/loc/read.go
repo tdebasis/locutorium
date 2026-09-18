@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
 	"time"
 
 	"github.com/tdebasis/locutorium/internal/config"
@@ -69,7 +71,85 @@ func readVerb(w io.Writer, args []string) error {
 	default:
 		return errUsage
 	}
-	return withProvider(func(p provider.Provider) error { return readMode(p, w, peek, jsonOut) })
+	return withProvider(func(p provider.Provider) error {
+		stop := releaseOnSignal(p)
+		defer stop()
+		return readMode(p, w, peek, jsonOut)
+	})
+}
+
+// signalGrace is how long the handler waits for the signal it re-sent to end
+// the process. The default disposition is restored before it is sent, so the
+// kernel ends this process inside that window and the sleep does not finish.
+// It is a bound on a gap, not a delay anybody waits out.
+const signalGrace = 2 * time.Second
+
+// readSignalExit is what a released read does after it has handed its message
+// back. It is a variable so a case can watch the release without the case's own
+// process being killed by the re-raise.
+var readSignalExit = reRaise
+
+// reRaise restores the default disposition and sends the signal to this process
+// again, so the ending is the ending the caller asked for.
+func reRaise(s os.Signal) {
+	signal.Reset(stopSignals()...)
+	if self, err := os.FindProcess(os.Getpid()); err == nil {
+		if err := self.Signal(s); err == nil {
+			time.Sleep(signalGrace)
+		}
+	}
+	// Windows delivers no signal to a process this way, so the ending is taken
+	// here instead. On Unix this line is not reached.
+	os.Exit(1)
+}
+
+// releaseOnSignal hands the in-flight message back before a killed read exits.
+//
+// A READ KILLED BY A SIGNAL SKIPS THE CLOSE THAT RETURNS IT. Close negatively
+// acknowledges everything the reader was handed and never took, so an ordinary
+// exit returns the message at once — an error, an EPIPE, a dry queue. `^C` and
+// `kill` do not run it. Without this handler the message the reader was in the
+// middle of stays in flight for the consumer's whole ack-wait, the server's
+// 30 s default, and the next read shows an empty mailbox: the one state a
+// reader cannot tell apart from having lost it (issue #30).
+//
+// THE ACK-WAIT IS NOT TOUCHED. An explicit ack-wait is a consumer
+// configuration, and every existing cursor would have to be migrated to take
+// one. The release costs no migration and bounds the window at the signal
+// rather than at a timer.
+//
+// SIGKILL IS NOT COVERED AND CANNOT BE. No process handles it, so a read
+// killed that way still strands its message for the server's default
+// ack-wait. That case is the reason the 30 s bound stays where it is.
+//
+// THE SIGNAL IS NOT SWALLOWED. readSignalExit restores the default disposition
+// and sends the same signal again, so the exit status still says the tool was
+// killed and names the signal. A caller reading `$?` sees no change.
+//
+// Close runs on this goroutine while the verb may still be inside its own
+// fetch or write, and the two race. The race is bounded by the direction this
+// whole path is built on: the worst outcome is a message handed back twice, or
+// handed back after it was taken, and both cost a DUPLICATE. Nothing here can
+// delete a message the reader has not seen.
+func releaseOnSignal(p provider.Provider) (stop func()) {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, stopSignals()...)
+	go func() {
+		s, ok := <-ch
+		if !ok {
+			// stop closed the channel: the read ended on its own and
+			// withProvider's own Close is what returns anything outstanding.
+			return
+		}
+		p.Close()
+		readSignalExit(s)
+	}()
+	return func() {
+		// Stop returns only once the signal package will send nothing more, so
+		// the close that follows cannot race a delivery.
+		signal.Stop(ch)
+		close(ch)
+	}
 }
 
 // read presents the caller's own queue and then the rooms, rendered as
