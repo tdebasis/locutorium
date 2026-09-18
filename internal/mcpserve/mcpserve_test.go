@@ -682,8 +682,13 @@ func TestBell_NamesTheCourierAfterTheSenders(t *testing.T) {
 	if got := f.couriersRung()[0]; got != "scribe" {
 		t.Errorf("one sender named the courier %q; want scribe", got)
 	}
-	if got := f.bells()[0]; got != "🔔 1 new → read" {
-		t.Errorf("the bell said %q; the sender belongs on the courier, not in the line", got)
+	// THE LINE NAMES THE SENDER TOO, and this assertion used to say the
+	// opposite. A tmux endpoint has no courier session to name, so naming the
+	// courier alone left those panes reading an anonymous count while every
+	// other pane saw a sender. A name is not a body: the line still carries the
+	// count and where to go, and never the message.
+	if got := f.bells()[0]; got != "🔔 1 new from scribe → read" {
+		t.Errorf("the bell said %q; want the count and the sender", got)
 	}
 
 	// TWO SENDERS GIVE THE FIRST AND A COUNT OF THE REST. The label holds one

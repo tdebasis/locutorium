@@ -121,7 +121,17 @@ const (
 // bellLine is the whole of a wake: a count and where to go for the bodies.
 // ONE LINE, NO BODY — a pane is not a mailbox, and a bell that carried the
 // message would make the read tool optional and the reminder unreachable.
-const bellLine = "🔔 %d new → read"
+//
+// bellLineFrom names the sender as well. A NAME IS NOT A BODY: the rule that a
+// bell does not carry the message stands, and what it carries now is who the
+// message is from — the one thing a reader looks for on arrival, which the line
+// answered with nothing. A tmux endpoint needs it HERE: it has no courier
+// session to name, so without it those panes read an anonymous count while
+// every other pane reads a sender.
+const (
+	bellLine     = "🔔 %d new → read"
+	bellLineFrom = "🔔 %d new from %s → read"
+)
 
 // Serve registers the seat, serves the four tools until the runtime lets go of
 // this process, and unregisters. It returns an error only when the server

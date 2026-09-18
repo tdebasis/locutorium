@@ -205,7 +205,16 @@ func (b *bell) fire() {
 	// The breaker has already been charged for it, which is deliberate: a
 	// notifier that fails will fail again, and a broken bell must not become a
 	// way to hammer the pane once it is fixed.
-	if err := b.s.d.Notify.Ring(b.s.d.Endpoint, b.s.address, fmt.Sprintf(bellLine, n), courierName(senders)); err != nil {
+	courier := courierName(senders)
+	// The line names the sender whenever the name survived the shape check. A
+	// backlog, or a name that did not, falls back to the count alone rather than
+	// printing a placeholder: "from loc-bell" would be noise wearing a fact's
+	// clothes.
+	line := fmt.Sprintf(bellLine, n)
+	if courier != defaultCourierName {
+		line = fmt.Sprintf(bellLineFrom, n, courier)
+	}
+	if err := b.s.d.Notify.Ring(b.s.d.Endpoint, b.s.address, line, courier); err != nil {
 		b.s.warn(fmt.Sprintf("bell failed %s: %v", b.s.d.Endpoint, err))
 		// THE WARNING AND THE EVENT GO TO DIFFERENT READERS. The warning
 		// lands in this seat's own delivery log, which is plain text and is
