@@ -18,9 +18,8 @@ func TestLineShapesMatchREADME(t *testing.T) {
 
 	for _, line := range []string{
 		formatTopic("standup", 1),
-		formatStatus("ada", "0"),
-		formatStatus("bob", "0"),
-		formatStatus("carol", "0"),
+		formatStatus("house.ada", "0"),
+		formatStatus("house.bob", "0"),
 	} {
 		if !strings.Contains(page, line) {
 			t.Errorf("README does not contain %q", line)
