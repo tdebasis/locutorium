@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.0.6](https://github.com/tdebasis/locutorium/compare/v0.0.5...v0.0.6) (2026-09-18)
+
+
+### Features
+
+* **bell:** name the wake courier after the sender ([#125](https://github.com/tdebasis/locutorium/issues/125)) ([57dfc74](https://github.com/tdebasis/locutorium/commit/57dfc748d60f28235d9f4af4ae9f645ea14c0d28))
+* **config:** rename idle_window to idle_timeout ([#117](https://github.com/tdebasis/locutorium/issues/117)) ([00ad5c1](https://github.com/tdebasis/locutorium/commit/00ad5c1ceac8f75ba003d353f2b637d087e3c569))
+
+
+### Bug Fixes
+
+* **loc:** split the pid liveness probe by platform ([#119](https://github.com/tdebasis/locutorium/issues/119)) ([5cc2ab2](https://github.com/tdebasis/locutorium/commit/5cc2ab274100c503867a0ef59631a1d29422771b))
+* **read:** release the in-flight message when a signal kills the read ([#121](https://github.com/tdebasis/locutorium/issues/121)) ([b551f76](https://github.com/tdebasis/locutorium/commit/b551f7663eb6e1d59d3c22eb9db3a6e06ec44def))
+
 ## [0.0.5](https://github.com/tdebasis/locutorium/compare/v0.0.4...v0.0.5) (2026-09-17)
 
 
