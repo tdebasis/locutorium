@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/tdebasis/locutorium/internal/config"
 )
@@ -33,7 +32,7 @@ func ListenerAlive(endpoint string) bool {
 	if err != nil || pid <= 0 {
 		return false
 	}
-	if syscall.Kill(pid, 0) != nil {
+	if !PidAlive(pid) {
 		return false
 	}
 	return PidStart(pid) == lines[1]

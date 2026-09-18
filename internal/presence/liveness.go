@@ -2,7 +2,6 @@ package presence
 
 import (
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/tdebasis/locutorium/internal/loc"
@@ -61,7 +60,7 @@ func Alive(pid int, started string) bool {
 	if pid <= 0 || started == "" {
 		return false
 	}
-	if syscall.Kill(pid, 0) != nil {
+	if !loc.PidAlive(pid) {
 		return false
 	}
 	return StartedAt(pid) == started
