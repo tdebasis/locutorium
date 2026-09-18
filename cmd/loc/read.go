@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
 	"time"
 
 	"github.com/tdebasis/locutorium/internal/config"
@@ -69,14 +72,156 @@ func readVerb(w io.Writer, args []string) error {
 	default:
 		return errUsage
 	}
-	return withProvider(func(p provider.Provider) error { return readMode(p, w, peek, jsonOut) })
+	return runRead(withProvider, func(p provider.Provider, unwind <-chan struct{}) error {
+		return readMode(p, w, peek, jsonOut, unwind)
+	})
+}
+
+// signalGrace is how long the handler waits for the signal it re-sent to end
+// the process. The default disposition is restored before it is sent, so the
+// kernel ends this process inside that window and the sleep does not finish.
+// It is a bound on a gap, not a delay anybody waits out.
+const signalGrace = 2 * time.Second
+
+// readSignalExit is what a released read does after it has handed its message
+// back. It is a variable so a case can watch the release without the case's own
+// process being killed by the re-raise.
+var readSignalExit = reRaise
+
+// reRaise restores the default disposition and sends the signal to this process
+// again, so the ending is the ending the caller asked for.
+func reRaise(s os.Signal) {
+	signal.Reset(stopSignals()...)
+	if self, err := os.FindProcess(os.Getpid()); err == nil {
+		if err := self.Signal(s); err == nil {
+			time.Sleep(signalGrace)
+		}
+	}
+	// Windows delivers no signal to a process this way, so the ending is taken
+	// here instead. On Unix this line is not reached.
+	os.Exit(1)
+}
+
+// errSignalled is what a read returns when a stop signal told it to unwind. It
+// is not a failure: the verb re-raises the signal, so the caller learns the
+// ending from the exit status and not from this error.
+var errSignalled = errors.New("read stopped by a signal")
+
+// runRead arms the stop signals, runs one read, and takes the ending.
+//
+// A READ KILLED BY A SIGNAL SKIPS THE CLOSE THAT RETURNS ITS MESSAGE. Close
+// negatively acknowledges everything the reader was handed and never took, so
+// an ordinary exit returns the message at once. `^C` and `kill` do not run it.
+// Without this the message the reader was in the middle of stays in flight for
+// the consumer's whole ack-wait, the server's 30 s default, and the next read
+// shows an empty mailbox: the one state a reader cannot tell apart from having
+// lost it (issue #30).
+//
+// THE HANDLER DOES NOT TOUCH THE PROVIDER, AND THAT IS THE POINT. The first
+// cut of this closed the provider on the handler's own goroutine while the read
+// was still inside a fetch or a write. Close nils the connection, the stream
+// and the subscriptions (internal/provider/nats/nats.go), the read path
+// dereferences all three, and neither side takes a lock: a data race, and a nil
+// dereference reachable by reading the code (Assayer, 2026-09-16). Here the
+// signal only closes a channel. The read sees the channel, stops, and returns;
+// open's own deferred Close then runs on the read's goroutine, exactly as it
+// does on an ordinary exit. ONE PARTY TOUCHES THE PROVIDER. Taking a mutex
+// inside Close was the other candidate and it was refused: it narrows the
+// window and leaves every unguarded dereference in the read path where it is.
+//
+// THE CLOSE RUNS BEFORE THE SIGNAL IS SENT ON. open returns only once its
+// deferred Close has run, and readSignalExit is called after that, so the
+// message is back in the queue before this process ends.
+//
+// THE ACK-WAIT IS NOT TOUCHED. An explicit ack-wait is a consumer
+// configuration, and every existing cursor would have to be migrated to take
+// one. The release costs no migration and bounds the window at the signal
+// rather than at a timer.
+//
+// SIGKILL IS NOT COVERED AND CANNOT BE. No process handles it, so a read killed
+// that way still strands its message for the server's default ack-wait. That
+// case is the reason the 30 s bound stays where it is.
+//
+// THE SIGNAL IS NOT SWALLOWED. readSignalExit restores the default disposition
+// and sends the same signal again, so the exit status still says the tool was
+// killed and names the signal. A caller reading `$?` sees no change.
+//
+// open is withProvider in the shipped binary. It is an argument so that a case
+// can watch the order of the close and the re-raise without a broker.
+func runRead(open func(func(provider.Provider) error) error, run func(provider.Provider, <-chan struct{}) error) error {
+	unwind, killedBy, stop := unwindOnSignal()
+	defer stop()
+
+	err := open(func(p provider.Provider) error { return run(p, unwind) })
+
+	// open has returned, so its deferred Close has run and the in-flight
+	// message is back in the queue.
+	if s := killedBy(); s != nil {
+		if errors.Is(err, errSignalled) {
+			// The signal is the ending, not an error to print.
+			err = nil
+		}
+		readSignalExit(s)
+	}
+	return err
+}
+
+// unwindOnSignal registers for the stop signals and reports them on a channel.
+//
+// IT TAKES NO PROVIDER. The handler cannot close what it is never given, which
+// is the defect of the first cut expressed as a type rather than as a comment.
+//
+// unwind closes when a stop signal arrives. killedBy answers which signal it
+// was, or nil if none came; it reads the signal only after a receive on unwind
+// has succeeded, and the close of unwind orders that write before this read.
+// stop unregisters the subscription.
+func unwindOnSignal() (unwind <-chan struct{}, killedBy func() os.Signal, stop func()) {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, stopSignals()...)
+	done := make(chan struct{})
+	var got os.Signal
+	go func() {
+		s, ok := <-ch
+		if !ok {
+			// stop closed the channel: the read ended on its own.
+			return
+		}
+		got = s
+		close(done)
+	}()
+	killedBy = func() os.Signal {
+		select {
+		case <-done:
+			return got
+		default:
+			return nil
+		}
+	}
+	stop = func() {
+		// Stop returns only once the signal package will send nothing more, so
+		// the close that follows cannot race a delivery.
+		signal.Stop(ch)
+		close(ch)
+	}
+	return done, killedBy, stop
+}
+
+// signalled reports whether the read was told to unwind. A nil channel is never
+// ready, so a caller that arms nothing — the MCP read hook — always answers no.
+func signalled(unwind <-chan struct{}) bool {
+	select {
+	case <-unwind:
+		return true
+	default:
+		return false
+	}
 }
 
 // read presents the caller's own queue and then the rooms, rendered as
 // markdown. It is the form the mcp verb's own Read hook (cmd/loc/mcp.go)
 // calls, which has no `--json` mode of its own to plumb through.
 func read(p provider.Provider, w io.Writer, peek bool) error {
-	return readMode(p, w, peek, false)
+	return readMode(p, w, peek, false, nil)
 }
 
 // readMode is read's full form, adding the `--json` output.
@@ -86,7 +231,7 @@ func read(p provider.Provider, w io.Writer, peek bool) error {
 // envelope as its raw wire bytes instead of rendered markdown, and omits the
 // `── queue.x ──` / `── topics ──` headings, so the output is JSON Lines and
 // nothing else. A hook parses that; it cannot parse a heading.
-func readMode(p provider.Provider, w io.Writer, peek bool, jsonOut bool) error {
+func readMode(p provider.Provider, w io.Writer, peek bool, jsonOut bool, unwind <-chan struct{}) error {
 	me, err := loc.Identity()
 	if err != nil {
 		return err
@@ -109,6 +254,12 @@ func readMode(p provider.Provider, w io.Writer, peek bool, jsonOut bool) error {
 	}
 	if err != nil {
 		return err
+	}
+	// The signal may have arrived while that fetch was waiting. Stopping here
+	// prints no heading at all, which is right: a heading and then nothing says
+	// the mailbox was looked at and found empty.
+	if signalled(unwind) {
+		return errSignalled
 	}
 
 	show := present
@@ -143,7 +294,7 @@ func readMode(p provider.Provider, w io.Writer, peek bool, jsonOut bool) error {
 	// would need one line per attender and would still not be complete while
 	// one of them has not read yet. Both forms of `read` and the MCP read tool
 	// reach this line, because all three come through readMode.
-	if err := drain(w, m, got, func() (provider.Message, bool, error) {
+	if err := drain(unwind, w, m, got, func() (provider.Message, bool, error) {
 		return r.NextQueued(me, fetchWait)
 	}, nil, show, func(raw []byte) {
 		e, err := loc.ParseEnvelope(raw)
@@ -167,7 +318,7 @@ func readMode(p provider.Provider, w io.Writer, peek bool, jsonOut bool) error {
 	if err != nil {
 		return err
 	}
-	return drain(w, m, got, func() (provider.Message, bool, error) {
+	return drain(unwind, w, m, got, func() (provider.Message, bool, error) {
 		return r.NextTopic(me, fetchWait)
 	}, isPresenceEvent, show, nil)
 }
@@ -224,9 +375,16 @@ func isPresenceEvent(raw []byte) bool {
 // anybody, so it is not something a reader read. after returns nothing,
 // because a record that could fail the read it describes would be a record
 // that costs mail.
-func drain(w io.Writer, m provider.Message, got bool, next func() (provider.Message, bool, error), skip func([]byte) bool, show func(io.Writer, []byte) error, after func(raw []byte)) error {
+func drain(unwind <-chan struct{}, w io.Writer, m provider.Message, got bool, next func() (provider.Message, bool, error), skip func([]byte) bool, show func(io.Writer, []byte) error, after func(raw []byte)) error {
 	var err error
 	for got {
+		// THE CHECK IS ABOVE THE WRITE AND ABOVE THE ACK. m is fetched and not
+		// yet acknowledged here, so returning now leaves it in flight and the
+		// verb's Close hands it straight back. A check below the ack would
+		// release the NEXT message and destroy this one.
+		if signalled(unwind) {
+			return errSignalled
+		}
 		// The write, then the ack that deletes what it carried — and a write
 		// that failed returns here at once, with nothing acknowledged, so the
 		// message it never showed is still owed to this reader.
