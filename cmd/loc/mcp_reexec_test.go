@@ -150,10 +150,17 @@ func servingPID(t *testing.T, home, endpoint string) int {
 		// TWO LINES: the pid, then the start time the presence model records
 		// for it. The pid is the first line; the second is what keeps a
 		// recycled number from reading as the same process. os.WriteFile is
-		// not atomic, so a reader can find the file before its first line is
-		// written; that reads as "not yet", not as a bad file.
-		first := strings.TrimSpace(strings.SplitN(string(b), "\n", 2)[0])
-		p, err := strconv.Atoi(first)
+		// not atomic, so a reader can find the file empty, or with only the
+		// first digits of the pid in it. Those digits parse as the pid of a
+		// different process, and the callers send a signal to what this
+		// returns. A first line therefore counts only when a newline ends it;
+		// anything less reads as "not yet", not as a bad file.
+		line, _, whole := strings.Cut(string(b), "\n")
+		if !whole {
+			last = fmt.Sprintf("it held %q, whose first line has no newline yet", string(b))
+			return false
+		}
+		p, err := strconv.Atoi(strings.TrimSpace(line))
 		if err != nil || p <= 0 {
 			last = fmt.Sprintf("it held %q, whose first line is not a pid", string(b))
 			return false
