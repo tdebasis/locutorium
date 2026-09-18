@@ -238,13 +238,39 @@ func courierName(senders []string) string {
 		return defaultCourierName
 	}
 	first := shortSeat(senders[0])
-	if first == "" {
+	// THE WIRE VALUE IS NOT TRUSTED. `from` is written by the sending seat and
+	// this house holds that a sender field is forgeable, so it reaches argv
+	// only if it looks like a seat name. Unfiltered, a `from` of `-p` or
+	// `--allowedTools` becomes a FLAG on the courier's own command line, and a
+	// newline becomes a label carrying a line break. There is no shell on this
+	// path — the spawn is exec.Command with an argv — so this is flag smuggling
+	// rather than injection, and the remedy is the same: refuse the shape.
+	if !seatNameShape(first) {
 		return defaultCourierName
 	}
 	if len(senders) == 1 {
 		return first
 	}
 	return fmt.Sprintf("%s+%d", first, len(senders)-1)
+}
+
+// seatNameShape reports whether s is safe to hand to a command line as a
+// display name: letters, digits, dot, underscore and hyphen, and never leading
+// with a hyphen, which is what makes a word a flag. The cap is deliberate —
+// a label is read by a person in a prompt box, not parsed.
+func seatNameShape(s string) bool {
+	if s == "" || len(s) > 32 || s[0] == '-' {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '.' || r == '_' || r == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // shortSeat is the seat's own name out of an endpoint: the part after the last
