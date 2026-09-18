@@ -55,7 +55,7 @@ func TestNotify_TmuxTypesTheBellIntoAPromptAndSubmitsIt(t *testing.T) {
 	r := &recorder{}
 	n := &tmuxNotifier{log: r.log}
 
-	if err := n.Ring("workshop.scribe", pane, "🔔 1 new → read"); err != nil {
+	if err := n.Ring("workshop.scribe", pane, "🔔 1 new → read", ""); err != nil {
 		t.Fatalf("a pane at a prompt refused the bell: %v", err)
 	}
 	var got string
@@ -83,7 +83,7 @@ func TestNotify_TmuxRefusesAPaneInCopyMode(t *testing.T) {
 	r := &recorder{}
 	n := &tmuxNotifier{log: r.log}
 
-	if err := n.Ring("workshop.scribe", pane, "🔔 1 new → read"); err == nil {
+	if err := n.Ring("workshop.scribe", pane, "🔔 1 new → read", ""); err == nil {
 		t.Fatal("a pane in copy mode took the bell")
 	}
 	assertNothingTyped(t, typed)
@@ -99,7 +99,7 @@ func TestNotify_TmuxRefusesAPaneThatIsNotAPrompt(t *testing.T) {
 	r := &recorder{}
 	n := &tmuxNotifier{log: r.log}
 
-	if err := n.Ring("workshop.scribe", pane, "🔔 1 new → read"); err == nil {
+	if err := n.Ring("workshop.scribe", pane, "🔔 1 new → read", ""); err == nil {
 		t.Fatal("a pane with no prompt marker took the bell")
 	}
 	assertNothingTyped(t, typed)
@@ -124,7 +124,7 @@ func TestNotify_NoneRingsNothingAndSaysNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := n.Ring("workshop.scribe", "%1", "🔔 1 new → read"); err != nil {
+	if err := n.Ring("workshop.scribe", "%1", "🔔 1 new → read", ""); err != nil {
 		t.Fatalf("the silent notifier failed: %v", err)
 	}
 	if r.joined() != "" {
@@ -161,7 +161,7 @@ func TestNotify_ClaudeSpawnsTheCourierWithItsPromptAndItsTwoGuards(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := n.Ring("workshop.scribe", "%42", "🔔 1 new → read"); err != nil {
+	if err := n.Ring("workshop.scribe", "%42", "🔔 1 new → read", ""); err != nil {
 		t.Fatalf("the courier failed: %v", err)
 	}
 	b, err := os.ReadFile(rec)
@@ -186,6 +186,57 @@ func TestNotify_ClaudeSpawnsTheCourierWithItsPromptAndItsTwoGuards(t *testing.T)
 	}
 }
 
+// THE COURIER CARRIES THE SENDER'S NAME (#124). The assertion is on the argv
+// the notifier hands the runtime, recorded by the spawned process itself: a
+// name that never reached `claude -n` is not a label on anything.
+//
+// The name is computed by courierName, the same function the bell calls, so
+// this joins the bell's rule to the flag rather than restating the rule here.
+func TestNotify_ClaudeNamesTheCourierAfterTheSender(t *testing.T) {
+	cases := []struct {
+		name    string
+		senders []string
+		want    string
+	}{
+		{"one sender is that seat", []string{"workshop.scribe"}, "scribe"},
+		{"two senders are the first and a count", []string{"workshop.binder", "workshop.warden"}, "binder+1"},
+		{"no sender is the fallback", nil, "loc-bell"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rec := fakeClaude(t, 0)
+			r := &recorder{}
+			n, err := newNotifier(ListenerClaude, r.log, time.Now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := n.Ring("workshop.scribe", "%42", "🔔 1 new → read", courierName(c.senders)); err != nil {
+				t.Fatalf("the courier failed: %v", err)
+			}
+			b, err := os.ReadFile(rec)
+			if err != nil {
+				t.Fatalf("the courier was never spawned: %v", err)
+			}
+			got := string(b)
+			if want := "-n\n" + c.want + "\n"; !strings.Contains(got, want) {
+				t.Errorf("the courier's call is missing %q; it was:\n%s", want, got)
+			}
+			// THE BELL TEXT DOES NOT CHANGE. The whole prompt is asserted as
+			// one argv entry, so a sender that leaked into the line fails here.
+			if want := fmt.Sprintf(courierPrompt, "%42", "🔔 1 new → read") + "\n"; !strings.Contains(got, want) {
+				t.Errorf("the bell text changed; the call was:\n%s", got)
+			}
+			// The two guards are load-bearing and this change does not touch
+			// them; a spawn that lost one consumes the message it announces.
+			for _, want := range []string{"LOC_COURIER=1\n", "LOC_IDENTITY=[]\n"} {
+				if !strings.Contains(got, want) {
+					t.Errorf("the courier's call is missing the guard %q; it was:\n%s", want, got)
+				}
+			}
+		})
+	}
+}
+
 func TestNotify_ClaudeReportsTheCouriersExitCode(t *testing.T) {
 	fakeClaude(t, 3)
 	r := &recorder{}
@@ -193,7 +244,7 @@ func TestNotify_ClaudeReportsTheCouriersExitCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := n.Ring("workshop.scribe", "%42", "🔔 1 new → read"); err == nil {
+	if err := n.Ring("workshop.scribe", "%42", "🔔 1 new → read", ""); err == nil {
 		t.Fatal("a courier that exited 3 was recorded as a ring")
 	}
 	if want := "nudge workshop.scribe BELL FAILED: courier exit 3"; r.joined() != want {
@@ -213,7 +264,7 @@ func TestNotify_ClaudeSpawnsAtMostOneCourierPerSeatPerWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 3; i++ {
-		if err := n.Ring("workshop.scribe", "%42", "🔔 1 new → read"); err != nil {
+		if err := n.Ring("workshop.scribe", "%42", "🔔 1 new → read", ""); err != nil {
 			t.Fatalf("ring %d failed: %v", i+1, err)
 		}
 	}
@@ -228,7 +279,7 @@ func TestNotify_ClaudeSpawnsAtMostOneCourierPerSeatPerWindow(t *testing.T) {
 	// AND THE WINDOW OPENS AGAIN. A rate limit that never lifted would be a
 	// silenced seat rather than a slowed one.
 	now = now.Add(courierWindow + time.Second)
-	if err := n.Ring("workshop.scribe", "%42", "🔔 1 new → read"); err != nil {
+	if err := n.Ring("workshop.scribe", "%42", "🔔 1 new → read", ""); err != nil {
 		t.Fatal(err)
 	}
 	b, _ = os.ReadFile(rec)

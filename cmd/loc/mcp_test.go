@@ -71,8 +71,8 @@ func TestMCP_TheServerHoldsTheSeatItWasLaunchedFor(t *testing.T) {
 	if !waitFor(6*time.Second, func() bool { return len(bells(t, spool)) == 1 }) {
 		t.Fatalf("one send rang %d bells: %q", len(bells(t, spool)), bells(t, spool))
 	}
-	if got := bells(t, spool)[0]; got != "🔔 1 new → read" {
-		t.Errorf("bell line %q; one arrival is one new message and the line carries no body", got)
+	if got := bells(t, spool)[0]; got != "🔔 1 new from host → read" {
+		t.Errorf("bell line %q; one arrival is one new message, named by its sender, and no body", got)
 	}
 
 	// ── the read tool: the reminder, then the message ───────────────────────

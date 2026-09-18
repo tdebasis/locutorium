@@ -89,9 +89,9 @@ func TestMCPBell_OneArrivalRingsOnce(t *testing.T) {
 	// And it rings ONCE. Given a second window to ring again, it does not.
 	time.Sleep(2 * time.Second)
 	got := bells(t, spool)
-	if len(got) != 1 || got[0] != "🔔 1 new → read" {
+	if len(got) != 1 || got[0] != "🔔 1 new from host → read" {
 		t.Errorf("one arrival produced %d bells %q; want exactly one, %q",
-			len(got), got, "🔔 1 new → read")
+			len(got), got, "🔔 1 new from host → read")
 	}
 }
 
@@ -112,9 +112,9 @@ func TestMCPBell_ArrivalsInsideTheWindowRingOnce(t *testing.T) {
 	}
 	time.Sleep(2 * time.Second)
 	got := bells(t, spool)
-	if len(got) != 1 || got[0] != "🔔 3 new → read" {
+	if len(got) != 1 || got[0] != "🔔 3 new from host → read" {
 		t.Errorf("three arrivals inside one window produced %d bells %q; want exactly one, %q",
-			len(got), got, "🔔 3 new → read")
+			len(got), got, "🔔 3 new from host → read")
 	}
 }
 

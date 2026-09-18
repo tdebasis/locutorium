@@ -26,8 +26,12 @@ import (
 // Notifier rings one seat's bell. The endpoint is the seat, the address is
 // what the seat registered as its LOC_LISTENER_ADDRESS, and the bell is the
 // one line to deliver.
+//
+// courier is what the delivering session should be CALLED, which the bell
+// works out from the senders (#124). It is a label on the carrier and never
+// part of the bell: a notifier that has no session to name ignores it.
 type Notifier interface {
-	Ring(endpoint, address, bell string) error
+	Ring(endpoint, address, bell, courier string) error
 }
 
 // The three listener types. A deployment sets one of these in
@@ -118,7 +122,7 @@ type tmuxNotifier struct{ log func(string) }
 //
 // THE 30-SECOND THROTTLE BELOW IS THE COURIER'S ALONE. This path is
 // unthrottled, by that same ruling.
-func (n *tmuxNotifier) Ring(endpoint, address, bell string) error {
+func (n *tmuxNotifier) Ring(endpoint, address, bell, _ string) error {
 	if address == "" {
 		return n.refuse(endpoint, "no pane address")
 	}
@@ -213,7 +217,7 @@ const courierPrompt = "You are a one-shot wake courier. Call ListAgents. " +
 // message it was announcing. LOC_COURIER=1 makes the deployment's ingest hook
 // exit early, and a blanked LOC_IDENTITY leaves it nothing to read as. Either
 // alone stops that; removing one must not silently reopen the hole.
-func (n *courierNotifier) Ring(endpoint, address, bell string) error {
+func (n *courierNotifier) Ring(endpoint, address, bell, courier string) error {
 	if address == "" {
 		return n.fail(endpoint, "no pane address")
 	}
@@ -227,8 +231,18 @@ func (n *courierNotifier) Ring(endpoint, address, bell string) error {
 	}
 	defer devnull.Close()
 
-	cmd := exec.Command("claude", "-p", fmt.Sprintf(courierPrompt, address, bell),
+	// THE COURIER IS NAMED AFTER THE SENDER. The receiving pane labels the
+	// message with this session's display name, and without -n the runtime
+	// generates one, which puts noise in the one field a reader checks for
+	// "who is this from" (#124). The bell text is untouched: the name is on
+	// the session, not in the line.
+	args := make([]string, 0, 6)
+	if courier != "" {
+		args = append(args, "-n", courier)
+	}
+	args = append(args, "-p", fmt.Sprintf(courierPrompt, address, bell),
 		"--allowedTools", "ListAgents,SendMessage")
+	cmd := exec.Command("claude", args...)
 	cmd.Stdin = devnull
 	cmd.Env = append(os.Environ(), "LOC_COURIER=1", "LOC_IDENTITY=")
 	if err := cmd.Run(); err != nil {
@@ -269,7 +283,7 @@ func (n *courierNotifier) fail(endpoint, reason string) error {
 // the product picks by itself.
 type silentNotifier struct{}
 
-func (silentNotifier) Ring(_, _, _ string) error { return nil }
+func (silentNotifier) Ring(_, _, _, _ string) error { return nil }
 
 // output runs a command and returns its standard output.
 func output(name string, args ...string) (string, error) {

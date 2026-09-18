@@ -2,6 +2,7 @@ package mcpserve
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,6 +34,12 @@ const (
 	defaultBreakerHour   = 60
 )
 
+// defaultCourierName is what the courier is called when the bell cannot say
+// who sent the mail. The startup backlog path asks the broker HOW MUCH mail is
+// waiting and never who sent it, so it names no seat; a name invented there
+// would be a guess standing in the one field a reader trusts.
+const defaultCourierName = "loc-bell"
+
 // bell coalesces arrivals and rings the seat's notifier.
 type bell struct {
 	s       *server
@@ -44,6 +51,11 @@ type bell struct {
 	pending int
 	timer   *time.Timer
 	stopped bool
+
+	// The senders seen in the open window, in arrival order and each one
+	// once. They name the courier and nothing else: they never reach the bell
+	// line, which stays a count with no body.
+	senders []string
 
 	// The breaker's counters, bucketed by calendar minute and hour exactly as
 	// the shell listener's are: a bucket that has rolled over starts empty,
@@ -90,16 +102,35 @@ func (s *server) startBell() func() {
 // arrived records one arrival and opens the coalescing window if it is shut.
 // The window is TRAILING: the wake fires once the arrivals have stopped
 // coming, carrying however many there were, rather than once per message.
-func (b *bell) arrived() {
+func (b *bell) arrived(sender string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.stopped {
 		return
 	}
 	b.pending++
+	b.note(sender)
 	if b.timer == nil {
 		b.timer = time.AfterFunc(b.window, b.fire)
 	}
+}
+
+// note records one sender. Called under the lock.
+//
+// EACH SENDER ONCE. Three messages from one seat are one sender, so a window
+// full of one seat's mail names that seat rather than claiming a crowd. An
+// empty sender is not a seat and is dropped: it is what an unparsable payload
+// gives, and the wake it carries is already counted in pending.
+func (b *bell) note(sender string) {
+	if sender == "" {
+		return
+	}
+	for _, s := range b.senders {
+		if s == sender {
+			return
+		}
+	}
+	b.senders = append(b.senders, sender)
 }
 
 // backlog asks the medium how much mail is waiting and rings for it at once,
@@ -143,6 +174,8 @@ func (b *bell) fire() {
 	b.mu.Lock()
 	n := b.pending
 	b.pending = 0
+	senders := b.senders
+	b.senders = nil
 	b.timer = nil
 	if b.stopped || n <= 0 {
 		b.mu.Unlock()
@@ -172,7 +205,16 @@ func (b *bell) fire() {
 	// The breaker has already been charged for it, which is deliberate: a
 	// notifier that fails will fail again, and a broken bell must not become a
 	// way to hammer the pane once it is fixed.
-	if err := b.s.d.Notify.Ring(b.s.d.Endpoint, b.s.address, fmt.Sprintf(bellLine, n)); err != nil {
+	courier := courierName(senders)
+	// The line names the sender whenever the name survived the shape check. A
+	// backlog, or a name that did not, falls back to the count alone rather than
+	// printing a placeholder: "from loc-bell" would be noise wearing a fact's
+	// clothes.
+	line := fmt.Sprintf(bellLine, n)
+	if courier != defaultCourierName {
+		line = fmt.Sprintf(bellLineFrom, n, courier)
+	}
+	if err := b.s.d.Notify.Ring(b.s.d.Endpoint, b.s.address, line, courier); err != nil {
 		b.s.warn(fmt.Sprintf("bell failed %s: %v", b.s.d.Endpoint, err))
 		// THE WARNING AND THE EVENT GO TO DIFFERENT READERS. The warning
 		// lands in this seat's own delivery log, which is plain text and is
@@ -191,6 +233,63 @@ func (b *bell) fire() {
 		return
 	}
 	b.s.log(fmt.Sprintf("wake %s count=%d", b.s.d.Endpoint, n))
+}
+
+// courierName is what the courier session is called. That name is the one
+// place the receiving pane shows who the message is from, so it carries the
+// sender (#124).
+//
+// One sender gives that seat's short name. Several give the first and a count
+// of the rest, because the label has room for one name and a bell that named
+// only the first would hide the others. None gives defaultCourierName.
+func courierName(senders []string) string {
+	if len(senders) == 0 {
+		return defaultCourierName
+	}
+	first := shortSeat(senders[0])
+	// THE WIRE VALUE IS NOT TRUSTED. `from` is written by the sending seat and
+	// this house holds that a sender field is forgeable, so it reaches argv
+	// only if it looks like a seat name. Unfiltered, a `from` of `-p` or
+	// `--allowedTools` becomes a FLAG on the courier's own command line, and a
+	// newline becomes a label carrying a line break. There is no shell on this
+	// path — the spawn is exec.Command with an argv — so this is flag smuggling
+	// rather than injection, and the remedy is the same: refuse the shape.
+	if !seatNameShape(first) {
+		return defaultCourierName
+	}
+	if len(senders) == 1 {
+		return first
+	}
+	return fmt.Sprintf("%s+%d", first, len(senders)-1)
+}
+
+// seatNameShape reports whether s is safe to hand to a command line as a
+// display name: letters, digits, dot, underscore and hyphen, and never leading
+// with a hyphen, which is what makes a word a flag. The cap is deliberate —
+// a label is read by a person in a prompt box, not parsed.
+func seatNameShape(s string) bool {
+	if s == "" || len(s) > 32 || s[0] == '-' {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '.' || r == '_' || r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// shortSeat is the seat's own name out of an endpoint: the part after the last
+// dot, so workshop.scribe reads as scribe. An endpoint with no dot is
+// already the short name.
+func shortSeat(endpoint string) string {
+	if i := strings.LastIndex(endpoint, "."); i >= 0 {
+		return endpoint[i+1:]
+	}
+	return endpoint
 }
 
 // roll advances the breaker's buckets. Called under the lock.
