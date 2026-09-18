@@ -153,7 +153,7 @@ provider = nats
 nats_url = $NURL
 topic_window = 7d
 send_requires_attendance = no
-idle_window = 10m
+idle_timeout = 10m
 heartbeat_log_retention_days = 7
 EOF
 # The broker is embedded, so the suite boots the product rather than a server

@@ -2,10 +2,12 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // Key is one setting: its name, the value loc uses when the file does not say,
@@ -30,7 +32,7 @@ const (
 	MonitorURL                = "monitor_url"
 	TopicWindow               = "topic_window"
 	SendRequiresAttendance    = "send_requires_attendance"
-	IdleWindow                = "idle_window"
+	IdleTimeout               = "idle_timeout"
 	HeartbeatLogRetentionDays = "heartbeat_log_retention_days"
 )
 
@@ -42,7 +44,7 @@ var Keys = []Key{
 	{MonitorURL, "", "the broker's HTTP monitoring endpoint; no verb reads it, and `loc start` opens no such port"},
 	{TopicWindow, "7d", "how long a room's messages live before retention removes them"},
 	{SendRequiresAttendance, "no", "whether send refuses when nobody is listening at the target"},
-	{IdleWindow, "10m", "how long without activity before a seat reads as idle in status"},
+	{IdleTimeout, "10m", "how long without activity before a seat reads as idle in status"},
 	{HeartbeatLogRetentionDays, "7", "heartbeat log files older than this are deleted when loc starts"},
 }
 
@@ -60,7 +62,45 @@ func Default(name string) string {
 // Value returns what the deployment says for name, or the table's default.
 // Every caller in the tree asks through this function, so no call site carries
 // a default of its own.
-func Value(name string) string { return Get(name, Default(name)) }
+func Value(name string) string {
+	warnOnce.Do(func() { WarnRenamedKeys(os.Stderr) })
+	return Get(name, Default(name))
+}
+
+// renamed is one key that this release reads under a new name.
+type renamed struct {
+	Old string
+	New string
+}
+
+// Renames lists every key whose name changed. A deployment file is written
+// once and hand-edited after that: WriteDefault refuses a file that exists, so
+// no release can add the new name to an old file. The old line therefore stays
+// and does nothing, and the new key takes the table default without saying so.
+// Each entry here turns that silence into one line on stderr.
+var Renames = []renamed{
+	{Old: "idle_window", New: IdleTimeout},
+}
+
+// warnOnce keeps the warning to one line per process. Value is the one path
+// every caller in the tree reads through, and a tool that reads four keys must
+// not say the same thing four times.
+var warnOnce sync.Once
+
+// WarnRenamedKeys writes one line to w for each renamed key that the
+// deployment's config still carries. The line names the old key, the new key,
+// and the value that is in force, which comes from the new key and never from
+// the old line. It reads through Get, not Value: Value is what calls this
+// function, and a second entry to that call would deadlock on warnOnce.
+func WarnRenamedKeys(w io.Writer) {
+	for _, r := range Renames {
+		if Get(r.Old, "") == "" {
+			continue
+		}
+		fmt.Fprintf(w, "loc: config key %s is now %s; the %s line is ignored, and %s = %s is in force\n",
+			r.Old, r.New, r.Old, r.New, Get(r.New, Default(r.New)))
+	}
+}
 
 // Int returns Value(name) as a number, or the table's default when the file
 // holds something that is not one. A bad line in a hand-edited file must not

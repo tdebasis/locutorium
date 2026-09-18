@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,11 +32,11 @@ func TestTheTableAnswersForEveryKey(t *testing.T) {
 func TestTheFileOverridesOneKeyAndNoOther(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("LOC_HOME", home)
-	if err := os.WriteFile(filepath.Join(home, "config"), []byte("idle_window = 45s\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(home, "config"), []byte("idle_timeout = 45s\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := Value(IdleWindow); got != "45s" {
-		t.Errorf("Value(idle_window) = %q, want %q", got, "45s")
+	if got := Value(IdleTimeout); got != "45s" {
+		t.Errorf("Value(idle_timeout) = %q, want %q", got, "45s")
 	}
 	if got := Value(TopicWindow); got != Default(TopicWindow) {
 		t.Errorf("Value(topic_window) = %q, want the default %q", got, Default(TopicWindow))
@@ -107,5 +108,47 @@ func TestWriteDefaultReportsAPathItCannotUse(t *testing.T) {
 	}
 	if err := WriteDefault(filepath.Join(blocker, "config")); err == nil {
 		t.Error("WriteDefault reported success for a path inside a file")
+	}
+}
+
+// A config that still carries the old name gets one line that names both keys
+// and the value in force. The old line does not set anything: the reader takes
+// the table default, and the warning is the only thing that says so.
+func TestARenamedKeyIsReportedOnce(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("LOC_HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "config"), []byte("idle_window = 3m\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := Get(IdleTimeout, Default(IdleTimeout)); got != "10m" {
+		t.Errorf("the old line must not set the new key: got %q, want the default %q", got, "10m")
+	}
+	var b bytes.Buffer
+	WarnRenamedKeys(&b)
+	got := b.String()
+	if n := strings.Count(got, "\n"); n != 1 {
+		t.Fatalf("want one line, got %d: %q", n, got)
+	}
+	for _, want := range []string{"idle_window", "idle_timeout", "10m"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the warning does not name %q: %q", want, got)
+		}
+	}
+}
+
+// A config that carries the new name, or neither name, says nothing. A warning
+// that fires always reports nothing.
+func TestTheRenameWarningIsSilentWithoutTheOldKey(t *testing.T) {
+	for _, line := range []string{"", "idle_timeout = 3m\n"} {
+		home := t.TempDir()
+		t.Setenv("LOC_HOME", home)
+		if err := os.WriteFile(filepath.Join(home, "config"), []byte(line), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var b bytes.Buffer
+		WarnRenamedKeys(&b)
+		if b.Len() != 0 {
+			t.Errorf("config %q warned: %q", line, b.String())
+		}
 	}
 }

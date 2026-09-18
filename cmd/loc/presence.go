@@ -597,9 +597,9 @@ func statusEndpoint(w io.Writer, endpoint string) error {
 	if err != nil {
 		return err
 	}
-	window, err := time.ParseDuration(config.Value(config.IdleWindow))
+	window, err := time.ParseDuration(config.Value(config.IdleTimeout))
 	if err != nil {
-		return fmt.Errorf("invalid idle_window in this deployment's config: %v", err)
+		return fmt.Errorf("invalid idle_timeout in this deployment's config: %v", err)
 	}
 	// An unregistered endpoint is a truthful answer to a fair question, not a
 	// failure: the caller asked whether anyone is there, and nobody is.
