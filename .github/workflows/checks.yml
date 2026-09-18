@@ -92,6 +92,21 @@ jobs:
         if: steps.probe.outputs.present == 'true'
         run: go build ./...
 
+      - name: every platform still compiles
+        # The build above runs for the runner's own platform only. A call that
+        # does not exist on Windows therefore compiled green here for four days
+        # (#86). This step builds the tree for every platform the project
+        # claims, so the next such break is red on the pull request that makes
+        # it. It is a compile and not a test: nothing platform-specific is
+        # exercised until there is a runner for that platform.
+        if: steps.probe.outputs.present == 'true'
+        run: |
+          set -euo pipefail
+          for goos in windows linux darwin; do
+            echo "== GOOS=$goos"
+            GOOS="$goos" GOARCH=amd64 go build ./...
+          done
+
       - name: the stamped binary
         id: stamped
         # `go build ./...` proves every package compiles; it does not produce the
