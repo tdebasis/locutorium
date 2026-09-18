@@ -15,17 +15,18 @@ sender. A refusal is the correct outcome, and you should treat it as one, not wo
 | verb | function | what it does |
 |---|---|---|
 | `loc send <endpoint> <body>` | `loc_send` | puts one envelope in that endpoint's queue. Guaranteed: it waits there through downtime. |
-| `loc publish <topic> <body>` | `loc_publish` | speaks in a room. Everyone attending reads it from their own cursor. A `@name` mention is announced to nobody, and the named endpoint finds it on `read`. |
-| `loc read [--peek]` | `loc_read` | presents your queue backlog, then the rooms. Without `--peek`, what you read is **consumed**. It is taken exactly once. |
+| `loc publish <topic> <body>` | `loc_publish` | speaks in a topic. Everyone attending reads it from their own cursor. A `@name` mention is announced to nobody, and the named endpoint finds it on `read`. |
+| `loc read [--peek]` | `loc_read` | presents your queue backlog, then the topics. Without `--peek`, what you read is **consumed**. It is taken exactly once. |
 | `loc mcp` ‡ | — | serves this seat to the agent runtime that launched it, over stdio: it registers you with that runtime's pid, rings your bell when mail lands, and hands the mail over through a `read` tool. |
 | `loc status` | `loc_status` | unread counts per endpoint. |
-| `loc topics` | `loc_topics` | which rooms are active right now. |
-| `loc registry` | `loc_registry` | asks an instance's host over the bus. Under per-seat servers nobody answers and it fails. Use `loc status` instead. |
+| `loc topics` | `loc_topics` | which topics are active right now. |
+| `loc registry` | `loc_registry` | asks an instance's host process over the bus. Each seat runs its own server, so no host process answers and the verb fails. Use `loc status` instead. |
 | `loc watch` | `loc_watch` | every envelope as it passes, read-only. |
 | `loc version` | — | the version. |
 
-‡ **The Go build's verb.** It is that build's answer to `sub`: one process the runtime launches,
-doing register-listen-wake instead of a background listener. `docs/CLI.md` §mcp has the config line.
+‡ **The Go build's verb.** It is that build's answer to `sub`. The agent runtime launches one
+process, and that process registers the seat, listens on its queue and wakes it. A background
+listener did that work before. `docs/CLI.md` §mcp has the config line.
 
 **Three verbs are gone.** This build dispatches no `sub`, no `unsub` and no `doctor`. They belonged
 to the shell tool, which was deleted on 2026-09-07. A seat is now held by a stdio MCP server the
@@ -57,7 +58,7 @@ agent runtime launches and ends (`docs/CLI.md` §mcp). Nothing replaced `doctor`
 sender: loc send you …  ─▶  queue.you  ─▶  your seat's loc mcp server taps it
                                                   ─▶ coalesces the arrivals across the wake window
                                                   ─▶ rings the notifier LOC_LISTENER_TYPE names
-you:    loc read  ─▶  presents your queue, then the rooms
+you:    loc read  ─▶  presents your queue, then the topics
 ```
 
 A bell never makes a message unreadable. The message waits in the queue until you read it, whatever
@@ -67,7 +68,7 @@ launched it ends.
 ## When a message seems missing
 
 1. `loc status` — is there an unread count for you?
-2. `loc read` — it presents the queue, then the rooms. A bell you missed costs nothing, because the
+2. `loc read` — it presents the queue, then the topics. A bell you missed costs nothing, because the
    message waits in the queue.
 3. Did you just `--peek`? Wait for redelivery before concluding anything.
 4. `run/<you>.delivery.log` — what your seat's own server did, with timestamps. A suppressed wake is

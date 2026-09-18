@@ -42,9 +42,9 @@ versioned with the envelope.*
 - `refs` points at where details live; bodies stay short — a message is a
   message, not a document.
 
-## 4. Nudges — the doorbell grammar
+## 4. Bells — what a bell is and when it rings
 
-- A nudge is an **advisory notification that something is waiting**. It is
+- A bell is an **advisory notification that something is waiting**. It is
   never the message, never required for delivery, and its failure loses
   nothing. The store is the truth.
 - The canonical form is one line, and there is only one. The seat's own server
@@ -59,7 +59,7 @@ versioned with the envelope.*
 ## 5. Reading — what receipt means
 
 - Readers consume at their own boundaries (turn boundaries, session
-  start/close, or on a nudge). **Notification is not attention**: a nudge
+  start/close, or on a bell). **Notification is not attention**: a bell
   entitles the sender to nothing but eventual reading.
 - Delivery is at-least-once: seeing a message twice is normal after an
   interrupted read; `id` is the dedupe key.

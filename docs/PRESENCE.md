@@ -163,7 +163,7 @@ not tell two agents of the same name apart.
 | Messages **to** an agent | `queue.<instance>.<agent>` |
 | Lifecycle and activity **events** | `presence.<instance>` |
 
-**Events are not mail.** They have their own subject family, beside the queue and the room rather
+**Events are not mail.** They have their own subject family, beside the queue and the topic rather
 than inside either, so they never enter the message plane's streams and are **not retained**: a
 consumer that needs the past asks the registry rather than replaying a history that does not exist.
 

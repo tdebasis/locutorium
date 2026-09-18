@@ -64,7 +64,7 @@ func (s *server) addTools(srv *mcp.Server) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "read",
-		Description: "Take this endpoint's waiting messages and the rooms' conversation. " +
+		Description: "Take this endpoint's waiting messages and the topics' conversation. " +
 			"Reading consumes: what it hands back is handed back once.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in readArgs) (*mcp.CallToolResult, any, error) {
 		return s.read(in.Peek)
@@ -79,7 +79,7 @@ func (s *server) addTools(srv *mcp.Server) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "topics",
-		Description: "Which rooms have traffic in the window.",
+		Description: "Which topics have traffic in the window.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ topicsArgs) (*mcp.CallToolResult, any, error) {
 		return s.call("topics", func(w io.Writer) error { return s.d.Topics(w) })
 	})

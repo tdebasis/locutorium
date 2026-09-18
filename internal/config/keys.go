@@ -42,7 +42,7 @@ var Keys = []Key{
 	{Provider, "nats", "which transport loc talks to; only nats exists"},
 	{NATSURL, "nats://127.0.0.1:4222", "where the broker listens and clients connect"},
 	{MonitorURL, "", "the broker's HTTP monitoring endpoint; no verb reads it, and `loc start` opens no such port"},
-	{TopicWindow, "7d", "how long a room's messages live before retention removes them"},
+	{TopicWindow, "7d", "how long a topic's messages live before retention removes them"},
 	{SendRequiresAttendance, "no", "whether send refuses when nobody is listening at the target"},
 	{IdleTimeout, "10m", "how long without activity before a seat reads as idle in status"},
 	{HeartbeatLogRetentionDays, "7", "heartbeat log files older than this are deleted when loc starts"},
