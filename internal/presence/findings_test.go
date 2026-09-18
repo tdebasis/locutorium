@@ -181,6 +181,21 @@ func TestFindingsReadsTheInstanceFromTheEndpoint(t *testing.T) {
 	}
 }
 
+// A stored instance field that names ANOTHER instance counts for nothing. The
+// case above uses an empty field, which a version that reads the field and
+// falls back to the endpoint would also pass. This one separates them: that
+// version would let one row claim a whole second instance, and every queue
+// there would become an orphan. It is the wrong-broker deletion again, reached
+// through a row file's contents instead of an empty ledger.
+func TestFindingsAStoredInstanceCannotClaimAnotherInstance(t *testing.T) {
+	row := live(t, "workshop.scribe")
+	row.Instance = "atelier"
+	got := kinds(Findings([]*Registration{row}, nil, []string{"workshop.scribe", "atelier.clerk"}))
+	if len(got) != 0 {
+		t.Errorf("Findings = %v, want nothing: the row's endpoint is in workshop, so atelier is not this ledger's", got)
+	}
+}
+
 // The unreadable finding carries the reason, because the operator has to fix
 // the file and "unreadable" alone does not say what is wrong with it.
 func TestFindingsCarriesTheReasonARowCouldNotBeRead(t *testing.T) {

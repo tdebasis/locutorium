@@ -301,7 +301,10 @@ func unsubscribeVerb(args []string) error {
 		// repairs — the daemon rebuilding a queue the caller just asked to be
 		// destroyed, and undoing its own work on the next beat. Remove the row
 		// first and the gap is a queue with no row, which the sweep's orphan
-		// pass finishes on the caller's behalf.
+		// pass finishes on the caller's behalf while another row still holds
+		// the instance. When this seat was the instance's last, no row is left
+		// to account for the instance, the orphan pass does not reach the
+		// queue, and running `loc unsubscribe` again is what removes it.
 		if err := model.Remove(endpoint); err != nil {
 			return err
 		}
