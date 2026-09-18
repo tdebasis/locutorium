@@ -385,6 +385,17 @@ jobs:
         if: runner.environment == 'self-hosted'
         run: bash conformance/leftovers.sh reap
 
+      - name: the Go toolchain (hosted image only)
+        # Same rule as the medium two steps up: a hosted image starts empty and
+        # installs its own tooling, a self-hosted machine is somebody's computer
+        # and this job installs nothing there. macos-14 ships no Go, which is
+        # what made the first hosted run red. The version matches the `go` job:
+        # one version for one thing.
+        if: runner.environment == 'github-hosted'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache: true
       - name: the Go toolchain is present
         # The suite drives the built binary, so it needs a compiler. A self-hosted machine is
         # somebody's computer and this job installs nothing on it — the same
