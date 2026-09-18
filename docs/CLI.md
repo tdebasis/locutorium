@@ -170,7 +170,7 @@ follow-up; this build does not do it yet. A **reader that closes early** — a p
 went away, a dead terminal — is not one of those deaths: for this build it is an ordinary **write
 error**, so `read` stops without acknowledging and the unshown message is handed back on exit.
 
-Presence events live on their own subject, `presence.<instance>`, so no room stream carries them and a reader is never handed one. `read` still passes over any event it meets — its room cursor advances past each one — because a deployment whose rooms were filled before the split still holds them.
+Presence events live on their own subject, `presence.<instance>`, so no topic stream carries them and a reader is never handed one. `read` still passes over any event it meets, and its topic cursor advances past each one. A deployment whose topics were filled before that subject split still holds such events.
 
 A queue that is empty, or an endpoint that has never had a queue, reads as the two headings and a
 zero exit. A **medium that cannot be reached** is the opposite: nothing on standard out, the reason
@@ -182,7 +182,7 @@ There is a third loud answer. If the deployment's access control **refuses the r
 `--peek` is much narrower than it looks, and this is worth knowing before relying on it:
 
 - shows **at most one** queue message, not your backlog
-- shows **no topics**, and says so in place of the heading rather than implying an empty room
+- shows **no topics**, and says so in place of the heading rather than implying that the topics are empty
 - consumes nothing
 
 > **This build refuses a misspelled flag.** Anything but exactly `--peek` prints the verb list and
@@ -249,7 +249,7 @@ Flags:
 - `--uid <uuid>` shows one message. It also prints that message's raw log lines under the body, so
   you can disagree with the outcome.
 - `--pending` shows only the messages whose last event is `sent`. It excludes topic messages: a
-  room message is read from each attender's own cursor, so it never gets a `read` line and would
+  topic message is read from each attender's own cursor, so it never gets a `read` line and would
   sit in this list for ever.
 - `--json` prints one JSON object per message, one per line, with the fields `uid`, `from`, `to`,
   `sent_ts`, `body`, `outcome` and `events`. The `events` field holds the raw log lines in order.

@@ -418,7 +418,7 @@ this code is in a position to make.
   to match on a body to find the `read` line.
 - A `read` line is written after the acknowledgement and never before it. A line saying a message
   was read, written for a message still in the queue, is a claim the next read disproves.
-- **A topic message gets no `read` line.** Everyone attending reads a room from their own position,
+- **A topic message gets no `read` line.** Everyone attending reads a topic from their own position,
   so one reader taking it is not a fact about the message. The complete answer would be one line per
   attender, and it would still be incomplete while one of them has not read.
 - The record's day file is the UTC day of the event, and the event's own stamp names the same day. A
