@@ -403,7 +403,29 @@ TAGROOT="$(scratch_dir)"
 # exit 2. The tag goes on the upstream, and the install clone takes it from
 # there as any user's clone does.
 git clone --quiet "$ROOT" "$TAGROOT/upstream"
+# THE FIXTURE MUST OWN ITS COMMIT, AND THE CLONE CARRIES THE REAL TAGS.
+# `git describe` reports ONE tag for a commit that carries several, so on a
+# release commit — where HEAD already carries v0.0.N — the fixture tag and the
+# real tag sit on the same commit and describe returns the real one. The
+# version assertion below then reads the release's number and the case fails.
+# Measured: five of the six release commits to date failed exactly here, and
+# every non-release push passed, because only a release commit is tagged.
+# Deleting the real tags in the scratch clone makes the fixture the only tag
+# the installer can see, which is what this case always meant. It also closes a
+# latent second defect: install.sh picks the newest tag by `sort -V`, so a real
+# tag above v9.9.9 would have been chosen over the fixture.
+while IFS= read -r real_tag; do
+  [[ -n "$real_tag" ]] && git -C "$TAGROOT/upstream" tag -d "$real_tag" >/dev/null
+done < <(git -C "$TAGROOT/upstream" tag -l 'v[0-9]*')
 git -C "$TAGROOT/upstream" tag v9.9.9-test
+# AND ASSERT THE ISOLATION, so this case cannot pass for the wrong reason. A
+# fixture that silently shared its commit is what hid the defect above.
+tags_seen="$(git -C "$TAGROOT/upstream" tag -l 'v[0-9]*' | tr '\n' ' ')"
+if [[ "$tags_seen" == "v9.9.9-test " ]]; then
+  ok "the tag-mode fixture is the only release tag in its clone"
+else
+  bad "the tag-mode fixture is the only release tag in its clone (saw: $tags_seen)"
+fi
 git clone --quiet "$TAGROOT/upstream" "$TAGROOT/clone"
 # THE LIST IS WHAT MAKES THIS CASE ABLE TO FAIL. `make clean-check` runs the
 # checker only when a list is readable, and this suite exports a scratch

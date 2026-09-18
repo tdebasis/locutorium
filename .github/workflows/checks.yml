@@ -313,7 +313,7 @@ jobs:
     # macOS on purpose: the suite drives BSD `sed -i ''` and `ps -o lstart=`,
     # and the pidfile's second line is that exact BSD string by contract. A
     # Linux runner would not be testing the thing this house actually ships.
-    runs-on: [self-hosted, macOS]
+    runs-on: macos-14
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
