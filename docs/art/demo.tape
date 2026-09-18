@@ -40,7 +40,15 @@ Enter
 Wait+Screen@20s /house.bob    unread/
 Sleep 3s
 
+# THE TEARDOWN STOPS THE DAEMON BEFORE IT REMOVES THE HOME, AND ONLY IF THE STOP
+# WORKED. The home holds the config, and the config is the only thing keeping this
+# daemon on its own port. A daemon that outlives its home falls back to the default
+# broker address and sweeps it with an empty ledger, deleting every queue it finds.
+# That happened: the previous teardown was `kill $DEMO_SERVER; rm -rf …`, the kill
+# did not land, and the survivor reaped a live deployment every five minutes.
+# `loc stop` waits for the port to close and fails if it does not; `&&` keeps the
+# home in place on any failure, so a survivor keeps its own config.
 Hide
-Type "kill $DEMO_SERVER; rm -rf $(dirname $LOC_HOME)"
+Type "loc stop && rm -rf $(dirname $LOC_HOME)"
 Enter
-Sleep 500ms
+Sleep 5s

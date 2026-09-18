@@ -27,5 +27,13 @@ done
 if [[ "${1:-}" == "--gif" ]]; then
   command -v vhs >/dev/null || { echo "build: vhs is required for the GIF" >&2; exit 1; }
   vhs demo.tape
+  # A RECORDING MUST LEAVE NO DAEMON BEHIND. The tape stops its scratch daemon
+  # itself; this is the check that it did. A survivor whose home is gone sweeps
+  # the default broker, so a leftover is reported by pid and fails the build.
+  left="$(pgrep -f "build/bin/loc start" || true)"
+  if [[ -n "$left" ]]; then
+    echo "build: the recording left a daemon running (pid $left); stop it before anything else" >&2
+    exit 1
+  fi
 fi
 echo "build: done"
