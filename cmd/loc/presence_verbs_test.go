@@ -494,9 +494,12 @@ func TestUnsubscribeRemovesTheRowBeforeTheQueue(t *testing.T) {
 	code, out, errOut := exec("unsubscribe", "workshop.scribe")
 	assertResult(t, code, out, errOut, 1, "", "loc: cannot reach the medium\n")
 	// THE ROW IS GONE AND THE QUEUE IS NOT, which is the gap this order
-	// chooses. The sweep's orphan pass finishes what the caller started.
-	// Deleting the queue first would leave a row with no queue, and the next
-	// beat would rebuild the queue the caller asked to be destroyed.
+	// chooses. The sweep's orphan pass finishes what the caller started, so
+	// long as another row still holds the instance. When the seat was the
+	// instance's last, no row holds the instance, the orphan pass does not
+	// reach the queue, and `loc unsubscribe` has to be run again. Deleting the
+	// queue first would leave a row with no queue, and the next beat would
+	// rebuild the queue the caller asked to be destroyed.
 	if _, err := os.Stat(d.ledger("workshop.scribe.json")); !os.IsNotExist(err) {
 		t.Error("the row outlived the queue it was removed before")
 	}
@@ -506,7 +509,8 @@ func TestUnsubscribeRemovesTheRowBeforeTheQueue(t *testing.T) {
 
 // The sweep reaps a registration whose process is gone — its row, its queue
 // and its server pidfile — and leaves a live one exactly where it is. It
-// reaches every instance, because a machine holds every process on it.
+// reaches every instance the ledger holds a row for, because a machine holds
+// every process on it.
 func TestSweepReapsOnlyTheDead(t *testing.T) {
 	d := newPresenceDeployment(t)
 	writeFile(t, d.ledger("workshop.scribe.json"),

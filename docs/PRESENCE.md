@@ -195,6 +195,11 @@ More than one host may run on a machine, sharing a broker. Namespacing by instan
 called `scribe` without either being able to receive the other's mail. Relying on everyone choosing
 distinct names does not survive somebody copying a configuration.
 
+The same boundary holds for cleanup. A sweep touches only the instances its own ledger holds a row
+for, so one host's reconciliation cannot destroy another host's queues (CLI.md §sweep). The
+guarantee is for **distinct instance names**. Two deployments that use the same instance name on one
+broker are not protected by any of this, because to the broker they are one namespace.
+
 Each segment — the instance and the agent — is `[a-z0-9-]+`, with exactly one dot between them and the
 underscore barred. That makes the dots-to-underscores substitution used for backing-object names
 (below) **injective by construction**: no endpoint can contain the `_` the substitution introduces, so
@@ -429,7 +434,10 @@ something that starts automatically at login and the two come up together.
 **Actions are trusted.** Within one machine there is no question of who may unsubscribe whom, or of
 one participant defending itself against another — they are all the same user's processes. Namespacing
 by instance exists to prevent *accidents*, not attacks: two hosts cannot deliver into each other's
-queues by mistake, which is a correctness property rather than a security one.
+queues by mistake, and one host's sweep cannot destroy the other's queues, which are correctness
+properties rather than security ones. Both hold only for **distinct instance names**. Two
+deployments sharing one instance name on one broker share one namespace, and neither property
+applies to them.
 
 Adversarial separation is a different tier and belongs to a deployment that has one; it is not a
 property of the inner parlor and is not claimed here.
@@ -523,7 +531,7 @@ this document's scope and are not listed.
 |---|---|
 | `subscribe <endpoint> --pid <n> --type <t> --version <v> [--display …] [--cwd …]` | Registers an agent instance, creates its queue, publishes `agent.subscribe`. **Refused (non-zero) if the endpoint already holds a registration** — free it with `unsubscribe` first. |
 | `unsubscribe <endpoint> [--reason clean\|expiry] [--force]` | Removes the registration, destroys the queue, publishes `agent.unsubscribe`. Defaults to `clean`. Succeeds on an empty endpoint (no-op) or a **dead** incumbent, and **refuses a live incumbent** (non-zero, naming its process) unless **`--force`** is given. An unconditional `unsubscribe`-then-`subscribe` restart is therefore always safe. |
-| `sweep [<instance>]` | Checks every registration in the namespace against its recorded process and unsubscribes those whose process is gone, with `--reason expiry`. **Must run on the machine holding the processes.** Idempotent; safe to run on a timer. |
+| `sweep` | Takes no argument; the verb refuses one. Reconciles every row in the ledger against its queue and its process, inside the instances the ledger holds a row for. **Must run on the machine holding the processes.** Idempotent; safe to run on a timer. See CLI.md §sweep for the three passes and their order. |
 
 **The window between a death and the next heartbeat, and what it costs.** Unsubscribing destroys the
 queue. A message sent to a seat after its process died and before the next heartbeat reaches it is

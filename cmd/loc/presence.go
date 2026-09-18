@@ -344,10 +344,11 @@ var (
 // and its process.
 //
 // IT TAKES NO ARGUMENT. A process id means something only on the machine that
-// holds it, so a sweep is a machine-wide act by nature; an instance name would
-// let a caller reconcile half of a store and leave the other half's queues
-// looking like orphans. It returns the number of changes it made so the daemon
-// can write that number in its heartbeat log.
+// holds it, so a sweep is a machine-wide act by nature. There is still no
+// instance argument, because the ledger's own rows say which instances this
+// sweep may touch. A queue in any other instance is not a finding, so it is
+// never listed here and never deleted. It returns the number of changes it
+// made so the daemon can write that number in its heartbeat log.
 //
 // IT PUBLISHES NOTHING. A departure event says an agent left; a reap says a
 // record was wrong. Emitting one for the other told every listener that an
@@ -407,10 +408,11 @@ func sweepVerb(w io.Writer, args []string) (changes int, err error) {
 				if err := pr.DeleteQueue(f.Endpoint); err != nil {
 					return err
 				}
-				// A queue no row claims. The line is written for exactly the
-				// question this pass is dangerous for: a queue that held mail
-				// is gone, and the record has to say a sweep took it rather
-				// than leaving it to be guessed at.
+				// A queue no row claims, inside an instance this ledger
+				// holds. The line is written for exactly the question this
+				// pass is dangerous for: a queue that held mail is gone, and
+				// the record has to say a sweep took it rather than leaving
+				// it to be guessed at.
 				loc.LogQueueDeleted(f.Endpoint, "orphan", time.Now().UTC())
 				changes++
 				if _, err := fmt.Fprintf(w, "%s: queue deleted, no row holds it\n", f.Endpoint); err != nil {
@@ -703,8 +705,10 @@ func lastBeat() string {
 	return last
 }
 
-// seatLines prints one line per seat, and one per queue that no seat claims,
-// saying what the next beat would do about it.
+// seatLines prints one line per seat, and one per queue that no seat claims
+// inside an instance the ledger holds a row for, saying what the next beat
+// would do about it. A queue in any other instance is not reported, because
+// the next beat would not touch it.
 func seatLines(w io.Writer, pr provider.Presence) error {
 	rows, unreadable, err := model.ListAll()
 	if err != nil {

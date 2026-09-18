@@ -282,8 +282,10 @@ func TestFalsifierABeatInsideSubscribesWindow(t *testing.T) {
 	}
 }
 
-// A beat inside unsubscribe's window leaves the seat GONE, and the beat
-// finishes the removal rather than undoing it.
+// A beat inside unsubscribe's window leaves the seat GONE. The row is removed
+// before the beat lands, and it is the only row, so the ledger holds no row
+// for the instance and the beat does nothing. The verb then deletes the queue
+// itself. What this arm proves is that the beat does not undo the removal.
 func TestFalsifierABeatInsideUnsubscribesWindow(t *testing.T) {
 	p := newPresence(t)
 	p.subscribeLive(t, e1)

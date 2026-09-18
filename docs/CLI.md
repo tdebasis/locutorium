@@ -345,17 +345,22 @@ loc sweep
 ```
 
 Reconciles the three records a seat has: its **ledger row**, its **queue** on the medium, and its
-**process**. It reads every row and lists every queue, then makes three passes in this order.
+**process**. It reads every row and lists every queue, then makes three passes in this order. The
+passes act only inside the instances the ledger holds a row for.
 
 | the disagreement | the repair |
 |---|---|
 | a row whose process is gone | delete the queue, the row and the seat's server pidfile |
-| a queue no row claims | delete the queue |
+| a queue no row claims, in an instance the ledger holds a row for | delete the queue |
 | a live row with no queue | create the queue; the row is not rewritten |
 
 **It takes no argument.** A process id means something only on the machine holding it, so a sweep is
-machine-wide by nature; reconciling one instance would leave the other instances' queues looking
-like queues that nobody claims.
+machine-wide by nature. There is still no instance argument, because the ledger's own rows say which
+instances this sweep may touch. A queue in any other instance is not a finding, so it is never listed
+and never deleted, and a ledger with no rows reaps nothing.
+
+**The boundary has a cost.** When the last seat of an instance leaves uncleanly, no row is left to
+hold that instance, so its queue is stranded. `loc unsubscribe <endpoint>` removes it.
 
 **A row it cannot read stops the second pass entirely,** and the sweep exits non-zero after naming
 the row. That row may be the one that claims a queue the pass would destroy, and there is no way to
