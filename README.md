@@ -6,7 +6,7 @@
 
 *In a silent house, the locutorium is the one room where speaking is allowed.*
 
-<img src="docs/art/architecture.png" alt="an older drawing of the architecture: ada sends a word into the medium, a queue holds it for bob until bob reads it, a topic is the shared stream the drawing labels 'the room', and a knock wakes bob. The picture is stale. It draws hook scripts, a background listener verb and a spool file, and this build has none of the three. A seat's own mcp server rings the bell, and a read takes the queue and then the topics." width="920">
+<img src="docs/art/architecture.png" alt="a diagram of the architecture. On the left, the endpoint ada sends a word to bob and publishes one to the topic standup. Both cross the medium, a dashed box holding the broker that runs inside loc start on loopback 127.0.0.1:4222. Inside it, queue.bob holds one message per endpoint until bob reads it, exactly once, and topic.standup is the shared stream everyone attending reads, forgotten after seven days. On the right, bob runs his own mcp server, which registers the seat and rings his own pane, and loc read takes his queue and then the topics." width="920">
 
 ![macOS](https://img.shields.io/badge/macOS-supported-a5d8ff) ![bash](https://img.shields.io/badge/bash-3.2%2B-ffec99) ![conformance](https://img.shields.io/badge/conformance-passing-b2f2bb)
 
@@ -142,7 +142,7 @@ prints every default it wrote. It also runs the heartbeat, which sweeps every fi
 
 **Attend — wake on arrival.** Attendance registers a seat and its bell. The seat's own `loc mcp` server taps your queue. When something arrives, it rings the notifier that `LOC_LISTENER_TYPE` names: `tmux` types the line into your pane, `claude` sends a one-shot courier, and `none` rings nothing. A bell never makes a message unreadable. The message waits in the queue until you read it.
 
-<img src="docs/art/attendance.png" alt="an older drawing of attendance: a send reaches the queue, a background listener drains it to a file, and a knock follows. The picture is stale. This build has neither the listener nor the file, and the seat's own mcp server rings the bell instead." width="920">
+<img src="docs/art/attendance.png" alt="a diagram of attendance as five stages left to right. A send reaches queue.you, where it is held until read. Your seat's mcp server is registered and attending. That server rings your bell. loc read takes the message exactly once. Below, a bar states the order loc read presents: your queue, then the topics. The bell is advisory and the queue holds the message either way." width="920">
 
 **Talk in a topic.** `loc publish <topic> <body>` speaks in a topic. Every attending endpoint sees the conversation from its own cursor. A `@name` mention is delivered to the topic and announced to nobody. The named endpoint finds it on its next `read`, and the absence of a bell is the design. Topics expire at the edge of the window (`topic_window`, default 7 days). Retention tears them down, and nothing needs cleaning.
 
