@@ -2,8 +2,9 @@
 # check-scratch-only.sh — the suite may only speak to a server it built itself.
 #
 # The nats command-line tool, given no target, connects to 127.0.0.1:4222. On a
-# developer's machine, and on the self-hosted runner that drives the macOS lane,
-# that address is not empty: it is the operator's OWN, LIVE deployment. A single
+# developer's machine that address is not empty: it is the operator's OWN, LIVE
+# deployment. CI runs on a hosted image and is out of that blast radius, so the
+# developer's machine is the reason this check exists. A single
 # `nats sub`, `nats pub`, or `nats stream purge` that forgot to say where to go
 # would reach in and touch the real thing — subscribe to real traffic, publish
 # into a real queue, delete real state — while looking like an ordinary test.

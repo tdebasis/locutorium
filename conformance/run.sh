@@ -55,8 +55,12 @@ obj() { ep "$1" | tr . _; }
 # so this is what it always was on the default lane, and it is still named
 # because the README demo further down lays a second house with it.
 # THE SCRATCH BROKER'S PORT, AND WHY IT IS NEVER 4222. This suite runs on a
-# self-hosted runner, which is the machine the live house's broker runs on, and
-# that broker holds 127.0.0.1:4222. `loc start` reads its listen address from
+# developer's machine as well as in CI, and on a developer's machine the live
+# house's broker holds 127.0.0.1:4222. CI runs on a hosted image and is out of
+# that blast radius. The developer's machine is not, and that is the case this
+# guards: a test run reached the live broker, swept it, and deleted the queues
+# of every seat, losing the mail they held. The guard stays for that machine.
+# `loc start` reads its listen address from
 # the scratch home's `config`, so the port is written there before the first
 # boot. A suite that took the product default would bind the live broker's port
 # on the operator's own computer, and the daemon's loopback check would not
@@ -403,7 +407,33 @@ TAGROOT="$(scratch_dir)"
 # exit 2. The tag goes on the upstream, and the install clone takes it from
 # there as any user's clone does.
 git clone --quiet "$ROOT" "$TAGROOT/upstream"
+# THE FIXTURE MUST OWN ITS COMMIT, AND THE CLONE CARRIES THE REAL TAGS.
+# `git describe` reports ONE tag for a commit that carries several, so on a
+# release commit — where HEAD already carries v0.0.N — the fixture tag and the
+# real tag sit on the same commit and describe returns the real one. The
+# version assertion below then reads the release's number and the case fails.
+# Measured: five of the six release commits to date failed exactly here, and
+# every non-release push passed, because only a release commit is tagged.
+# Deleting the tags in the scratch clone makes the fixture the only one the
+# build can see, which is what this case always meant.
+#
+# EVERY TAG GOES, NOT ONLY THE RELEASE-SHAPED ONES. `git describe --tags` reads
+# any tag, so a tag outside the `v[0-9]*` shape — a `nightly-1` — would be
+# picked while a guard filtered to that shape reported the fixture alone.
+# Measured with a plant: the assertion said OK while describe returned the
+# planted tag, the same failure travelling through the guard.
+while IFS= read -r stale_tag; do
+  [[ -n "$stale_tag" ]] && git -C "$TAGROOT/upstream" tag -d "$stale_tag" >/dev/null
+done < <(git -C "$TAGROOT/upstream" tag -l)
 git -C "$TAGROOT/upstream" tag v9.9.9-test
+# AND ASSERT THE ISOLATION, so this case cannot pass for the wrong reason. A
+# fixture that silently shared its commit is what hid the defect above.
+tags_seen="$(git -C "$TAGROOT/upstream" tag -l | tr '\n' ' ')"
+if [[ "$tags_seen" == "v9.9.9-test " ]]; then
+  ok "the tag-mode fixture is the only release tag in its clone"
+else
+  bad "the tag-mode fixture is the only release tag in its clone (saw: $tags_seen)"
+fi
 git clone --quiet "$TAGROOT/upstream" "$TAGROOT/clone"
 # THE LIST IS WHAT MAKES THIS CASE ABLE TO FAIL. `make clean-check` runs the
 # checker only when a list is readable, and this suite exports a scratch

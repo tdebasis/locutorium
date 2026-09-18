@@ -313,16 +313,17 @@ jobs:
     # macOS on purpose: the suite drives BSD `sed -i ''` and `ps -o lstart=`,
     # and the pidfile's second line is that exact BSD string by contract. A
     # Linux runner would not be testing the thing this house actually ships.
-    runs-on: [self-hosted, macOS]
+    runs-on: macos-14
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: environment carries no operator secrets
-        # The job now runs in a person's own account under a launchd service,
-        # not an ephemeral hosted sandbox — this step is the falsifier that the
-        # service environment carries none of that person's credentials. It
-        # runs on hosted runners too, where the environment is already bare and
-        # this is a cheap no-op there.
+        # This job runs on a hosted image, where the environment is already
+        # bare, so this step is close to a no-op today. It is kept because it
+        # is the falsifier for the case where the job runs in a person's own
+        # account under a launchd service and the environment carries that
+        # person's credentials. The github-hosted guards below are live code
+        # for the same reason. Do not read either as dead.
         run: |
           set -euo pipefail
           names="$(env | cut -d= -f1 | sort)"
@@ -385,6 +386,17 @@ jobs:
         if: runner.environment == 'self-hosted'
         run: bash conformance/leftovers.sh reap
 
+      - name: the Go toolchain (hosted image only)
+        # Same rule as the medium two steps up: a hosted image starts empty and
+        # installs its own tooling, a self-hosted machine is somebody's computer
+        # and this job installs nothing there. macos-14 ships no Go, which is
+        # what made the first hosted run red. The version matches the `go` job:
+        # one version for one thing.
+        if: runner.environment == 'github-hosted'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache: true
       - name: the Go toolchain is present
         # The suite drives the built binary, so it needs a compiler. A self-hosted machine is
         # somebody's computer and this job installs nothing on it — the same
