@@ -772,19 +772,19 @@ func TestStatusOfAnUnregisteredEndpoint(t *testing.T) {
 
 // The idle window is a deployment's to set, and one it has set wrongly is
 // named rather than silently replaced with a default.
-func TestStatusReportsAnUnreadableIdleWindow(t *testing.T) {
+func TestStatusReportsAnUnreadableIdleTimeout(t *testing.T) {
 	d := newPresenceDeployment(t)
-	writeFile(t, filepath.Join(d.home, "config"), "provider = presence-spy\nidle_window = a while\n")
+	writeFile(t, filepath.Join(d.home, "config"), "provider = presence-spy\nidle_timeout = a while\n")
 
 	code, out, errOut := exec("status", "workshop.scribe")
-	if code != 1 || out != "" || !strings.Contains(errOut, "invalid idle_window") {
+	if code != 1 || out != "" || !strings.Contains(errOut, "invalid idle_timeout") {
 		t.Errorf("exit=%d stdout=%q stderr=%q; want a refusal naming the setting", code, out, errOut)
 	}
 }
 
 // The window is what returns a wrongly-concluded "working" to rest, and the
 // deployment's own setting is what sizes it.
-func TestStatusHonoursTheConfiguredIdleWindow(t *testing.T) {
+func TestStatusHonoursTheConfiguredIdleTimeout(t *testing.T) {
 	d := newPresenceDeployment(t)
 	if code, _, errOut := exec("subscribe", "workshop.scribe", "--pid", alivePid(),
 		"--type", "tmux", "--version", "3.2.0"); code != 0 {
@@ -800,7 +800,7 @@ func TestStatusHonoursTheConfiguredIdleWindow(t *testing.T) {
 		t.Errorf("with the default window an hour-old tool call is past it; got %q", out)
 	}
 
-	writeFile(t, filepath.Join(d.home, "config"), "provider = presence-spy\nidle_window = 24h\n")
+	writeFile(t, filepath.Join(d.home, "config"), "provider = presence-spy\nidle_timeout = 24h\n")
 	_, out, _ = exec("status", "workshop.scribe")
 	if !strings.Contains(out, "active (tool.pre at "+stamp+")") {
 		t.Errorf("with a 24h window an hour-old tool call is inside it; got %q", out)

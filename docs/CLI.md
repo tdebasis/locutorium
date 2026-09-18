@@ -459,8 +459,8 @@ workshop.scribe
 It touches no medium — every answer it gives is held locally, which is what lets it answer at all
 when the broker is the thing that is wrong. An unregistered endpoint is a truthful answer to a fair
 question rather than a failure, so it exits **0**; a name that is not of the form
-`<instance>.<agent>`, or an `idle_window` this deployment cannot parse, exits **1**. An event counts
-as current for `idle_window` after it arrived.
+`<instance>.<agent>`, or an `idle_timeout` this deployment cannot parse, exits **1**. An event counts
+as current for `idle_timeout` after it arrived.
 
 ## topics
 
@@ -692,7 +692,7 @@ the bell; something else must then run `subscribe` and `unsubscribe` around the 
 |---|---|---|
 | `provider` | `nats` | which transport loc talks to; only nats exists |
 | `nats_url` | `nats://127.0.0.1:4222` | where the medium is |
-| `idle_window` | `10m` | how long after an event `status <endpoint>` still reads *active* |
+| `idle_timeout` | `10m` | how long after an event `status <endpoint>` still reads *active* |
 | `send_requires_attendance` | `no` | refuse sends to endpoints that are not attending. With the NATS provider the key is satisfied by the live queue: a subscribed peer attends, and an unsubscribed one has no queue, so its send is refused for absence. |
 | `monitor_url` | none | the broker's HTTP monitoring endpoint; no verb reads it, and `loc start` opens no such port |
 | `topic_window` | `7d` | how long topic messages live; `loc start` gives the `TOPICS` stream this age limit |
@@ -700,6 +700,11 @@ the bell; something else must then run `subscribe` and `unsubscribe` around the 
 | `wake_window_seconds` | `5` | wakes are coalesced across this window (`loc mcp`) |
 | `wake_breaker_per_minute` | `6` | cap on wakes per minute (`loc mcp`) |
 | `wake_breaker_per_hour` | `60` | cap on wakes per hour (`loc mcp`) |
+
+**`idle_window` is the old name of `idle_timeout`.** `loc` never rewrites a config file that exists,
+so a deployment that set the old key keeps a line that does nothing. The new key takes its own value,
+which is `10m` unless the file sets it. Each run prints one line on stderr that names both keys and
+the value in force.
 
 **The defaults live in one table**, `internal/config/keys.go`. `loc start` writes the file from it on
 first run, with each key's comment above it, so the file and the code cannot drift apart. The three
