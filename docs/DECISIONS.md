@@ -428,3 +428,54 @@ this code is in a position to make.
   they are here rather than in a table.
 - A line is still written in one call, as entry 10 requires. Every new kind of line is built in
   memory first.
+
+---
+
+## 15. A sweep touches only what its own deployment holds
+
+**Decision (2026-09-18):** Three changes, each stopping a different step of one failure.
+
+1. **The orphan pass is bounded by the instances the ledger holds.** A queue in any other instance is
+   not a finding at all: it is never reported and never deleted. A ledger with no rows therefore
+   reaps nothing. This is the change made under issue #134, and it stops the deletion itself.
+2. **A process with no config file refuses instead of taking the default address.** The key table's
+   default `nats_url` is the live broker on a machine that runs the product, so a process with a
+   scratch home silently pointed at somebody else's mail. Refusing stops the wrong broker being
+   reached. This is decided and lands in the change that follows this one.
+3. **The daemon sweeps only the broker embedded in its own process.** A daemon that dials an address
+   it did not start is reconciling records it did not write. This stops a leftover daemon acting on a
+   broker that outlived it. This is decided and lands in the change that follows this one.
+
+**Context.** A daemon whose home directory had been removed kept running. Its ledger was therefore
+empty. It reached a broker serving a different deployment's instance, and its orphan pass deleted
+every queue there on each five-minute beat. Mail waiting in those queues was destroyed.
+
+The root is the same as entry 13 above: a process with an empty registry, holding the default
+address, deleting queues it has no record of. Entry 13 stopped that root inside `go test`. It did
+nothing for the shipped binary, because the guard it added reads `testing.Testing()`.
+
+**The design documents said this was safe.** PRESENCE.md said two deployments may share a broker and
+that instance namespacing makes a collision impossible by construction. That was true for delivery
+and false for cleanup, because the sweep had no notion of which instances were its own. Change 1
+makes the document true.
+
+**Rejected: a daemon that exits when its home or its pidfile vanishes.** It was the obvious answer to
+a daemon that outlived its own home. With changes 1 and 3 in place a leftover daemon is harmless: it
+holds no rows, so it reaps nothing, and it sweeps only a broker it started. Self-exit would add a new
+way for a live broker to stop, keyed on a filesystem check that a backup, a sync client or a rename
+can trip. A new way to lose a broker is a poor trade for a case the other changes already cover.
+
+**Consequences:**
+
+- **The last seat of an instance strands its queue.** When it leaves uncleanly, no row is left to
+  hold the instance, so no sweep reaps the queue. `loc unsubscribe <endpoint>` removes it by hand. A
+  memory-backed queue ends with the broker.
+- **Two deployments that use the SAME instance name on one broker are not protected.** To the broker
+  they are one namespace. Each ledger holds the instance and neither holds the other's rows, so each
+  sweep reads the other's queues as orphans and deletes them. Nothing here separates them, and
+  nothing else does either.
+- **A row the ledger cannot read still holds its instance.** The queue it may claim is still reported
+  as an orphan, which is what makes the caller's blanket skip of the orphan pass fire. A version that
+  quietly dropped such a row would hide the danger instead of removing it.
+- **`loc status` inherits the boundary with no change of its own.** The report and the sweep read one
+  function, so they cannot disagree about which queues are this deployment's business.

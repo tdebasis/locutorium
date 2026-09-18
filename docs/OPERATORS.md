@@ -132,7 +132,7 @@ never which message arrived.
 
 `queue-deleted` says a queue is gone, so mail stops reaching that seat. The reason is one of `left`
 (the agent unsubscribed), `displaced` (another agent took the seat with `--force`), `expired` (the
-sweep found the registered process gone) or `orphan` (the sweep found a queue no row claims).
+sweep found the registered process gone) or `orphan` (the sweep found a queue no row claims, in an instance its ledger holds).
 
 The file holds message bodies in plain text. The writer creates the directory `0700` and the file
 `0600`, and it sets those modes only when it creates them.

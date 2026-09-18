@@ -117,13 +117,15 @@ func TestSweepReportsAReaderThatGoesAway(t *testing.T) {
 }
 
 // Each of the three passes reports its own line, and an orphan queue is one of
-// them. The change count is what the daemon logs.
+// them. The change count is what the daemon logs. `atelier.stray` is the fire
+// control: no row names that instance, so the sweep must not see it at all.
 func TestSweepCountsAndNamesEveryChange(t *testing.T) {
 	d := newPresenceDeployment(t)
 	deadRow(t, d, "workshop.scribe")
 	liveRow(t, d, "workshop.clerk")
 	d.spy.exists["workshop.scribe"] = true // the dead seat's queue
-	d.spy.exists["atelier.stray"] = true   // a queue no row claims
+	d.spy.exists["workshop.stray"] = true  // a queue no row claims, in an instance the ledger holds
+	d.spy.exists["atelier.stray"] = true   // a queue in an instance the ledger does not hold
 
 	var out strings.Builder
 	changes, err := sweepVerb(&out, nil)
@@ -134,10 +136,36 @@ func TestSweepCountsAndNamesEveryChange(t *testing.T) {
 		t.Errorf("changes = %d, want 3 (one reap, one orphan, one repair)", changes)
 	}
 	want := "workshop.scribe: reaped, the process is gone\n" +
-		"atelier.stray: queue deleted, no row holds it\n" +
+		"workshop.stray: queue deleted, no row holds it\n" +
 		"workshop.clerk: queue recreated\n"
 	if out.String() != want {
 		t.Errorf("got:\n%q\nwant:\n%q", out.String(), want)
+	}
+	for _, e := range d.spy.deleted {
+		if e == "atelier.stray" {
+			t.Errorf("the sweep destroyed a queue in an instance it holds no row for: %v", d.spy.deleted)
+		}
+	}
+	if strings.Contains(out.String(), "atelier") {
+		t.Errorf("the sweep named an instance it holds no row for:\n%q", out.String())
+	}
+}
+
+// A report says nothing about an instance the ledger holds no row for. The
+// next beat would not touch that queue, so naming it would invite an operator
+// to delete another deployment's mail by hand.
+func TestStatusSaysNothingAboutAnInstanceItDoesNotHold(t *testing.T) {
+	d := newPresenceDeployment(t)
+	liveRow(t, d, "workshop.scribe")
+	d.spy.exists["workshop.scribe"] = true
+	d.spy.exists["atelier.stray"] = true
+
+	code, out, errOut := exec("status")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errOut)
+	}
+	if strings.Contains(out, "atelier") {
+		t.Errorf("status named an instance the ledger holds no row for:\n%s", out)
 	}
 }
 
@@ -170,7 +198,7 @@ func TestStatusReportsAReaderThatGoesAway(t *testing.T) {
 	if err := seatLines(&refusingWriter{}, d.spy); err == nil {
 		t.Error("seatLines swallowed a write failure")
 	}
-	d.spy.exists["atelier.stray"] = true
+	d.spy.exists["workshop.stray"] = true
 	if err := seatLines(&refusingWriter{after: 1}, d.spy); err == nil {
 		t.Error("seatLines swallowed a write failure on the orphan line")
 	}
