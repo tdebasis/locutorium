@@ -55,6 +55,19 @@ Anything checking one must run on the same machine as the process, which rules o
 **A process id alone is not an identity.** Operating systems reuse them. A registration therefore
 records the process id *and its start time*; the pair is unambiguous where the number alone is not.
 
+**Checking that pair asks the operating system two questions.** The first question asks whether the
+process id exists. The second question reads the process's start time, and it runs a `ps` command for
+that one process id. The cheap question runs first, so a process id that is gone stops the check there.
+
+**The first question uses a different mechanism on each platform, with the same outcome.** On Unix it
+is a signal the kernel checks and then delivers to nobody. A process running under another user reads
+as absent there, because the kernel refuses the signal. On Windows the check opens the process and
+reads its exit code.
+
+**A check over many agents should read the start times in one batch.** One `ps` per agent costs little
+in a sweep over a handful of seats. A wider check should ask once, with `ps -o pid=,lstart= -p 1,2,3`.
+Locutorium asks once per process id today.
+
 ## How an agent joins
 
 1. The host prepares the agent's workspace.
@@ -134,6 +147,40 @@ check is running. It is not structurally impossible for a registration to persis
 it is bounded by how often something looks. Deployments should size that interval accordingly.
 
 An agent that restarts subscribes again, as a new instance, with a new process id.
+
+## The two process ids a seat records
+
+A seat in the presence model records two process ids. One goes into its registration. One goes into a
+file, the seat's server pidfile. They name different processes. They answer different questions.
+
+| Record | Which process it names | The question it answers |
+|---|---|---|
+| The registration's `process.pid` | the agent runtime | Is the agent there? |
+| Line 1 of the server pidfile, `run/<endpoint>.mcp.pid` | the server | Is a server running for this seat? |
+
+**The server writes both records.** It registers the runtime's process id, because the runtime is the
+process whose death ends the session. It writes its own process id into the pidfile when it takes the
+seat. It removes that file when it gives the seat up.
+
+**The server receives the runtime's process id at launch.** The process the runtime starts reads its
+own parent, then re-executes this tool and passes that number down as an argument. The server one
+generation below cannot read the number itself, because its own parent is the launched process.
+
+**The pidfile holds two lines.** Line 1 is the process id. Line 2 is that process's start time. A
+reader compares both lines, because the number alone is not an identity. A server killed outright
+leaves the file behind, so a stale file can name a process id the system has since reused.
+
+**Attendance is the registration's process id.** The sweep judges a seat by that number and its start
+time. It reaps a row whose process is gone. It removes the seat's server pidfile as part of the same
+repair. The sweep never reads the pidfile.
+
+**The pidfile answers a different question.** It tells a reader which process is currently serving the
+seat. A runtime can outlive the server it started, and the two records then disagree. The seat reads
+as attended while no server is there.
+
+**The two numbers are not interchangeable.** A sweep that judged a seat by the pidfile would
+unsubscribe a live agent whenever its server had died. The agent is still there.
+Only the process that rings its bell is gone.
 
 ## Subjects, endpoints and queues
 
