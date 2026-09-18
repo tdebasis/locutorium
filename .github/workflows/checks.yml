@@ -318,11 +318,12 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: environment carries no operator secrets
-        # The job now runs in a person's own account under a launchd service,
-        # not an ephemeral hosted sandbox — this step is the falsifier that the
-        # service environment carries none of that person's credentials. It
-        # runs on hosted runners too, where the environment is already bare and
-        # this is a cheap no-op there.
+        # This job runs on a hosted image, where the environment is already
+        # bare, so this step is close to a no-op today. It is kept because it
+        # is the falsifier for the case where the job runs in a person's own
+        # account under a launchd service and the environment carries that
+        # person's credentials. The github-hosted guards below are live code
+        # for the same reason. Do not read either as dead.
         run: |
           set -euo pipefail
           names="$(env | cut -d= -f1 | sort)"
