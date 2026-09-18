@@ -40,6 +40,38 @@ import (
 	"time"
 )
 
+// departWait bounds the OBSERVATION of the departure. It is longer than
+// exitWait on purpose, because the two bound different things. exitWait is the
+// promise the server makes: it gives the seat up inside that time. departWait
+// is the delay a test runner adds on top of that promise. A loaded runner holds
+// a process off the processor for seconds after its work is done, and a case
+// that looks once at the edge of the promise reports that delay as a
+// regression. Run 34320209330 on 2c440ea did exactly that (#66): the process
+// tree was gone inside exitWait, and the registry read at the 3 s mark still
+// said the seat was taken.
+const departWait = 10 * time.Second
+
+// departPoll is the interval between looks. Each look shells out to `loc
+// status` or stats a file, so it is coarse on purpose.
+const departPoll = 100 * time.Millisecond
+
+// waitForDeparture polls cond every departPoll until it holds, or until
+// departWait elapses. It returns as soon as cond holds, so an unloaded machine
+// waits no longer than the departure itself takes. The caller keeps its
+// assertion: this function only decides when to make it.
+func waitForDeparture(cond func() bool) bool {
+	deadline := time.Now().Add(departWait)
+	for {
+		if cond() {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(departPoll)
+	}
+}
+
 func TestMCP_ASecondSignalDoesNotCutTheGoodbyeShort(t *testing.T) {
 	bin := buildLoc(t)
 	p := newPresence(t)
@@ -92,11 +124,18 @@ func TestMCP_ASecondSignalDoesNotCutTheGoodbyeShort(t *testing.T) {
 	<-hammered
 
 	// ── the seat is free, and says so through the verb an operator would use ─
-	if !waitFor(exitWait, func() bool { return statusSays(t, e1, "registered: no") }) {
+	if !waitForDeparture(func() bool { return statusSays(t, e1, "registered: no") }) {
 		t.Errorf("%s was still registered %s after the signals; status said:\n%s\n"+
 			"a goodbye that a second signal can interrupt is not a goodbye",
-			e1, exitWait, statusOf(t, e1))
+			e1, departWait, statusOf(t, e1))
 	}
+	// The pid file goes last, so it is the step a loaded runner delays most.
+	// Wait for it on the same bound. The assertion below is the one that
+	// decides the case, and it is unchanged.
+	waitForDeparture(func() bool {
+		_, err := os.Stat(mcpPIDPath(p.home, e1))
+		return os.IsNotExist(err)
+	})
 	if _, err := os.Stat(mcpPIDPath(p.home, e1)); !os.IsNotExist(err) {
 		t.Errorf("the serving process left its pid file behind at %s; "+
 			"a file that outlives the process it names sends the next reader to a stranger",
