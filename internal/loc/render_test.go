@@ -75,15 +75,15 @@ func TestRenderMatchesREADME(t *testing.T) {
 	}{
 		{
 			name:   "queue",
-			env:    Envelope{ID: "x", TS: ts, From: "ada", To: "bob", Kind: "msg", Body: "the build is green; the tag is yours", Refs: []string{}},
-			after:  "── queue.bob ──",
+			env:    Envelope{ID: "x", TS: ts, From: "house.ada", To: "house.bob", Kind: "msg", Body: "the build is green; the tag is yours", Refs: []string{}},
+			after:  "── queue.house.bob ──",
 			before: "── topics ──",
 		},
 		{
 			name:   "topic",
-			env:    Envelope{ID: "x", TS: ts, From: "ada", To: "#standup", Kind: "msg", Body: "@bob please look at the restore proof", Refs: []string{}},
+			env:    Envelope{ID: "x", TS: ts, From: "house.ada", To: "#standup", Kind: "msg", Body: "@house.bob please look at the restore proof", Refs: []string{}},
 			after:  "── topics ──",
-			before: "$ LOC_IDENTITY=bob loc topics",
+			before: "$ LOC_IDENTITY=house.bob loc topics",
 		},
 	}
 

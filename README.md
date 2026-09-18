@@ -6,7 +6,7 @@
 
 *In a silent house, the locutorium is the one room where speaking is allowed.*
 
-<img src="docs/art/architecture.png" alt="a diagram of the architecture. On the left, the endpoint ada sends a word to bob and publishes one to the topic standup. Both cross the medium, a dashed box holding the broker that runs inside loc start on loopback 127.0.0.1:4222. Inside it, queue.bob holds one message per endpoint until bob reads it, exactly once, and topic.standup is the shared stream everyone attending reads, forgotten after seven days. On the right, bob runs his own mcp server, which registers the seat and rings his own pane, and loc read takes his queue and then the topics." width="920">
+<img src="docs/art/architecture.png" alt="a diagram of the architecture. On the left, the endpoint house.ada sends a word to house.bob and publishes one to the topic standup. Both cross the medium, a dashed box holding the broker that runs inside loc start on loopback 127.0.0.1:4222. Inside it, queue.house.bob holds one message per endpoint until house.bob reads it, exactly once, and topic.standup is the shared stream everyone attending reads, forgotten after seven days. On the right, house.bob runs its own mcp server, which registers the seat and rings its own pane, and loc read takes its queue and then the topics." width="920">
 
 ![macOS](https://img.shields.io/badge/macOS-supported-a5d8ff) ![bash](https://img.shields.io/badge/bash-3.2%2B-ffec99) ![conformance](https://img.shields.io/badge/conformance-passing-b2f2bb)
 
@@ -45,33 +45,36 @@ It is for the moment a coordinator says *"builder, the tests are green — tag i
 ## Two agents, one conversation
 
 ```console
-$ LOC_IDENTITY=ada loc send bob "the build is green; the tag is yours"
-sent → queue.bob uid=9f1c2a3b-4d5e-4f60-8a71-2b3c4d5e6f70
-$ LOC_IDENTITY=ada loc publish standup "@bob please look at the restore proof"
+$ LOC_IDENTITY=house.ada loc send house.bob "the build is green; the tag is yours"
+sent → queue.house.bob uid=9f1c2a3b-4d5e-4f60-8a71-2b3c4d5e6f70
+$ LOC_IDENTITY=house.ada loc publish standup "@house.bob please look at the restore proof"
 published → #standup
-$ LOC_IDENTITY=bob loc read
-── queue.bob ──
-ada -> bob   2026-08-26T03:54:39Z
+$ LOC_IDENTITY=house.bob loc read
+── queue.house.bob ──
+house.ada -> house.bob   2026-08-26T03:54:39Z
 + the build is green; the tag is yours
 
 ── topics ──
-ada -> #standup   2026-08-26T03:54:39Z
-+ @bob please look at the restore proof
+house.ada -> #standup   2026-08-26T03:54:39Z
++ @house.bob please look at the restore proof
 
-$ LOC_IDENTITY=bob loc topics
+$ LOC_IDENTITY=house.bob loc topics
 #standup  (1 in window)
-$ LOC_IDENTITY=bob loc status
-ada          unread: 0
-bob          unread: 0
-carol        unread: 0
+$ LOC_IDENTITY=house.bob loc status
+daemon: running, pid 4821, last beat 2026-08-25T20:54:39-07:00 swept, 0 changes
+house.ada: row ok, queue ok
+house.bob: row ok, queue ok
+house.ada    unread: 0
+house.bob    unread: 0
 ```
 
-<img src="docs/art/demo.gif" alt="the five commands above, played against a scratch house" width="800">
+<img src="docs/art/demo.gif" alt="a terminal recording of the five commands above, played against a scratch house" width="800">
 
-A word held for bob until bob took it; a word spoken in the topic; bob read both from one place. The queue is
-empty again, and the topic keeps its word for the window. This block was captured from a real run.
-`internal/loc/render_test.go` diffs the rendered envelopes against it, so the test fails if this page and the
-tool ever disagree.
+A word held for house.bob until house.bob took it; a word spoken in the topic; house.bob read both from one place. The queue is
+empty again, and the topic keeps its word for the window. The commands and the shape of every line come
+from a real run; the values that change on each run (the message id, the times, the process id) are fixed
+ones. Two tests pin seven of these lines to what the tool prints: both messages, the topics line and the two
+unread counts. The commands themselves and the other status lines are not pinned.
 
 - **Held until read.** A queue keeps a word through downtime and gives it up exactly once (Contract: *Delivery*).
 - **Wake on arrival, never poll.** A seat's own `loc mcp` server watches its queue and rings the seat's bell. A bell never hides a message (Contract: *Semantics*).
