@@ -52,7 +52,7 @@ agent runtime launches and ends (`docs/CLI.md` §mcp). Nothing replaced `doctor`
 
 ## Attendance — what happens between a send and your reading it
 
-![an older drawing of attendance: a send reaches the queue, a background listener drains it to a file, and a knock follows. The picture is stale. This build has neither the listener nor the file, and the seat's own mcp server rings the bell instead.](art/attendance.png)
+![a diagram of attendance as five stages left to right. A send reaches queue.you, where it is held until read. Your seat's mcp server is registered and attending. That server rings your bell. loc read takes the message exactly once. Below, a bar states the order loc read presents: your queue, then the topics. The bell is advisory and the queue holds the message either way.](art/attendance.png)
 
 ```
 sender: loc send you …  ─▶  queue.you  ─▶  your seat's loc mcp server taps it
