@@ -56,9 +56,11 @@ obj() { ep "$1" | tr . _; }
 # because the README demo further down lays a second house with it.
 # THE SCRATCH BROKER'S PORT, AND WHY IT IS NEVER 4222. This suite runs on a
 # developer's machine as well as in CI, and on a developer's machine the live
-# house's broker holds 127.0.0.1:4222. CI moved to a hosted image, so CI is out
-# of that blast radius; the developer's machine is not, and it is the case that
-# caused the 2026-09-16 outage. The guard stays and the reason is that machine. `loc start` reads its listen address from
+# house's broker holds 127.0.0.1:4222. CI runs on a hosted image and is out of
+# that blast radius. The developer's machine is not, and that is the case this
+# guards: a test run reached the live broker, swept it, and deleted the queues
+# of every seat, losing the mail they held. The guard stays for that machine.
+# `loc start` reads its listen address from
 # the scratch home's `config`, so the port is written there before the first
 # boot. A suite that took the product default would bind the live broker's port
 # on the operator's own computer, and the daemon's loopback check would not
