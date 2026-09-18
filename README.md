@@ -175,3 +175,7 @@ are changing this repository, read [`AGENTS.md`](AGENTS.md).
 Early; interfaces may move. The definition of the product is the conformance suite;
 `docs/PROTOCOL.md` §8 says what a change in version means. Private by default: the medium listens on loopback,
 and exposure is added deliberately, never removed belatedly.
+
+## Licence
+
+Apache License 2.0. The full text is in [`LICENSE`](LICENSE).
