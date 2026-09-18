@@ -69,7 +69,7 @@ type Deps struct {
 	// published to the seat's queue subject and reconnected once per
 	// re-established connection; Unread answers the backlog question at start
 	// and after each of those.
-	Watch  func(endpoint string, arrived, reconnected func()) (stop func(), err error)
+	Watch  func(endpoint string, arrived func(sender string), reconnected func()) (stop func(), err error)
 	Unread func(endpoint string) (int, error)
 
 	// Signals is the caller's OWN signal channel, when it has one. The

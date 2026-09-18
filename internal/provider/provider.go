@@ -100,7 +100,13 @@ type Listener interface {
 	// has been re-established — the moment at which arrivals were missed. It
 	// CONSUMES NOTHING: watching must never compete with reading for the mail.
 	// The returned function stops the watch and releases whatever it holds.
-	WatchQueue(endpoint string, arrived, reconnected func()) (stop func(), err error)
+	//
+	// arrived is given the SENDER of the message, which is the envelope's
+	// `from`. It is the only part of the mail the watcher looks at, and it is
+	// looked at rather than taken. A payload this build cannot parse yields an
+	// EMPTY sender and still rings: a bell says that mail arrived, and mail in
+	// a form nobody here reads is still mail.
+	WatchQueue(endpoint string, arrived func(sender string), reconnected func()) (stop func(), err error)
 
 	// Unread is how many messages endpoint has not yet taken. Unlike Status,
 	// which prints "?" rather than fail a whole report over one number, this

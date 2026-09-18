@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tdebasis/locutorium/internal/loc"
 	"github.com/tdebasis/locutorium/internal/loctest"
 )
 
@@ -28,7 +29,7 @@ func TestWatchQueue_RingsOnArrivalAndConsumesNothing(t *testing.T) {
 	defer nc.Close()
 
 	var rings atomic.Int64
-	stop, err := p.WatchQueue("alice", func() { rings.Add(1) }, nil)
+	stop, err := p.WatchQueue("alice", func(string) { rings.Add(1) }, nil)
 	if err != nil {
 		t.Fatalf("WatchQueue: %v", err)
 	}
@@ -51,12 +52,81 @@ func TestWatchQueue_RingsOnArrivalAndConsumesNothing(t *testing.T) {
 	}
 }
 
+// THE WATCHER REPORTS WHO SENT THE MAIL, AND STILL TAKES NONE OF IT. The
+// sender names the courier the bell spawns (#124); it never reaches the bell
+// line, which stays a count.
+func TestWatchQueue_ReportsTheSenderAndStillConsumesNothing(t *testing.T) {
+	h := newHarness(t, "alice")
+	p := h.as(t, "alice")
+	nc, _ := h.admin(t)
+	defer nc.Close()
+
+	senders := make(chan string, 4)
+	stop, err := p.WatchQueue("alice", func(from string) { senders <- from }, nil)
+	if err != nil {
+		t.Fatalf("WatchQueue: %v", err)
+	}
+	defer stop()
+
+	e := loc.NewEnvelope("workshop.scribe", "alice", "msg", "body")
+	raw, err := e.Marshal()
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := nc.Publish("queue.alice", raw); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	_ = nc.Flush()
+
+	select {
+	case got := <-senders:
+		if got != "workshop.scribe" {
+			t.Errorf("the watcher reported the sender as %q; the envelope says workshop.scribe", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("an arrival carrying a sender never rang")
+	}
+	if got := h.stored(t, "QUEUE_alice"); got != 1 {
+		t.Errorf("the queue holds %d after the watch read the sender; watching must consume nothing", got)
+	}
+}
+
+// A PAYLOAD THIS BUILD CANNOT READ IS STILL MAIL. The bell says that something
+// arrived, so a parse failure gives an empty sender and rings anyway.
+func TestWatchQueue_AnUnparsablePayloadRingsWithNoSender(t *testing.T) {
+	h := newHarness(t, "alice")
+	p := h.as(t, "alice")
+	nc, _ := h.admin(t)
+	defer nc.Close()
+
+	senders := make(chan string, 4)
+	stop, err := p.WatchQueue("alice", func(from string) { senders <- from }, nil)
+	if err != nil {
+		t.Fatalf("WatchQueue: %v", err)
+	}
+	defer stop()
+
+	if err := nc.Publish("queue.alice", []byte("this is not an envelope")); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	_ = nc.Flush()
+
+	select {
+	case got := <-senders:
+		if got != "" {
+			t.Errorf("an unparsable payload reported the sender as %q; want the empty one", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("an unparsable payload rang nothing; a bell must still ring")
+	}
+}
+
 func TestWatchQueue_AnUnreachableMediumIsAnError(t *testing.T) {
 	h := newHarness(t, "alice")
 	p := h.as(t, "alice")
 	write(t, filepath.Join(h.home, "config"), "nats_url = "+loctest.ClosedPort(t)+"\n")
 
-	if stop, err := p.WatchQueue("alice", func() {}, nil); err == nil {
+	if stop, err := p.WatchQueue("alice", func(string) {}, nil); err == nil {
 		stop()
 		t.Fatal("a watch was established against a medium that is not there")
 	}
@@ -123,7 +193,7 @@ func TestWatchQueue_ARestoredConnectionSaysSo(t *testing.T) {
 	write(t, filepath.Join(h.home, "config"), "nats_url = nats://"+relay.addr+"\n")
 
 	var back atomic.Int64
-	stop, err := p.WatchQueue("alice", func() {}, func() { back.Add(1) })
+	stop, err := p.WatchQueue("alice", func(string) {}, func() { back.Add(1) })
 	if err != nil {
 		t.Fatalf("WatchQueue through the relay: %v", err)
 	}

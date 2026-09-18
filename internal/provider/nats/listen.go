@@ -9,6 +9,7 @@ import (
 	natsgo "github.com/nats-io/nats.go"
 
 	"github.com/tdebasis/locutorium/internal/config"
+	"github.com/tdebasis/locutorium/internal/loc"
 	"github.com/tdebasis/locutorium/internal/provider"
 )
 
@@ -35,7 +36,7 @@ const listenReconnectWait = 1 * time.Second
 // that gave up on the first blip would instead leave its seat registered and
 // deaf, which is the failure nobody notices. Each re-establishment calls
 // reconnected, because arrivals during the gap were seen by no one.
-func (p *Provider) WatchQueue(endpoint string, arrived, reconnected func()) (func(), error) {
+func (p *Provider) WatchQueue(endpoint string, arrived func(sender string), reconnected func()) (func(), error) {
 	nc, err := Dial(config.Value(config.NATSURL),
 		natsgo.Name("loc"),
 		natsgo.Timeout(ackTimeout),
@@ -54,10 +55,23 @@ func (p *Provider) WatchQueue(endpoint string, arrived, reconnected func()) (fun
 		}
 		return nil, errConnect
 	}
-	sub, err := nc.Subscribe("queue."+endpoint, func(*natsgo.Msg) {
-		if arrived != nil {
-			arrived()
+	sub, err := nc.Subscribe("queue."+endpoint, func(m *natsgo.Msg) {
+		if arrived == nil {
+			return
 		}
+		// THE SENDER IS READ, THE MAIL IS NOT TAKEN. This is still the core
+		// subscription described above: the callback looks at the copy the
+		// broker handed it and acknowledges nothing, so the message stays in
+		// the queue for the read that follows the bell.
+		//
+		// A PAYLOAD THAT DOES NOT PARSE STILL RINGS. The sender only names the
+		// courier; it is not the wake. An envelope this build cannot read
+		// yields an empty sender, and the bell rings on the empty one.
+		var from string
+		if e, err := loc.ParseEnvelope(m.Data); err == nil {
+			from = e.From
+		}
+		arrived(from)
 	})
 	if err == nil {
 		// Flushed before returning, so that a caller which asks for the

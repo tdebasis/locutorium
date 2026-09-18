@@ -47,9 +47,11 @@ type fake struct {
 	unsubscribed [][]string
 	emitted      []string
 	nudged       []string
+	couriers     []string
 
 	// The callbacks Watch was handed, so a case can make an arrival happen.
-	arrived, reconnected func()
+	arrived     func(sender string)
+	reconnected func()
 
 	unread    int
 	unreadErr error
@@ -111,17 +113,18 @@ func (f *fake) deps() Deps {
 			defer f.mu.Unlock()
 			f.emitted = append(f.emitted, kind+" "+endpoint+" "+tool)
 		},
-		Watch: func(_ string, arrived, reconnected func()) (func(), error) {
+		Watch: func(_ string, arrived func(string), reconnected func()) (func(), error) {
 			f.mu.Lock()
 			f.arrived, f.reconnected = arrived, reconnected
 			f.mu.Unlock()
 			return func() {}, nil
 		},
 		Unread: func(string) (int, error) { return f.unread, f.unreadErr },
-		Notify: notifierFunc(func(_, _, bell string) error {
+		Notify: notifierFunc(func(_, _, bell, courier string) error {
 			f.mu.Lock()
 			defer f.mu.Unlock()
 			f.nudged = append(f.nudged, bell)
+			f.couriers = append(f.couriers, courier)
 			return f.nudgeErr
 		}),
 		// A pid that is alive and is not this process, so "our parent" is a
@@ -151,12 +154,23 @@ func (f *fake) ready(t *testing.T) {
 	}
 }
 
-// ring is one arrival, as the medium would report it.
-func (f *fake) ring() {
+// ring is one arrival, as the medium would report it. The sender is unknown,
+// which is what a payload this build cannot parse gives.
+func (f *fake) ring() { f.ringFrom("") }
+
+// ringFrom is one arrival carrying the seat that sent it.
+func (f *fake) ringFrom(sender string) {
 	f.mu.Lock()
 	a := f.arrived
 	f.mu.Unlock()
-	a()
+	a(sender)
+}
+
+// couriersRung is the courier name the bell computed for each ring.
+func (f *fake) couriersRung() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.couriers...)
 }
 
 // reconnect is the connection coming back after a break.
@@ -651,17 +665,76 @@ func TestBell_TheBacklogSampleTakesTheLargerFigure(t *testing.T) {
 	}
 }
 
+// THE COURIER IS NAMED AFTER THE SENDER (#124). The name goes on the carrier,
+// and the bell line does not change: it stays one line with a count and no
+// body, whoever sent the mail.
+func TestBell_NamesTheCourierAfterTheSenders(t *testing.T) {
+	home(t, "provider = none\nwake_window_seconds = 1\n")
+	f := &fake{}
+	sess, done := serve(t, f.deps())
+	defer stop(t, sess, done)
+	f.ready(t)
+
+	f.ringFrom("workshop.scribe")
+	if !waitFor(3*time.Second, func() bool { return len(f.bells()) == 1 }) {
+		t.Fatalf("one arrival rang %v", f.bells())
+	}
+	if got := f.couriersRung()[0]; got != "scribe" {
+		t.Errorf("one sender named the courier %q; want scribe", got)
+	}
+	if got := f.bells()[0]; got != "🔔 1 new → read" {
+		t.Errorf("the bell said %q; the sender belongs on the courier, not in the line", got)
+	}
+
+	// TWO SENDERS GIVE THE FIRST AND A COUNT OF THE REST. The label holds one
+	// name, and a bell that printed only the first would hide the other.
+	f.ringFrom("workshop.binder")
+	f.ringFrom("workshop.warden")
+	if !waitFor(3*time.Second, func() bool { return len(f.bells()) == 2 }) {
+		t.Fatalf("two arrivals rang %v", f.bells())
+	}
+	if got := f.couriersRung()[1]; got != "binder+1" {
+		t.Errorf("two senders named the courier %q; want binder+1", got)
+	}
+
+	// AND NO SENDER GIVES THE FALLBACK. This is the unparsable payload; the
+	// startup backlog path reaches the same place by asking only how many.
+	f.ring()
+	if !waitFor(3*time.Second, func() bool { return len(f.bells()) == 3 }) {
+		t.Fatalf("an arrival with no sender rang %v", f.bells())
+	}
+	if got := f.couriersRung()[2]; got != "loc-bell" {
+		t.Errorf("an arrival with no sender named the courier %q; want loc-bell", got)
+	}
+}
+
+// The backlog path asks the broker how much mail is waiting and never who sent
+// it, so it can name no seat.
+func TestBell_ABacklogNamesNoSender(t *testing.T) {
+	home(t, "provider = none\nwake_window_seconds = 1\n")
+	f := &fake{unread: 4}
+	sess, done := serve(t, f.deps())
+	defer stop(t, sess, done)
+
+	if !waitFor(3*time.Second, func() bool { return len(f.bells()) == 1 }) {
+		t.Fatalf("a seat that came up to a full queue was told %v", f.bells())
+	}
+	if got := f.couriersRung()[0]; got != "loc-bell" {
+		t.Errorf("the backlog named the courier %q; want loc-bell", got)
+	}
+}
+
 // arrivalsDuringWatch wraps the fake's Watch so that n arrivals land in the one
 // stretch a case cannot otherwise reach: after the watcher is live and before
 // startBell takes its backlog sample.
-func arrivalsDuringWatch(watch func(string, func(), func()) (func(), error), n int) func(string, func(), func()) (func(), error) {
-	return func(endpoint string, arrived, reconnected func()) (func(), error) {
+func arrivalsDuringWatch(watch func(string, func(string), func()) (func(), error), n int) func(string, func(string), func()) (func(), error) {
+	return func(endpoint string, arrived func(string), reconnected func()) (func(), error) {
 		stop, err := watch(endpoint, arrived, reconnected)
 		if err != nil {
 			return stop, err
 		}
 		for i := 0; i < n; i++ {
-			arrived()
+			arrived("")
 		}
 		return stop, nil
 	}
@@ -714,7 +787,7 @@ func TestBell_AnUnwatchableMediumStillServesTheSeat(t *testing.T) {
 	home(t, "provider = none\n")
 	f := &fake{}
 	d := f.deps()
-	d.Watch = func(string, func(), func()) (func(), error) { return nil, fmt.Errorf("cannot reach the medium") }
+	d.Watch = func(string, func(string), func()) (func(), error) { return nil, fmt.Errorf("cannot reach the medium") }
 	sess, done := serve(t, d)
 	defer stop(t, sess, done)
 
@@ -849,8 +922,8 @@ func waitFor(d time.Duration, cond func() bool) bool {
 
 // notifierFunc adapts a function to the Notifier interface, so a case that
 // only wants to see the bell line does not have to declare a type for it.
-type notifierFunc func(endpoint, address, bell string) error
+type notifierFunc func(endpoint, address, bell, courier string) error
 
-func (f notifierFunc) Ring(endpoint, address, bell string) error {
-	return f(endpoint, address, bell)
+func (f notifierFunc) Ring(endpoint, address, bell, courier string) error {
+	return f(endpoint, address, bell, courier)
 }
