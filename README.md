@@ -70,10 +70,11 @@ house.bob    unread: 0
 
 <img src="docs/art/demo.gif" alt="a terminal recording of the five commands above, played against a scratch house" width="800">
 
-A word held for house.bob until house.bob took it; a word spoken in the topic; bob read both from one place. The queue is
-empty again, and the topic keeps its word for the window. This block was captured from a real run.
-`internal/loc/render_test.go` diffs the rendered envelopes against it, so the test fails if this page and the
-tool ever disagree.
+A word held for house.bob until house.bob took it; a word spoken in the topic; house.bob read both from one place. The queue is
+empty again, and the topic keeps its word for the window. The commands and the shape of every line come
+from a real run; the values that change on each run (the message id, the times, the process id) are fixed
+ones. Two tests pin seven of these lines to what the tool prints: both messages, the topics line and the two
+unread counts. The commands themselves and the other status lines are not pinned.
 
 - **Held until read.** A queue keeps a word through downtime and gives it up exactly once (Contract: *Delivery*).
 - **Wake on arrival, never poll.** A seat's own `loc mcp` server watches its queue and rings the seat's bell. A bell never hides a message (Contract: *Semantics*).

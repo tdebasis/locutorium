@@ -46,9 +46,9 @@ Sleep 3s
 # broker address and sweeps it with an empty ledger, deleting every queue it finds.
 # That happened: the previous teardown was `kill $DEMO_SERVER; rm -rf …`, the kill
 # did not land, and the survivor reaped a live deployment every five minutes.
-# `loc stop` waits for the port to close and fails if it does not; `&&` keeps the
-# home in place on any failure, so a survivor keeps its own config.
+# `demo_teardown` lives in prep.sh. It refuses any home but the one prep.sh made, runs
+# `loc stop`, which waits for the port to close, and removes the home only if that worked.
 Hide
-Type "loc stop && rm -rf $(dirname $LOC_HOME)"
+Type "demo_teardown"
 Enter
 Sleep 5s
