@@ -4,7 +4,7 @@ Output demo.gif
 Set Shell bash
 Set FontSize 16
 Set Width 1000
-Set Height 540
+Set Height 620
 Set Padding 24
 Set Theme "Catppuccin Latte"
 Set TypingSpeed 40ms
@@ -16,28 +16,28 @@ Wait+Line@60s /^> ?$/
 Sleep 500ms
 Show
 
-Type `LOC_IDENTITY=ada loc send bob "the build is green; the tag is yours"`
+Type `LOC_IDENTITY=house.ada loc send house.bob "the build is green; the tag is yours"`
 Sleep 500ms
 Enter
 Sleep 1500ms
-Type `LOC_IDENTITY=ada loc publish standup "@bob please look at the restore proof"`
+Type `LOC_IDENTITY=house.ada loc publish standup "@house.bob please look at the restore proof"`
 Sleep 500ms
 Enter
 Sleep 1500ms
-Type "LOC_IDENTITY=bob loc read"
+Type "LOC_IDENTITY=house.bob loc read"
 Sleep 500ms
 Enter
 Wait+Screen@20s /── topics ──/
 Sleep 2s
-Type "LOC_IDENTITY=bob loc topics"
+Type "LOC_IDENTITY=house.bob loc topics"
 Sleep 500ms
 Enter
 Wait+Screen@20s /in window/
 Sleep 1500ms
-Type "LOC_IDENTITY=bob loc status"
+Type "LOC_IDENTITY=house.bob loc status"
 Sleep 500ms
 Enter
-Wait+Screen@20s /carol/
+Wait+Screen@20s /house.bob    unread/
 Sleep 3s
 
 Hide
