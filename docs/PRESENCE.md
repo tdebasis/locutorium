@@ -56,10 +56,13 @@ Anything checking one must run on the same machine as the process, which rules o
 records the process id *and its start time*; the pair is unambiguous where the number alone is not.
 
 **Checking that pair asks the operating system two questions.** The first question asks whether the
-process id exists. It is a signal the kernel checks and then delivers to nobody. The second question
-reads the process's start time, and it runs a `ps` command for that one process id. The cheap question
-runs first, so a process id that is gone stops the check there. A process running under another user
-reads as absent, because the kernel refuses the signal.
+process id exists. The second question reads the process's start time, and it runs a `ps` command for
+that one process id. The cheap question runs first, so a process id that is gone stops the check there.
+
+**The first question uses a different mechanism on each platform, with the same outcome.** On Unix it
+is a signal the kernel checks and then delivers to nobody. A process running under another user reads
+as absent there, because the kernel refuses the signal. On Windows the check opens the process and
+reads its exit code.
 
 **A check over many agents should read the start times in one batch.** One `ps` per agent costs little
 in a sweep over a handful of seats. A wider check should ask once, with `ps -o pid=,lstart= -p 1,2,3`.
@@ -164,7 +167,8 @@ own parent, then re-executes this tool and passes that number down as an argumen
 generation below cannot read the number itself, because its own parent is the launched process.
 
 **The pidfile holds two lines.** Line 1 is the process id. Line 2 is that process's start time. A
-reader compares both lines, because the number alone is not an identity.
+reader compares both lines, because the number alone is not an identity. A server killed outright
+leaves the file behind, so a stale file can name a process id the system has since reused.
 
 **Attendance is the registration's process id.** The sweep judges a seat by that number and its start
 time. It reaps a row whose process is gone. It removes the seat's server pidfile as part of the same
