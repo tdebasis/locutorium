@@ -53,6 +53,11 @@ running; the bare form is the launcher and `--serve` is that process. Nobody typ
 explicit at that boot. Every later start prints one line: the path, and that it is the place to
 change settings.
 
+**A home with no `config` file is not a deployment.** `loc start --serve` refuses it and boots
+nothing. Bare `loc start` still works, because it writes the file before it reads the listen
+address. That order is also the recovery path: if the file is deleted under a live daemon, run
+`loc start` and it writes the file again.
+
 **The listen address must be loopback.** `loc start` refuses any other, and says why. The broker has
 no authentication in this version, so an address the network can reach would offer every queue in
 the deployment to it.
@@ -87,6 +92,10 @@ loc stop [--force]
 | no live pidfile, and the port held | three lines: the port is held by a process `loc` did not start; stopping it could stop a broker another supervisor owns; `to stop it anyway: loc stop --force` | 1 |
 | `--force`, and a pid found holding the port | `stopped` | 0 |
 | `--force`, and no pid found | that no process was found on the port | 1 |
+
+**A home with no `config` file is refused.** `loc stop` and `loc stop --force` both read
+`nats_url` to find the port, and a missing file would give them the built-in default, which is
+another deployment's live broker. Run `loc start` to write the file back.
 
 **The refusal is the point.** A broker on this port may be another supervisor's, and a stop is not
 recoverable. `--force` finds the pid by asking the operating system — `lsof` on macOS, `ss` on
@@ -714,6 +723,11 @@ the value in force.
 **The defaults live in one table**, `internal/config/keys.go`. `loc start` writes the file from it on
 first run, with each key's comment above it, so the file and the code cannot drift apart. The three
 wake keys are the deployment's and are not in that table.
+
+**A default is not a deployment.** Every key above has one, so a home with no `config` file reads a
+whole configuration that nobody chose, and its `nats_url` is another deployment's live broker. Any
+verb that opens the medium refuses such a home and names the path it looked at. A file that exists
+and is silent on a key still takes the default above: that is what a hand-edited file relies on.
 
 Every key above except `monitor_url` is read by this build. The three wake keys are read by the
 seat's own `mcp` server, which is the only listener there is. `registry`'s wait for a host is fixed
