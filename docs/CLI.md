@@ -169,6 +169,10 @@ deletes it. So if presenting fails part way — a dead terminal, a broken pipe �
 **re-presented next time, never dropped.** The failure direction is deliberate: duplicate rather
 than lose, and `id` is the key for spotting the duplicate (PROTOCOL.md §5).
 
+**The read waits for the broker to confirm each deletion.** It does not send the acknowledgement and
+move on. The broker answers an acknowledgement only after it has removed the message, so `loc
+unread` and `loc status`, asked after a `read` exits, cannot count a message that read already took.
+
 A message that has been **fetched but not yet acknowledged is invisible to a following read** for
 the length of the consumer's ack-wait — the server's default of **30 s**, which this tool sets
 nowhere today. `read` gives such a message back the moment it exits normally: on close it

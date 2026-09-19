@@ -11,6 +11,7 @@ package nats
 // the broker to redeliver.
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -104,5 +105,60 @@ func TestUnreadCountsMailHandedOverAndNeverAcknowledged(t *testing.T) {
 	}
 	if n, err := p.Unread("bob"); err != nil || n != 1 {
 		t.Errorf("Unread = (%d, %v), want (1, nil)", n, err)
+	}
+}
+
+// THE COUNT IS 0 THE INSTANT A READ ACKNOWLEDGES. The count is the queue's
+// depth, so it falls only when the broker removes the message. The broker
+// removes a work-queue message while it handles the acknowledgement, and it
+// answers the acknowledgement afterwards, so a reader that waits for that
+// answer cannot be followed by a count that still holds what it read.
+//
+// The asking connection is opened BEFORE the acknowledgement and is not the
+// reader's, so the only work between the acknowledgement and the question is
+// one request. Two hundred rounds, a new message each time.
+//
+// THE PLANT THAT TURNS THIS RED: acknowledge with m.m.Ack() in place of
+// AckSync in read.go.
+func TestUnreadIsZeroImmediatelyAfterAReadAcknowledges(t *testing.T) {
+	newHarness(t, "alice")
+	t.Setenv("LOC_IDENTITY", "alice")
+
+	sender := &Provider{}
+	t.Cleanup(sender.Close)
+
+	for i := 0; i < 200; i++ {
+		if err := sender.SendQueue("alice", envelope(t, "alice", "alice", fmt.Sprintf("message-%d", i))); err != nil {
+			t.Fatalf("round %d: SendQueue: %v", i, err)
+		}
+
+		reader := &Provider{}
+		m, ok, err := reader.NextQueued("alice", fetchWindow)
+		if err != nil || !ok {
+			reader.Close()
+			t.Fatalf("round %d: NextQueued: ok=%v err=%v", i, ok, err)
+		}
+
+		asker := &Provider{}
+		if err := asker.connect(); err != nil {
+			reader.Close()
+			t.Fatalf("round %d: the asking connection: %v", i, err)
+		}
+
+		if err := m.Ack(); err != nil {
+			reader.Close()
+			asker.Close()
+			t.Fatalf("round %d: Ack: %v", i, err)
+		}
+
+		n, err := asker.Unread("alice")
+		reader.Close()
+		asker.Close()
+		if err != nil {
+			t.Fatalf("round %d: Unread: %v", i, err)
+		}
+		if n != 0 {
+			t.Fatalf("round %d: Unread = %d straight after the read acknowledged; want 0", i, n)
+		}
 	}
 }
