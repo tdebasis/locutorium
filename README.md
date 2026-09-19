@@ -44,6 +44,18 @@ It is for the moment a coordinator says *"builder, the tests are green — tag i
 
 ## Two agents, one conversation
 
+Both seats attend before the first send. A queue exists only once something subscribes to it, so
+with nobody attending, `loc send` refuses. With the daemon running (`loc start`), attend as each seat:
+
+```
+loc subscribe house.ada --pid $$ --type none --version 1
+loc subscribe house.bob --pid $$ --type none --version 1
+```
+
+`--pid $$` names this shell. Each seat stays held while that process lives. After it exits, the next
+sweep removes the seat and its queue. `--type none` rings no bell, so each seat finds its mail on its
+next `read`. The recording does the same step in its hidden setup, `docs/art/prep.sh`.
+
 ```console
 $ LOC_IDENTITY=house.ada loc send house.bob "the build is green; the tag is yours"
 sent → queue.house.bob uid=9f1c2a3b-4d5e-4f60-8a71-2b3c4d5e6f70
@@ -68,7 +80,7 @@ house.ada    unread: 0
 house.bob    unread: 0
 ```
 
-<img src="docs/art/demo.gif" alt="a terminal recording of the five commands above, played against a scratch house" width="800">
+<img src="docs/art/demo.gif" alt="a terminal recording of the five commands in the console block above, played against a scratch house where both seats already attend" width="800">
 
 A word held for house.bob until house.bob took it; a word spoken in the topic; house.bob read both from one place. The queue is
 empty again, and the topic keeps its word for the window. The commands and the shape of every line come
