@@ -38,6 +38,17 @@ func Dial(url string, opts ...natsgo.Option) (*natsgo.Conn, error) {
 	if err := refuseDefaultUnderTest(url); err != nil {
 		return nil, err
 	}
+	// A HOME WITH NO CONFIG FILE IS NOT A DEPLOYMENT. Every key then resolves
+	// to the table's default, and the default nats_url is the address a real
+	// deployment on this machine listens on. A daemon that lost its home
+	// dialled that broker and its sweep deleted the queues there.
+	//
+	// THE ORDER IS PART OF THE GUARD. refuseDefaultUnderTest answers first, so
+	// every case that asserts the test refusal still gets the test refusal,
+	// and this check speaks only for a home no case pinned an address in.
+	if err := config.RequireFile(); err != nil {
+		return nil, err
+	}
 	return dialBroker(url, opts...)
 }
 

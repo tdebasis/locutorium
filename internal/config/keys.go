@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -115,6 +116,42 @@ func Int(name string) int {
 
 // File is the path to the deployment's config file.
 func File() string { return filepath.Join(Home(), "config") }
+
+// ErrNoDeployment says that this home holds no config file.
+//
+// THE DEFAULTS ARE NOT A DEPLOYMENT. Every key above has a default, so a
+// process with no file reads a whole configuration that nobody chose. The
+// default nats_url is the address a real deployment on this machine listens
+// on, so a daemon that lost its home dialled a live broker and swept it. A
+// caller that acts on the medium asks RequireFile first and is refused.
+//
+// The text carries no path. This variable is built once, and LOC_HOME moves
+// under a running process, so the path is added by RequireFile at the moment
+// the question is asked.
+var ErrNoDeployment = errors.New("this deployment has no config file; run `loc start` to write one")
+
+// Exists reports whether File is there and is a regular file.
+//
+// A DIRECTORY AT THAT PATH IS NOT A CONFIG FILE. Get opens the path and falls
+// back to the defaults when the open fails, so a directory reads exactly like
+// an absent file, and that is the state this predicate must call absent.
+func Exists() bool {
+	fi, err := os.Stat(File())
+	return err == nil && fi.Mode().IsRegular()
+}
+
+// RequireFile answers nil when the deployment has a config file, and an error
+// naming the path when it does not.
+//
+// Get and Value are UNCHANGED by this. A file that exists and says nothing
+// about a key still takes the table's default, which is what a hand-edited
+// file relies on.
+func RequireFile() error {
+	if Exists() {
+		return nil
+	}
+	return fmt.Errorf("%w (looked for %s)", ErrNoDeployment, File())
+}
 
 // WriteDefault writes the table to path, with each key's comment above it.
 //

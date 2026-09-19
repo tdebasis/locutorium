@@ -446,6 +446,10 @@ this code is in a position to make.
    it did not start is reconciling records it did not write. This stops a leftover daemon acting on a
    broker that outlived it. This is decided and lands in the change that follows this one.
 
+Changes 2 and 3 have landed. Change 2 sits at two seams: the nats provider's `Dial`, and
+`listenAddr`, which `loc stop` and `loc start --serve` both ask. Change 3 pins the address on the
+provider itself, and the daemon takes it from the server it started.
+
 **Context.** A daemon whose home directory had been removed kept running. Its ledger was therefore
 empty. It reached a broker serving a different deployment's instance, and its orphan pass deleted
 every queue there on each five-minute beat. Mail waiting in those queues was destroyed.
@@ -479,3 +483,9 @@ can trip. A new way to lose a broker is a poor trade for a case the other change
   quietly dropped such a row would hide the danger instead of removing it.
 - **`loc status` inherits the boundary with no change of its own.** The report and the sweep read one
   function, so they cannot disagree about which queues are this deployment's business.
+- **A config file deleted under a live daemon makes every beat fail.** The daemon keeps its broker,
+  because the address is pinned at boot. Its sweep opens a provider, and that provider refuses a home
+  with no file. Each beat writes `sweep failed` to the heartbeat log. `loc start` writes the file
+  again, and the next beat sweeps.
+- **`loc start` is the only verb that works with no config file.** It writes the file before it reads
+  the listen address. `loc stop` and `loc start --serve` are refused, and the refusal names the path.

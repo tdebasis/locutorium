@@ -30,6 +30,14 @@ import (
 // who has none is told so rather than left waiting.
 const registryTimeout = 2 * time.Second
 
+// presenceOpener yields one presence extension to one verb. It is the shape of
+// withPresence.
+//
+// IT IS A PARAMETER SO THE DAEMON CAN PIN ITS BROKER. withPresence reads
+// nats_url every time it is called, which is right for a CLI process and wrong
+// for a daemon that runs a broker of its own: see ownBroker in daemon.go.
+type presenceOpener func(fn func(provider.Presence) error) error
+
 // withPresence opens the configured provider and hands its presence extension
 // to one verb. A medium that carries messages but not presence is named in the
 // refusal, because "this provider cannot" and "you typed it wrong" are
@@ -365,11 +373,18 @@ func sweepVerb(w io.Writer, args []string) (changes int, err error) {
 	if len(args) > 0 {
 		return 0, errUsage
 	}
+	return sweep(w, withPresence)
+}
+
+// sweep is the reconciliation itself, against whatever broker open yields. The
+// daemon hands in an opener pinned to the broker it runs; every other caller
+// hands in withPresence, which reads the deployment's config.
+func sweep(w io.Writer, open presenceOpener) (changes int, err error) {
 	rows, unreadable, err := model.ListAll()
 	if err != nil {
 		return 0, err
 	}
-	err = withPresence(func(pr provider.Presence) error {
+	err = open(func(pr provider.Presence) error {
 		queues, err := pr.Queues()
 		if err != nil {
 			return err

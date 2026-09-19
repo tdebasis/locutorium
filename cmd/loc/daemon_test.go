@@ -410,7 +410,7 @@ func TestABeatRecordsASweepThatFailed(t *testing.T) {
 	// kernel handed out and then closed, so there is no broker to reach.
 	writeFile(t, filepath.Join(home, "config"), "nats_url = "+loctest.ClosedPort(t)+"\n")
 	beatDir := filepath.Join(home, "run", "heartbeat")
-	beatOnce(&strings.Builder{}, beatDir)
+	beatOnce(&strings.Builder{}, beatDir, withPresence)
 	lines := beatLines(t, filepath.Join(beatDir, time.Now().Format("2006-01-02")+".log"))
 	if len(lines) != 1 || !strings.Contains(lines[0], "sweep failed:") {
 		t.Errorf("the log reads %v, want one line naming the failure", lines)
@@ -885,6 +885,12 @@ func TestTheFloorRefusesTheDefaultPort(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("LOC_HOME", home)
 	t.Setenv("LOC_IDENTITY", "house.keeper")
+	// THE FILE IS WRITTEN, AND IT NAMES THE DEFAULT ON PURPOSE. listenAddr
+	// refuses a home with no config file before it reads any address, so this
+	// case would otherwise stop at that refusal and never reach the floor it
+	// is about. The default address is what a forgetful case resolves to, and
+	// the floor is what must refuse it.
+	writeFile(t, filepath.Join(home, "config"), "nats_url = "+config.Default(config.NATSURL)+"\n")
 
 	ready := false
 	err := runDaemon(&strings.Builder{}, time.Hour, make(chan os.Signal), func() { ready = true })

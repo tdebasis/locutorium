@@ -17,6 +17,7 @@ import (
 	natsgo "github.com/nats-io/nats.go"
 
 	"github.com/tdebasis/locutorium/internal/broker"
+	"github.com/tdebasis/locutorium/internal/provider"
 	"github.com/tdebasis/locutorium/internal/provider/nats"
 
 	"github.com/tdebasis/locutorium/internal/config"
@@ -39,6 +40,18 @@ var readyWait = 10 * time.Second
 // the network. The refusal is here, in the one function both `loc start` and
 // the daemon ask, so neither can boot an address the other would have refused.
 func listenAddr() (host string, port int, err error) {
+	// A HOME WITH NO CONFIG FILE IS NOT A DEPLOYMENT. nats_url would resolve
+	// to the table's default, which is the address a real deployment on this
+	// machine listens on, and this function is what decides where a broker
+	// binds. `loc stop`, `loc stop --force` and a hand-typed
+	// `loc start --serve` all arrive here with no file when a home is gone.
+	//
+	// BARE `loc start` STILL WORKS. startVerb calls surfaceConfig first, which
+	// writes the default file, so the file is there by the time this runs.
+	// That is also the recovery path for a deployment whose file was deleted.
+	if err := config.RequireFile(); err != nil {
+		return "", 0, err
+	}
 	raw := config.Value(config.NATSURL)
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -159,14 +172,15 @@ func runDaemon(w io.Writer, beat time.Duration, sigs <-chan os.Signal, ready fun
 		ready()
 	}
 
-	beatOnce(w, beatDir)
+	own := ownBroker(srv.ClientURL())
+	beatOnce(w, beatDir, own)
 
 	ticker := time.NewTicker(beat)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
-			beatOnce(w, beatDir)
+			beatOnce(w, beatDir, own)
 		case <-sigs:
 			// ONCE THE END IS DECIDED, LATER SIGNALS ARE IGNORED. The shutdown
 			// and the pidfile removal run after this line, and the default
@@ -180,13 +194,33 @@ func runDaemon(w io.Writer, beat time.Duration, sigs <-chan os.Signal, ready fun
 	}
 }
 
+// ownBroker is the opener the daemon's sweep uses: a provider pinned to the
+// broker THIS process started.
+//
+// THE ADDRESS IS THREADED, NOT READ AGAIN. The sweep opened the configured
+// provider on every beat, and that provider read nats_url each time. A config
+// file rewritten or restored under a running daemon therefore moved the sweep
+// onto another deployment's broker, where this ledger claims nothing and the
+// orphan pass deletes queues that are in use.
+//
+// ONLY THE NATS PROVIDER EXISTS (internal/provider/nats/nats.go registers the
+// one name the key table offers), and this file already dials it directly for
+// ensureTopics. A second provider would need an opener of its own here.
+func ownBroker(clientURL string) presenceOpener {
+	return func(fn func(provider.Presence) error) error {
+		p := nats.At(clientURL)
+		defer p.Close()
+		return fn(p)
+	}
+}
+
 // beatOnce sweeps and writes the one line that says it happened.
 //
 // A QUIET BEAT WRITES A LINE TOO. A log that only records repairs cannot tell
 // a heartbeat that found nothing from a heartbeat that never ran, and the
 // second is the failure worth seeing.
-func beatOnce(w io.Writer, beatDir string) {
-	changes, err := sweepVerb(w, nil)
+func beatOnce(w io.Writer, beatDir string, open presenceOpener) {
+	changes, err := sweep(w, open)
 	if err != nil {
 		appendBeat(beatDir, fmt.Sprintf("sweep failed: %v", err))
 		return

@@ -85,20 +85,94 @@ func TestAPinnedAddressReachesTheDialUnderGoTest(t *testing.T) {
 	}
 }
 
-func TestTheShippedBinaryDialsTheDefaultAddress(t *testing.T) {
+// A HOME WITH NO CONFIG FILE IS REFUSED, AND NOTHING IS DIALLED.
+//
+// The test guard is pinned OFF here, so the only thing that can refuse is
+// config.RequireFile. With no file every key resolves to the table's default,
+// and the default nats_url is the address a real deployment on this machine
+// listens on. That is how a daemon which lost its home swept a live broker.
+//
+// This case and the one below replace TestTheShippedBinaryDialsTheDefaultAddress,
+// which asserted the behaviour this change removes: it pinned the guard off,
+// gave the provider a home with no config file, and required the dial to reach
+// the default address.
+//
+// THE PLANT THAT TURNS THIS RED: delete the config.RequireFile call from Dial.
+func TestAHomeWithNoConfigFileIsRefusedAndNothingIsDialled(t *testing.T) {
 	r := pin(t, false)
 	t.Setenv("LOC_HOME", t.TempDir())
+
+	err := (&Provider{}).connect()
+	if err == nil {
+		t.Fatal("connect accepted a home with no config file")
+	}
+	if !errors.Is(err, config.ErrNoDeployment) {
+		t.Errorf("connect failed with %v, want it to wrap config.ErrNoDeployment", err)
+	}
+	// THE REFUSAL IS SAID AS ITSELF. connectWithin folds every dial failure
+	// into errConnect, "cannot reach the medium", and that sends an operator
+	// looking for a broker that is running. The medium was never asked here.
+	if err == errConnect {
+		t.Error("the refusal arrived as errConnect, not as itself")
+	}
+	if len(r.urls) != 0 {
+		t.Errorf("the dial saw %v; it must be refused before the dial", r.urls)
+	}
+}
+
+// A FILE THAT EXISTS AND IS SILENT ON THE ADDRESS STILL DIALS THE DEFAULT.
+// RequireFile asks whether the deployment exists. It does not ask what the
+// file says, and Value keeps the table's default for a key nobody wrote.
+//
+// Nothing here reaches the network: pin replaces dialBroker with a recorder,
+// so the default address is recorded and never opened.
+//
+// THE PLANT THAT TURNS THIS RED: make RequireFile demand the nats_url line
+// rather than the file.
+func TestAFileSilentOnTheAddressStillDialsTheDefault(t *testing.T) {
+	r := pin(t, false)
+	home := t.TempDir()
+	write(t, filepath.Join(home, "config"), "provider = nats\n")
+	t.Setenv("LOC_HOME", home)
 
 	err := (&Provider{}).connect()
 	if err != errConnect {
 		t.Fatalf("connect returned %v, want the errConnect sentinel", err)
 	}
-	if strings.Contains(err.Error(), refusalMark) {
-		t.Error("the guard refused the default address outside go test")
-	}
 	def := config.Default(config.NATSURL)
 	if len(r.urls) != 1 || r.urls[0] != def {
 		t.Errorf("the dial saw %v, want one call for %s", r.urls, def)
+	}
+}
+
+// WatchQueue opens its own connection and folds its own errors, so the
+// pass-through is asserted there too. The listener is the seam that dialled
+// past the first cut of the test guard (Assayer F1).
+//
+// THE PLANT THAT TURNS THIS RED: drop config.ErrNoDeployment from the
+// pass-through in WatchQueue, leaving only ErrRefusedUnderTest.
+func TestWatchQueueSaysTheMissingDeploymentAsItself(t *testing.T) {
+	r := pin(t, false)
+	t.Setenv("LOC_HOME", t.TempDir())
+
+	p := &Provider{}
+	stop, err := p.WatchQueue("workshop.scribe", nil, nil)
+	if stop != nil {
+		// Only reachable if the refusal regresses, and then this arm holds a
+		// connection; release it before failing (Assayer N5).
+		stop()
+	}
+	if err == nil {
+		t.Fatal("WatchQueue accepted a home with no config file")
+	}
+	if !errors.Is(err, config.ErrNoDeployment) {
+		t.Errorf("WatchQueue failed with %v, want it to wrap config.ErrNoDeployment", err)
+	}
+	if err == errConnect {
+		t.Error("the refusal arrived as errConnect, not as itself")
+	}
+	if len(r.urls) != 0 {
+		t.Errorf("WatchQueue dialled %v past the refusal", r.urls)
 	}
 }
 

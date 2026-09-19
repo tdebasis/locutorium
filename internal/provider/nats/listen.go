@@ -37,7 +37,7 @@ const listenReconnectWait = 1 * time.Second
 // deaf, which is the failure nobody notices. Each re-establishment calls
 // reconnected, because arrivals during the gap were seen by no one.
 func (p *Provider) WatchQueue(endpoint string, arrived func(sender string), reconnected func()) (func(), error) {
-	nc, err := Dial(config.Value(config.NATSURL),
+	nc, err := Dial(p.brokerURL(),
 		natsgo.Name("loc"),
 		natsgo.Timeout(ackTimeout),
 		natsgo.ErrorHandler(p.noteRefusal),
@@ -50,7 +50,10 @@ func (p *Provider) WatchQueue(endpoint string, arrived func(sender string), reco
 		}),
 	)
 	if err != nil {
-		if errors.Is(err, ErrRefusedUnderTest) {
+		// Both refusals are said as themselves, for the reason connectWithin
+		// gives: neither one reached the medium, so neither is "cannot reach
+		// the medium".
+		if errors.Is(err, ErrRefusedUnderTest) || errors.Is(err, config.ErrNoDeployment) {
 			return nil, err
 		}
 		return nil, errConnect

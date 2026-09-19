@@ -42,6 +42,19 @@ It never rewrites a `config` that is already there, so a key you edited survives
 There is no roster file: a seat exists while it is subscribed, and the ledger is what `loc status`
 reads.
 
+**If the `config` file goes missing, run `loc start`.** It writes the file again from the key table.
+Every other verb that opens the broker refuses a home with no `config`, and says where it looked. A
+live daemon keeps its own broker while the file is gone, but its sweep fails each beat, and the
+heartbeat log records that. `loc start` is the way back.
+
+The refusal reaches more than the sweep. No agent can send or read while the file is gone, because
+each send and each read opens a connection of its own. An agent server that is running keeps its
+listener, and the bell still rings, but the read that follows is refused. An agent server that starts
+while the file is gone is refused.
+
+`loc start` writes the defaults. It cannot restore a key that a person edited in the lost file. After
+a recovery, compare the new file with your own record of the old one, and edit it again.
+
 ## The service
 
 `./install.sh` builds `loc`, copies the stamped binary into `lib/locutorium`, and links `loc` at that
@@ -71,6 +84,10 @@ Change a key by editing the line; revert it by deleting the line.
 
 `loc start` writes every key above except the three `wake_` keys. Those three are read when a line
 holds them and carry the default above when no line does. Add the line yourself to change one.
+
+A default is not a deployment. A home with no `config` file at all is refused by every verb that
+opens the broker, because the built-in `nats_url` is another deployment's live broker. A file that
+exists and says nothing about one key still takes that key's default.
 
 ## The bell — how a seat is told
 
@@ -172,6 +189,14 @@ own.
 `nats_url`, `nats://127.0.0.1:4222`. It refuses `localhost` and `::1` at that port too. A test that
 needs a broker must boot one and pin `nats_url` to its port. This holds on a machine that runs the
 Locutorium, where the default address is the live daemon.
+
+**A scratch home needs a `config` file.** The provider refuses a home that has none, whatever
+address the defaults would give it. A test that wants a broker writes its own `nats_url`; a test
+that wants none writes a closed port.
+
+**The daemon sweeps the broker it runs.** It takes that address from its own server at boot and
+keeps it for the life of the process. A `config` file rewritten under a running daemon moves no
+later beat, so a restored backup cannot point the sweep at another deployment's queues.
 
 ## When something is wrong
 
