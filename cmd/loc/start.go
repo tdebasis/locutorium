@@ -29,6 +29,9 @@ func startVerb(w io.Writer, args []string) error {
 		return errUsage
 	}
 
+	if err := config.RequireFile(); err != nil {
+		return err
+	}
 	if err := surfaceConfig(w); err != nil {
 		return err
 	}
