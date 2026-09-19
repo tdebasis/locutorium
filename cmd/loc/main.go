@@ -54,6 +54,7 @@ presence — called by a person, or by a consumer
   registry [<instance>] [--json]
                             who is registered, asked of the instance's host
   status [<endpoint>]       one agent's three facts; bare, the whole deployment
+  unread <endpoint>         mail not taken: a number, or the word unknown
   watch [<instance>]        follow the event stream, read-only (^C to stop)
 
 the deployment
@@ -198,6 +199,16 @@ func dispatch(args []string, w, errw io.Writer) error {
 			return statusEndpoint(w, rest[0])
 		}
 		return statusVerb(w)
+
+	case "unread":
+		// ONE ARGUMENT, COUNTED HERE. A status line runs this on a timer and
+		// reads the exit code and the stream, so an invocation it got wrong
+		// must be refused as a typing mistake rather than reported as a
+		// deployment that cannot be reached.
+		if len(rest) != 1 {
+			return errUsage
+		}
+		return unreadVerb(w, rest[0])
 
 	case "subscribe":
 		return subscribeVerb(rest)

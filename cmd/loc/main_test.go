@@ -216,7 +216,15 @@ func TestArgumentCheckHappensBeforeTheProviderIsOpened(t *testing.T) {
 	t.Setenv("LOC_HOME", home) // no config at all: any Open would fail
 	installed = nil
 
-	for _, args := range [][]string{{"send", "ada"}, {"publish", "standup"}} {
+	for _, args := range [][]string{
+		{"send", "ada"},
+		{"publish", "standup"},
+		// `unread` takes exactly one argument, and it judges the count before
+		// it opens anything, so both the empty and the crowded invocation
+		// belong on this list.
+		{"unread"},
+		{"unread", "workshop.scribe", "workshop.clerk"},
+	} {
 		code, out, errOut := exec(args...)
 		assertResult(t, code, out, errOut, 1, usage, "")
 	}

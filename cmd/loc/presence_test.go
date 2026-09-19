@@ -259,7 +259,7 @@ func execWithin(t *testing.T, d time.Duration, args ...string) (code int, stdout
 	case r := <-ch:
 		return r.code, r.stdout, r.stderr
 	case <-time.After(d):
-		t.Fatalf("emit did not return within %s — a blocking impl must go red, not hang", d)
+		t.Fatalf("%s did not return within %s — a blocking impl must go red, not hang", args[0], d)
 		return 0, "", ""
 	}
 }

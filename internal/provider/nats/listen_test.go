@@ -263,3 +263,22 @@ func (r *relay) cut() {
 		_ = c.Close()
 	}
 }
+
+// AN EMPTY QUEUE IS A NUMBER, NOT A REFUSAL. The two error cases above say
+// what happens when the figure cannot be had, and neither of them holds this
+// one down: a queue that exists and holds nothing must answer 0. Without this
+// case an implementation that refused every falsy count would pass the whole
+// file, and the verb built on it would print `unknown` for the ordinary state
+// of a seat that is caught up.
+func TestUnread_AnEmptyQueueIsZeroAndNotAnError(t *testing.T) {
+	h := newHarness(t, "alice")
+	p := h.as(t, "alice")
+
+	n, err := p.Unread("alice")
+	if err != nil {
+		t.Fatalf("Unread on a queue that exists and holds nothing: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("Unread = %d; the queue was stood up and nothing was sent to it", n)
+	}
+}

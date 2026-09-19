@@ -127,6 +127,41 @@ A busy refusal typed nothing into the pane, so it does not count against `wake_b
 Identity comes from `LOC_IDENTITY` and from nothing else. A verb with no identity refuses
 (`loc_identity`). A refusal is correct; guessing is not.
 
+## An unread count on the agent's status line
+
+The bell is the only thing that tells a seat mail arrived, and one bell can fail. A busy pane
+refuses the bell and the server asks the pane again. A broken bell is not retried: there is no pane
+address, or tmux cannot be read, or the courier exited non-zero. Nothing asks again after those, so
+the mail waits in the queue and nobody is told. A second signal is what catches that.
+
+`loc unread <endpoint>` is that signal. It prints a number, or the word `unknown`. It never prints
+an empty line. An empty line is also what a seat with no mail looks like. A failed reading must not
+look like a count of zero.
+
+Call it from the agent's status line:
+
+```sh
+#!/bin/sh
+# One reading of the mail waiting for this seat.
+n=$(loc unread "$LOC_IDENTITY" 2>/dev/null)
+case "$n" in
+  0)              ;;                       # caught up: show nothing
+  *[!0-9]*|"")    printf 'mail: UNREADABLE (%s)\n' "${n:-no answer}" ;;
+  *)              printf 'mail: %s\n' "$n" ;;
+esac
+```
+
+The script cannot hang. **The verb answers within 2 seconds**, even against a broker that accepts
+the connection and then says nothing.
+
+The script must name the **full endpoint**, `<instance>.<agent>`. A bare agent name is not an
+endpoint and the verb refuses it, with nothing on standard out. `LOC_IDENTITY` already holds the full
+name.
+
+The warning branch catches `unknown` and everything else the verb could not produce, an empty answer
+included. Read it as "I cannot see your mail", not as "you have none". The reason is on standard
+error; run the command by hand to read it.
+
 ## The day's record
 
 `run/log/YYYY-MM-DD.jsonl` holds one JSON object per line, appended by every process on the machine.
