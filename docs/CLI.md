@@ -576,8 +576,8 @@ carried its details; this asks for the current picture instead of replaying a hi
 exist (PRESENCE.md §Who is here right now).
 
 The request goes out on `registry.<instance>` and the host answers, because the host holds the
-registrations — it created them. **Nobody answering is a failure, not an empty ledger**: the command
-exits non-zero and names the subject that went unanswered. A host that answers with an empty ledger
+registrations — it created them. **Nobody answering is a failure, not an empty list**: the command
+exits non-zero and names the subject that went unanswered. A host that answers with an empty list
 prints `(no agents registered)` and exits **0**; the two are different, and telling them apart is
 the point.
 

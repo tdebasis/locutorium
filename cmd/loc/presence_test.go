@@ -715,7 +715,7 @@ func TestPresence_Registry_NoHostRunning_Fails(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
 	// This deployment runs no host process, so the request goes unanswered: the
-	// verb must FAIL saying so, never print an empty ledger and exit 0.
+	// verb must FAIL saying so, never print an empty list and exit 0.
 	checkRefusal(t, "no host|unanswered|no reply|timed out|timeout|no registry|no answer",
 		"registry", "workshop")
 }

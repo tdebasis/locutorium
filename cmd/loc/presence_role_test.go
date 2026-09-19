@@ -19,7 +19,7 @@ import (
 //
 // The broker-backed cases reuse the presence deployment and the event witness
 // from the integration suite; the rendering case uses the spy deployment,
-// because printing the ledger touches no medium.
+// because printing the list touches no medium.
 
 func TestPresence_Subscribe_JoinEventCarriesTheDisplayRole(t *testing.T) {
 	p := newPresence(t)
@@ -70,7 +70,7 @@ func TestPresence_Subscribe_WithoutARoleOmitsTheKey(t *testing.T) {
 	}
 }
 
-// The ledger is where a person reads the registration back, so a role that was
+// The list is where a person reads the registration back, so a role that was
 // registered has to appear there too.
 func TestRegistryRenderingCarriesTheRole(t *testing.T) {
 	d := newPresenceDeployment(t)

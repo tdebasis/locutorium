@@ -125,7 +125,7 @@ A busy refusal typed nothing into the pane, so it does not count against `wake_b
 `wake_breaker_per_hour`. A ring that typed does count, and so does a broken bell.
 
 Identity comes from `LOC_IDENTITY` and from nothing else. A verb with no identity refuses
-(`loc_identity`). A refusal is correct; guessing is not.
+(`cannot determine sender identity: set LOC_IDENTITY`). A refusal is correct; guessing is not.
 
 ## An unread count on the agent's status line
 
