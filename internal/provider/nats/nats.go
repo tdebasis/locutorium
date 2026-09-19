@@ -85,9 +85,6 @@ func At(url string) *Provider { return &Provider{pinned: url} }
 // brokerURL is the address this provider dials: the pinned one when it has
 // one, and otherwise what the deployment says right now.
 func (p *Provider) brokerURL() string {
-	if p.pinned != "" {
-		return p.pinned
-	}
 	return config.Value(config.NATSURL)
 }
 

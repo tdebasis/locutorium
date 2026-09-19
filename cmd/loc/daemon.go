@@ -49,9 +49,6 @@ func listenAddr() (host string, port int, err error) {
 	// BARE `loc start` STILL WORKS. startVerb calls surfaceConfig first, which
 	// writes the default file, so the file is there by the time this runs.
 	// That is also the recovery path for a deployment whose file was deleted.
-	if err := config.RequireFile(); err != nil {
-		return "", 0, err
-	}
 	raw := config.Value(config.NATSURL)
 	u, err := url.Parse(raw)
 	if err != nil {
