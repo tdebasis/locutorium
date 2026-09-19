@@ -104,8 +104,11 @@ func (p *Provider) connectWithin(dial time.Duration) error {
 	if err != nil {
 		// The guard's refusal is said as itself: it names the address on
 		// purpose, and "cannot reach the medium" would tell a test the
-		// opposite of what happened.
-		if errors.Is(err, ErrRefusedUnderTest) {
+		// opposite of what happened. The missing config file is said as
+		// itself for the same reason. The medium was never asked, and an
+		// operator who reads "cannot reach the medium" goes looking for a
+		// broker that is running.
+		if errors.Is(err, ErrRefusedUnderTest) || errors.Is(err, config.ErrNoDeployment) {
 			return err
 		}
 		// The client's error text never carries the password, but it can

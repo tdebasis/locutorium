@@ -885,6 +885,12 @@ func TestTheFloorRefusesTheDefaultPort(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("LOC_HOME", home)
 	t.Setenv("LOC_IDENTITY", "house.keeper")
+	// THE FILE IS WRITTEN, AND IT NAMES THE DEFAULT ON PURPOSE. listenAddr
+	// refuses a home with no config file before it reads any address, so this
+	// case would otherwise stop at that refusal and never reach the floor it
+	// is about. The default address is what a forgetful case resolves to, and
+	// the floor is what must refuse it.
+	writeFile(t, filepath.Join(home, "config"), "nats_url = "+config.Default(config.NATSURL)+"\n")
 
 	ready := false
 	err := runDaemon(&strings.Builder{}, time.Hour, make(chan os.Signal), func() { ready = true })

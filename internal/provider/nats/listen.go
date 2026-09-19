@@ -50,7 +50,10 @@ func (p *Provider) WatchQueue(endpoint string, arrived func(sender string), reco
 		}),
 	)
 	if err != nil {
-		if errors.Is(err, ErrRefusedUnderTest) {
+		// Both refusals are said as themselves, for the reason connectWithin
+		// gives: neither one reached the medium, so neither is "cannot reach
+		// the medium".
+		if errors.Is(err, ErrRefusedUnderTest) || errors.Is(err, config.ErrNoDeployment) {
 			return nil, err
 		}
 		return nil, errConnect

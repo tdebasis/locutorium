@@ -39,6 +39,18 @@ var readyWait = 10 * time.Second
 // the network. The refusal is here, in the one function both `loc start` and
 // the daemon ask, so neither can boot an address the other would have refused.
 func listenAddr() (host string, port int, err error) {
+	// A HOME WITH NO CONFIG FILE IS NOT A DEPLOYMENT. nats_url would resolve
+	// to the table's default, which is the address a real deployment on this
+	// machine listens on, and this function is what decides where a broker
+	// binds. `loc stop`, `loc stop --force` and a hand-typed
+	// `loc start --serve` all arrive here with no file when a home is gone.
+	//
+	// BARE `loc start` STILL WORKS. startVerb calls surfaceConfig first, which
+	// writes the default file, so the file is there by the time this runs.
+	// That is also the recovery path for a deployment whose file was deleted.
+	if err := config.RequireFile(); err != nil {
+		return "", 0, err
+	}
 	raw := config.Value(config.NATSURL)
 	u, err := url.Parse(raw)
 	if err != nil {
