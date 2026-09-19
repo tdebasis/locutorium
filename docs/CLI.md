@@ -489,6 +489,13 @@ The line has three values and not two.
 report that printed `no` for it would accuse a healthy seat on the strength of a broker it never
 reached.
 
+**Read the first word.** The value's first word is the answer. It is exactly one of `yes`, `no` and
+`unknown`, and nothing else in the line carries the state. The text in parentheses is explanation
+and may hold any words at all. In the `unknown` case it is the medium's own error text, and two
+real ones read `this deployment has no config file; run 'loc start' to write one` and `no provider
+configured (set 'provider = <name>' in …/config)`. A script that searched the whole line for `no`
+would call either of those an absent queue.
+
 Three of the four facts are held locally, and the medium cannot take them away. **A broker that
 cannot answer costs this report the `attending` line alone**: the other three print and the verb
 still exits **0**. That is what lets it answer at all when the broker is the thing that is wrong.
@@ -503,6 +510,9 @@ unreachable when it asks and not before.
 
 The ask waits as long as opening the provider waits, and no longer. Against a dead broker the
 shared provider can take about 13 seconds to give up. This verb adds no clock of its own.
+
+**The MCP `status` tool runs this same function**, so an agent that calls it with an endpoint also
+asks the broker, and also waits that long when the broker is dead.
 
 ## unread
 

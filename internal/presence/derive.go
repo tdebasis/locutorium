@@ -55,9 +55,19 @@ func Derive(endpoint string, reg *Registration, att Attendance, act *Activity, n
 
 // attendingLine derives the reachable fact from the medium's answer.
 //
-// Each branch avoids the words the other branches use, for the reason
-// activityLine gives below. A reader, or a check, that reads this report for
-// `yes` must not find it in a line that means the opposite.
+// THE FIRST WORD OF THE VALUE CARRIES THE ANSWER, AND NOTHING ELSE IN THE LINE
+// DOES. It is exactly one of `yes`, `no` and `unknown`. What follows it in
+// parentheses is explanation. That text may hold any words at all, a state
+// word among them, and a reader must not take the answer out of it.
+//
+// The parenthesis is not this function's to control. The unknown branch prints
+// the medium's own error text, and two real ones say "this deployment has no
+// config file" and "no provider configured". A check that read the whole line
+// for `no` would report those as an absent queue, which is the opposite of
+// what they mean. Read the first word.
+//
+// activityLine below keeps a different rule, and keeps it because every word
+// in every one of its lines is written here.
 func attendingLine(att Attendance) string {
 	switch {
 	case !att.asked:

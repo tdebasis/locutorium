@@ -9,6 +9,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	// The attending line embeds the medium's own error text, so the cases for
+	// it take that text from the packages that raise it.
+	"github.com/tdebasis/locutorium/internal/config"
+	"github.com/tdebasis/locutorium/internal/provider"
 )
 
 // ------------------------------------------------------------------- names
@@ -573,60 +578,92 @@ func TestDerivation(t *testing.T) {
 // printed "no" for a question it could not put would repeat that failure in
 // the other direction: it would accuse a healthy seat on the strength of a
 // broker it never reached.
+//
+// THE CONTRACT IS THE FIRST WORD OF THE VALUE. The parenthesis after it is
+// explanation and may hold any words, because in the unknown state it holds
+// the medium's own error text. Two real ones say "this deployment has no
+// config file" and "no provider configured", and the last two cases below feed
+// exactly those in. A check written against the whole line would read them as
+// an absent queue. This one reads the first word.
 func TestTheAttendingFact(t *testing.T) {
 	now := time.Date(2026, 1, 14, 10, 0, 0, 0, time.UTC)
 	window := 10 * time.Minute
 	live := reg("workshop.scribe", os.Getpid(), StartedAt(os.Getpid()))
 
+	// Taken from the packages that raise them, not retyped, so these cases
+	// follow the text if it changes. Both are reachable from status: the
+	// provider defaults to nats, which refuses without a config file, and a
+	// home naming no provider at all raises the other.
+	noDeployment := config.ErrNoDeployment.Error()
+	_, err := provider.Open("")
+	if err == nil {
+		t.Fatal("opening the empty provider name did not fail; this case has no error text to plant")
+	}
+	noProvider := err.Error()
+
 	cases := []struct {
-		name string
-		att  Attendance
-		want string
+		name      string
+		att       Attendance
+		wantFirst string
+		wantLine  string
 	}{
 		{
-			name: "the queue is there",
-			att:  Asked(true),
-			want: "  attending:  yes (queue exists)\n",
+			name:      "the queue is there",
+			att:       Asked(true),
+			wantFirst: "yes",
+			wantLine:  "  attending:  yes (queue exists)\n",
 		},
 		{
-			name: "the queue is gone",
-			att:  Asked(false),
-			want: "  attending:  no (no queue: a send to this endpoint is refused)\n",
+			name:      "the queue is gone",
+			att:       Asked(false),
+			wantFirst: "no",
+			wantLine:  "  attending:  no (no queue: a send to this endpoint is refused)\n",
 		},
 		{
-			name: "the medium carries no presence",
-			att:  NotAsked("provider 'file' does not support presence"),
-			want: "  attending:  unknown (could not ask: provider 'file' does not support presence)\n",
+			name:      "the medium carries no presence",
+			att:       NotAsked("provider 'file' does not support presence"),
+			wantFirst: "unknown",
+			wantLine:  "  attending:  unknown (could not ask: provider 'file' does not support presence)\n",
 		},
 		{
-			name: "the broker refused to answer",
-			att:  NotAsked("connect: connection refused"),
-			want: "  attending:  unknown (could not ask: connect: connection refused)\n",
+			name:      "the broker refused to answer",
+			att:       NotAsked("connect: connection refused"),
+			wantFirst: "unknown",
+			wantLine:  "  attending:  unknown (could not ask: connect: connection refused)\n",
 		},
 		{
-			name: "nobody asked",
-			att:  Attendance{},
-			want: "  attending:  unknown (could not ask: the question was never put)\n",
+			name:      "nobody asked",
+			att:       Attendance{},
+			wantFirst: "unknown",
+			wantLine:  "  attending:  unknown (could not ask: the question was never put)\n",
+		},
+		{
+			// The real text carries the word `no` inside it. The answer is
+			// still unknown, and only the first word says so.
+			name:      "this home holds no config file",
+			att:       NotAsked(noDeployment),
+			wantFirst: "unknown",
+			wantLine:  "  attending:  unknown (could not ask: " + noDeployment + ")\n",
+		},
+		{
+			// This one BEGINS with the word `no`, one word inside the
+			// parenthesis. Nothing about it means the queue is absent.
+			name:      "this home names no provider",
+			att:       NotAsked(noProvider),
+			wantFirst: "unknown",
+			wantLine:  "  attending:  unknown (could not ask: " + noProvider + ")\n",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := Derive("workshop.scribe", live, tc.att, nil, now, window)
-			if !strings.Contains(got, tc.want) {
-				t.Errorf("the report does not carry %q:\n%s", tc.want, got)
+			if !strings.Contains(got, tc.wantLine) {
+				t.Errorf("the report does not carry %q:\n%s", tc.wantLine, got)
 			}
-			// The three states must not be readable as one another. A `no`
-			// that carries the word `yes`, or an `unknown` that carries
-			// either, defeats every reader that looks for one word — which is
-			// how the line will be read, by a person scanning it and by a
-			// script grepping it.
-			line := attendingOf(t, got)
-			if strings.HasPrefix(line, "no ") && strings.Contains(line, "yes") {
-				t.Errorf("the absent-queue line carries the attending word: %q", line)
-			}
-			if strings.HasPrefix(line, "unknown ") &&
-				(strings.Contains(line, "yes") || strings.Contains(line, " no ")) {
-				t.Errorf("the could-not-ask line carries a state word it does not mean: %q", line)
+			// THE ASSERTION THE CONTRACT IS MADE OF. One word, exactly, and
+			// it is the whole of the answer.
+			if first := firstWordOfAttending(t, got); first != tc.wantFirst {
+				t.Errorf("the attending answer is %q, want %q\n%s", first, tc.wantFirst, got)
 			}
 			// The four facts are one report. The attending fact is asked of
 			// the medium, and a medium that cannot answer must not cost the
@@ -640,17 +677,33 @@ func TestTheAttendingFact(t *testing.T) {
 	}
 }
 
-// The attending line, without its label and its indent, so a check can read
-// the value the way a person reads it.
-func attendingOf(t *testing.T, report string) string {
+// firstWordOfAttending reads the attending answer the way the contract says to
+// read it: the first word of the value, and nothing after it.
+func firstWordOfAttending(t *testing.T, report string) string {
 	t.Helper()
 	for _, l := range strings.Split(report, "\n") {
-		if strings.HasPrefix(l, "  attending:") {
-			return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l), "attending:"))
+		if !strings.HasPrefix(l, "  attending:") {
+			continue
 		}
+		value := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l), "attending:"))
+		return strings.Fields(value + " ")[0]
 	}
 	t.Fatalf("the report carries no attending line:\n%s", report)
 	return ""
+}
+
+// A value with no word at all is a report of nothing, and the reader above
+// must not index into an empty slice to discover it.
+func TestTheAttendingAnswerIsAlwaysOneOfThree(t *testing.T) {
+	for _, att := range []Attendance{Asked(true), Asked(false), Attendance{}, NotAsked("x")} {
+		got := Derive("workshop.scribe", nil, att, nil,
+			time.Date(2026, 1, 14, 10, 0, 0, 0, time.UTC), 10*time.Minute)
+		switch first := firstWordOfAttending(t, got); first {
+		case "yes", "no", "unknown":
+		default:
+			t.Errorf("the attending answer is %q, which is not one of the three states", first)
+		}
+	}
 }
 
 // The attending line sits SECOND, directly under registered. The two answer
