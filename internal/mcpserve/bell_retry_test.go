@@ -384,3 +384,120 @@ func TestBell_StopCancelsTheRetry(t *testing.T) {
 		t.Errorf("the notifier saw %v after stop; the seat was already given up", got)
 	}
 }
+
+// A SUPPRESSED FIRST RING IS MADE LATER. Before this, fire's errSuppressed
+// case did nothing: a first ring that met a tripped breaker never scheduled a
+// retry, and the mail waited with no bell until the next arrival happened to
+// come (#151).
+//
+// PLANT: in fire, make the errSuppressed case do nothing again.
+func TestBell_ASuppressedRingIsMadeLater(t *testing.T) {
+	dir := home(t, "provider = none\n")
+	now := bellRecordClock
+	f := &fake{unread: 1}
+	b, sch, _ := retryBell(t, f, func() time.Time { return now })
+	b.perMin = 1
+
+	b.arrived("")
+	b.fire()
+	if got := f.bells(); len(got) != 1 {
+		t.Fatalf("the first ring was %v; want one bell", got)
+	}
+
+	b.arrived("")
+	b.fire()
+	if got := f.bells(); len(got) != 1 {
+		t.Fatalf("the suppressed ring reached the pane: %v", got)
+	}
+	if got := sch.delays(); len(got) != 1 || got[0] != 15*time.Second {
+		t.Fatalf("a suppressed ring scheduled %v; want one retry at 15s", got)
+	}
+
+	// Past the calendar minute the breaker tripped in, so the cap has room
+	// again.
+	now = now.Add(61 * time.Second)
+	f.unread = 1
+	sch.run(t, 0)
+
+	got := f.bells()
+	if len(got) != 2 {
+		t.Fatalf("the seat was rung %d times; a suppressed ring must be made later", len(got))
+	}
+	if got[1] != "🔔 1 new → read" {
+		t.Errorf("the second bell said %q; the queue holds one", got[1])
+	}
+	if log := delivery(t, dir); strings.Contains(log, "rang after") {
+		t.Errorf("a suppression is not a refusal, so no 'rang after' line belongs here: %q", log)
+	}
+}
+
+// A RETRY THAT MEETS A STILL-TRIPPED BREAKER WAITS AGAIN AND DOES NOT RING.
+// The breaker un-trips on the hour, and a retry run before then finds the
+// same cap still spent.
+//
+// No existing case covers this. TestBell_TheBreakerCapsWakesAndTripsOnce
+// (mcpserve_test.go) checks the bell count and the one-line trip warning, not
+// what the retry timer does; nothing else in this package drives retry() into
+// errSuppressed.
+//
+// PLANT: in retry, make the errSuppressed case do nothing.
+func TestBell_ARetryUnderATrippedBreakerWaitsAndDoesNotRing(t *testing.T) {
+	now := bellRecordClock
+	f := &fake{unread: 1}
+	b, sch, _ := retryBell(t, f, func() time.Time { return now })
+	b.perMin = 1
+
+	b.arrived("")
+	b.fire()
+	b.arrived("")
+	b.fire()
+	if got := f.bells(); len(got) != 1 {
+		t.Fatalf("the suppressed ring reached the pane: %v", got)
+	}
+
+	// The clock does not move: the retry lands in the same calendar minute
+	// the breaker tripped in.
+	sch.run(t, 0)
+
+	if got := f.bells(); len(got) != 1 {
+		t.Errorf("a retry under a still-tripped breaker rang: %v", got)
+	}
+	if !retryArmed(b) {
+		t.Fatal("no retry is waiting; a still-tripped breaker must be asked again")
+	}
+	want := []time.Duration{15 * time.Second, 30 * time.Second}
+	if got := sch.delays(); len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("the scheduled waits were %v; want %v", got, want)
+	}
+}
+
+// STOP CANCELS A RETRY THAT A SUPPRESSION SCHEDULED, exactly as it cancels one
+// a busy refusal scheduled. The server is departing, the seat is given up,
+// and a timer that still fires must ring nothing. ring already returns
+// errSuppressed once stopped is set, and scheduleRetry already refuses to arm
+// a timer once stopped is set, so this confirms the existing stop path
+// already covers the suppressed case rather than planting a new defect.
+func TestBell_StopCancelsARetryScheduledForASuppression(t *testing.T) {
+	now := bellRecordClock
+	f := &fake{unread: 1}
+	b, sch, _ := retryBell(t, f, func() time.Time { return now })
+	b.perMin = 1
+
+	b.arrived("")
+	b.fire()
+	b.arrived("")
+	b.fire()
+	if !retryArmed(b) {
+		t.Fatal("a suppressed ring scheduled no retry, so this case would pass on an absent one")
+	}
+
+	b.stop()
+	if retryArmed(b) {
+		t.Error("stop left a retry waiting")
+	}
+
+	sch.run(t, 0)
+	if got := f.bells(); len(got) != 1 {
+		t.Errorf("the notifier saw %v after stop; the seat was already given up", got)
+	}
+}
