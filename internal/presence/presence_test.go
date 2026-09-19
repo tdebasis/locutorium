@@ -686,7 +686,11 @@ func firstWordOfAttending(t *testing.T, report string) string {
 			continue
 		}
 		value := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l), "attending:"))
-		return strings.Fields(value + " ")[0]
+		fields := strings.Fields(value)
+		if len(fields) == 0 {
+			t.Fatalf("the attending line carries no word:\n%s", report)
+		}
+		return fields[0]
 	}
 	t.Fatalf("the report carries no attending line:\n%s", report)
 	return ""

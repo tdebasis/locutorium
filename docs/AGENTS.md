@@ -20,7 +20,7 @@ sender. A refusal is the correct outcome, and you should treat it as one, not wo
 | `loc mcp` ‡ | — | serves this seat to the agent runtime that launched it, over stdio: it registers you with that runtime's pid, rings your bell when mail lands, and hands the mail over through a `read` tool. |
 | `loc status` | `loc_status` | unread counts per endpoint. |
 | `loc topics` | `loc_topics` | which topics are active right now. |
-| `loc registry` | `loc_registry` | asks an instance's host process over the bus. Each seat runs its own server, so no host process answers and the verb fails. Use `loc status` instead. |
+| `loc registry` | — | asks an instance's host process over the bus. Each seat runs its own server, so no host process answers and the verb fails. Use `loc status` instead. |
 | `loc watch` | `loc_watch` | every envelope as it passes, read-only. |
 | `loc version` | — | the version. |
 
