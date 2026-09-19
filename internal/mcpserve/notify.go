@@ -58,6 +58,28 @@ func ValidListenerType(t string) error {
 		t, strings.Join(ListenerTypes, ", "))
 }
 
+// ErrBusy marks a refusal that a LATER RING CAN REPAIR. The pane was in copy
+// mode, or it was not at an empty prompt. Both states say the seat is busy
+// right now, and both end on their own, so the bell asks again rather than
+// leaving the mail with nothing to announce it. A message waited 3m57s that
+// way.
+//
+// NOTHING ELSE WRAPS IT. A missing pane address, a tmux that cannot be read
+// and a courier that exited non-zero are all broken rather than busy, and
+// asking again repairs none of them.
+var ErrBusy = errors.New("the seat is busy")
+
+// busyRefusal carries ErrBusy under a refusal WHOSE TEXT DOES NOT CHANGE. The
+// reason reaches the day's record and `loc transcript` prints it, so the
+// marker rides on the type rather than on another word in the string.
+type busyRefusal struct{ err error }
+
+func (b busyRefusal) Error() string { return b.err.Error() }
+
+func (b busyRefusal) Unwrap() error { return b.err }
+
+func (busyRefusal) Is(target error) bool { return target == ErrBusy }
+
 // courierWindow is the rate limit under the claude notifier: at most one
 // courier spawn per seat per this long (R35c). A courier is a whole Claude
 // session, so a queue that fills quickly would otherwise spawn one session per
@@ -122,6 +144,9 @@ type tmuxNotifier struct{ log func(string) }
 //
 // THE 30-SECOND THROTTLE BELOW IS THE COURIER'S ALONE. This path is
 // unthrottled, by that same ruling.
+//
+// THE TWO GUARD REFUSALS ARE MARKED ErrBusy and the other three refusals are
+// not, so the bell can tell a seat that is busy from a bell that is broken.
 func (n *tmuxNotifier) Ring(endpoint, address, bell, _ string) error {
 	if address == "" {
 		return n.refuse(endpoint, "no pane address")
@@ -131,14 +156,14 @@ func (n *tmuxNotifier) Ring(endpoint, address, bell, _ string) error {
 		return n.refuse(endpoint, fmt.Sprintf("cannot read pane %s: %v", address, err))
 	}
 	if strings.TrimSpace(mode) != "0" {
-		return n.refuse(endpoint, "pane_in_mode")
+		return busyRefusal{n.refuse(endpoint, "pane_in_mode")}
 	}
 	pane, err := output("tmux", "capture-pane", "-t", address, "-p")
 	if err != nil {
 		return n.refuse(endpoint, fmt.Sprintf("cannot capture pane %s: %v", address, err))
 	}
 	if !isPrompt(pane) {
-		return n.refuse(endpoint, "not a prompt")
+		return busyRefusal{n.refuse(endpoint, "not a prompt")}
 	}
 	if err := exec.Command("tmux", "send-keys", "-t", address, "-l", "--", bell).Run(); err != nil {
 		return n.fail(endpoint, fmt.Sprintf("send-keys: %v", err))

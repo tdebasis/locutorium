@@ -1,6 +1,7 @@
 package mcpserve
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -105,6 +106,50 @@ func TestNotify_TmuxRefusesAPaneThatIsNotAPrompt(t *testing.T) {
 	assertNothingTyped(t, typed)
 	if want := "nudge workshop.scribe refused: not a prompt"; r.joined() != want {
 		t.Errorf("delivery log said %q; want %q", r.joined(), want)
+	}
+}
+
+// ONLY A TRANSIENT REFUSAL IS BUSY. The bell asks a busy pane again and never
+// asks a broken one, so the two must be told apart at the one place that knows
+// which is which. The refusal TEXT does not change with the marker: the day's
+// record carries that text and `loc transcript` prints it.
+//
+// PLANT: in Ring, replace `busyRefusal{n.refuse(endpoint, "pane_in_mode")}`
+// with `n.refuse(endpoint, "pane_in_mode")`.
+func TestNotify_OnlyATransientRefusalIsBusy(t *testing.T) {
+	// NO PANE ADDRESS NEEDS NO TMUX. A seat with no address is broken, and
+	// asking it again repairs nothing.
+	r := &recorder{}
+	n := &tmuxNotifier{log: r.log}
+	err := n.Ring("workshop.scribe", "", "🔔 1 new → read", "")
+	if err == nil {
+		t.Fatal("a seat with no pane address took the bell")
+	}
+	if errors.Is(err, ErrBusy) {
+		t.Errorf("no pane address reads as busy: %v", err)
+	}
+
+	// COPY MODE IS BUSY. A person is reading the pane right now.
+	pane, _ := scratchPane(t, true)
+	if err := exec.Command("tmux", "copy-mode", "-t", pane).Run(); err != nil {
+		t.Skipf("cannot put the scratch pane in copy mode: %v", err)
+	}
+	err = n.Ring("workshop.scribe", pane, "🔔 1 new → read", "")
+	if !errors.Is(err, ErrBusy) {
+		t.Errorf("a pane in copy mode gave %v; it is busy and the bell asks again", err)
+	}
+	if err.Error() != "refused: pane_in_mode" {
+		t.Errorf("the refusal reads %q; the day's record carries this text", err.Error())
+	}
+
+	// A PANE THAT IS NOT AT A PROMPT IS BUSY TOO: the seat is mid-turn.
+	other, _ := scratchPane(t, false)
+	err = n.Ring("workshop.scribe", other, "🔔 1 new → read", "")
+	if !errors.Is(err, ErrBusy) {
+		t.Errorf("a pane that is not a prompt gave %v; it is busy and the bell asks again", err)
+	}
+	if err.Error() != "refused: not a prompt" {
+		t.Errorf("the refusal reads %q; the day's record carries this text", err.Error())
 	}
 }
 

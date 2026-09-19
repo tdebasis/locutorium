@@ -20,6 +20,7 @@ never means a particular deployment.
 | **bell** | one bell line; the addressee's own server rings it when mail lands in the queue. A topic publish rings nobody. | the bell; advisory, never load-bearing |
 | **courier** | the `claude` notifier: it starts one Claude session to carry the bell onto a seat's surface | the one who brings the note in |
 | **breaker** | `wake_breaker_per_minute` / `_per_hour`: caps wakes; suppression loses nothing | not knocking sixty times |
+| **retry** | `wake_retry_seconds`: a bell a busy pane refused rings again, each wait twice the last, up to 60s | knocking again once the room is quiet |
 | **registry** | `loc registry`: it asks an instance's host process over the bus. Each seat now runs its own server, so no host process answers and the verb fails. Use `loc status`. | the attendance book |
 | **watch** | `loc watch`, which follows the event stream and takes nothing | the silent observer |
 | **identity** | `LOC_IDENTITY`, and nothing else; a refusal, never a guess | knowing who is speaking |

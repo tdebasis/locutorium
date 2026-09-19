@@ -79,10 +79,11 @@ durable; listeners reconnect.
 | `wake_window_seconds` | `5` | how long the seat's server coalesces arrivals before it rings |
 | `wake_breaker_per_minute` | `6` | max wakes per endpoint per minute; excess is suppressed, loudly, and nothing is lost |
 | `wake_breaker_per_hour` | `60` | the hourly cap |
+| `wake_retry_seconds` | `15` | a pane that was busy is asked again after this long. Each wait is twice the one before it, up to 60 seconds |
 
 Change a key by editing the line; revert it by deleting the line.
 
-`loc start` writes every key above except the three `wake_` keys. Those three are read when a line
+`loc start` writes every key above except the four `wake_` keys. Those four are read when a line
 holds them and carry the default above when no line does. Add the line yourself to change one.
 
 A default is not a deployment. A home with no `config` file at all is refused by every verb that
@@ -110,6 +111,18 @@ it:
 
 There is no fallback from one notifier to another. A bell that could not ring is written to
 `run/<endpoint>.delivery.log`, and the message waits in the queue.
+
+A `tmux` pane in copy mode refuses the bell, and so does a pane that is not at an empty prompt. The
+seat is busy, and both states end on their own. The server waits `wake_retry_seconds` and asks the
+pane again. Each wait is twice the one before it, up to 60 seconds. Every attempt asks the broker how
+much mail is waiting, so the bell carries the count the queue holds. The retry stops when the bell
+rings or when the queue reads empty.
+
+A broken bell is not retried. There is no pane address, or tmux cannot be read, or the courier exited
+non-zero. Asking again repairs none of these.
+
+A busy refusal typed nothing into the pane, so it does not count against `wake_breaker_per_minute` or
+`wake_breaker_per_hour`. A ring that typed does count, and so does a broken bell.
 
 Identity comes from `LOC_IDENTITY` and from nothing else. A verb with no identity refuses
 (`loc_identity`). A refusal is correct; guessing is not.
@@ -145,7 +158,8 @@ A `sent` line with no `read` line under the same `uid` is a message nobody has c
 
 `bell-failed` says the seat's notifier could not ring. The mail is still in the queue, and the seat
 finds it on its next `read`. The line names no message: the server is told that mail arrived and
-never which message arrived.
+never which message arrived. A run of busy refusals writes ONE line, for the first refusal. The
+attempts after it are in `run/<endpoint>.delivery.log`, one `nudge <endpoint> refused` line each.
 
 `queue-deleted` says a queue is gone, so mail stops reaching that seat. The reason is one of `left`
 (the agent unsubscribed), `displaced` (another agent took the seat with `--force`), `expired` (the
