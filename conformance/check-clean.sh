@@ -19,8 +19,15 @@
 #   $LOC_HOME/forbidden  the default; $HOME/.locutorium/forbidden if LOC_HOME
 #                        is unset
 #
-# With no list at all the check still runs, against a built-in generic list that
-# holds only universally-wrong content — a maintainer's absolute home path — and
+# The two lists add up. A built-in generic list holds only universally-wrong
+# content — a maintainer's absolute home path — and it applies on every run,
+# because a home path is wrong for everybody and no deployment list is obliged to
+# repeat it. When a deployment list is readable, its patterns are checked as
+# well. If the deployment list replaced the generic one, the same tree could pass
+# on a machine whose list happens to omit one home-path form and fail on a
+# machine with no list at all (#137).
+#
+# With no list at all the check still runs, against the generic list alone, and
 # says on stderr that it is doing so. A missing list is a weaker check, never a
 # silent pass and never a hard failure: the suite and the release path both gate
 # on the exit status.
@@ -35,21 +42,26 @@ FORBIDDEN_FILE="${LOC_FORBIDDEN_FILE:-${LOC_HOME:-$HOME/.locutorium}/forbidden}"
 # matches exactly what the plain spelling would.
 GENERIC='/[Uu]sers/[a-z]|/home/[a-z]'
 
+pattern="$GENERIC"
 if [[ -r "$FORBIDDEN_FILE" ]]; then
-  pattern="$(sed -e 's/#.*//' -e 's/[[:space:]]*$//' "$FORBIDDEN_FILE" \
-    | grep -v '^[[:space:]]*$' | paste -sd '|' -)"
+  deployment="$(sed -e 's/#.*//' -e 's/[[:space:]]*$//' "$FORBIDDEN_FILE" \
+    | grep -v '^[[:space:]]*$' | paste -sd '|' - || true)"
   n="$(sed -e 's/#.*//' -e 's/[[:space:]]*$//' "$FORBIDDEN_FILE" \
-    | grep -cv '^[[:space:]]*$')"
-  source_note="deployment list: $FORBIDDEN_FILE, $n patterns"
+    | grep -cv '^[[:space:]]*$' || true)"
+  # An installed list that holds no patterns is still refused. The generic list
+  # would make the run look healthy, and the maintainer believes the deployment
+  # words are being checked when none are. The `|| true` above lets the run reach
+  # this line: under pipefail a grep that selects nothing ends the script with no
+  # message.
+  if [[ -z "$deployment" ]]; then
+    echo "check-clean: the list at $FORBIDDEN_FILE is empty — nothing to check against" >&2
+    exit 1
+  fi
+  pattern="$pattern|$deployment"
+  source_note="generic list + deployment list: $FORBIDDEN_FILE, $n patterns"
 else
-  pattern="$GENERIC"
   source_note="generic list only"
   echo "check-clean: no deployment list at $FORBIDDEN_FILE; generic list only" >&2
-fi
-
-if [[ -z "$pattern" ]]; then
-  echo "check-clean: the list at $FORBIDDEN_FILE is empty — nothing to check against" >&2
-  exit 1
 fi
 
 # .idea and .vscode are excluded BY NAME. This is not honouring .gitignore, which
