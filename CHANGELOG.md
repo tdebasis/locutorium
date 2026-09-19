@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.8](https://github.com/tdebasis/locutorium/compare/v0.0.7...v0.0.8) (2026-09-19)
+
+
+### Bug Fixes
+
+* **conformance:** apply the generic list together with the deployment list ([#157](https://github.com/tdebasis/locutorium/issues/157)) ([1ca330c](https://github.com/tdebasis/locutorium/commit/1ca330ca65b5bff8d114c009065f5e37bef22a31))
+
 ## [0.0.7](https://github.com/tdebasis/locutorium/compare/v0.0.6...v0.0.7) (2026-09-19)
 
 
