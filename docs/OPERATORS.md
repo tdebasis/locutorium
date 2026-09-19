@@ -197,8 +197,9 @@ never which message arrived. A run of busy refusals writes ONE line, for the fir
 attempts after it are in `run/<endpoint>.delivery.log`, one `nudge <endpoint> refused` line each.
 
 `queue-deleted` says a queue is gone, so mail stops reaching that seat. The reason is one of `left`
-(the agent unsubscribed), `displaced` (another agent took the seat with `--force`), `expired` (the
-sweep found the registered process gone) or `orphan` (the sweep found a queue no row claims, in an instance its ledger holds).
+(the agent unsubscribed), `displaced` (another agent took the seat with `--force`) or `expired` (the
+sweep found the registered process gone). Older logs also hold `orphan`, from the sweep that used to
+delete a queue no row claimed; no version writes that reason now.
 
 The file holds message bodies in plain text. The writer creates the directory `0700` and the file
 `0600`, and it sets those modes only when it creates them.
@@ -259,4 +260,16 @@ A queue made before endpoints carried an instance name has a bare name, such as 
 The sweep cannot see such a queue, and it never removes one: the name does not say which
 deployment made it. `loc status` prints one line for each of them. Remove them with the broker's
 own command-line tool.
+
+**A queue with no row.** `loc status` and `loc sweep` both print `<endpoint>: queue with no row;
+nothing removes it; remove it with loc unsubscribe <endpoint>`. Mail sent to that endpoint is
+accepted and stored there for nobody. Nothing in Locutorium removes it, because an absent row does
+not say whether the agent left or the row was lost. You have two remedies, and they are opposites:
+
+- `loc unsubscribe <endpoint>` destroys the queue and the mail in it.
+- `loc subscribe <endpoint> …` takes the queue over, with the mail in it, for the agent you
+  subscribe.
+
+The usual cause is an `unsubscribe` interrupted between its two writes. Running it again finishes
+the job.
 

@@ -196,6 +196,9 @@ func TestSeatEventsCarryNoUID(t *testing.T) {
 	}{
 		{"bell-failed", func() { LogBellFailed("workshop.scribe", "pane is in copy mode", at) },
 			"bell-failed", "pane is in copy mode"},
+		// `orphan` is a reason NO BUILD WRITES any more (#141). The format
+		// still carries it, because the log holds records written before that
+		// change and the readers still have to parse them.
 		{"queue-deleted", func() { LogQueueDeleted("workshop.clerk", "orphan", at) },
 			"queue-deleted", "orphan"},
 	}

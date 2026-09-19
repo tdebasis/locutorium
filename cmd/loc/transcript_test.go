@@ -104,6 +104,10 @@ func TestTranscript_EveryOutcomeWord(t *testing.T) {
 			"pending, bell failed 14:12:30Z: exit status 3",
 		},
 		{
+			// `orphan` is a HISTORICAL reason: no build has written one
+			// since #141. The reader must still render a record that
+			// carries it, because logs written before that change are
+			// still on disk.
 			"lost to a deleted queue",
 			[]string{seatLine(to, "queue-deleted", "2026-09-16T14:20:00Z", "orphan")},
 			"lost: queue deleted 14:20:00Z (orphan)",

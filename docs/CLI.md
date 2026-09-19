@@ -353,6 +353,12 @@ what makes an unconditional unsubscribe-then-subscribe restart safe — a crashe
 cleared, a working agent is never displaced by accident. `--force` is the deliberate displacement,
 and it is a separate word because it is a separate decision (PRESENCE.md §How an agent leaves).
 
+**This is also how a queue with no row is removed.** The sweep reports such a queue and never
+deletes it (§sweep), so removing one is a person's decision, made with this verb. `loc unsubscribe
+<endpoint>` on an endpoint that has a queue and no row destroys the queue and the mail in it. If
+that mail should be kept instead, subscribe an agent to the endpoint: the subscribe ADOPTS the
+standing queue and everything waiting in it.
+
 ## sweep
 
 ```
@@ -360,37 +366,49 @@ loc sweep
 ```
 
 Reconciles the three records a seat has: its **ledger row**, its **queue** on the medium, and its
-**process**. It reads every row and lists every queue, then makes three passes in this order. The
-passes act only inside the instances the ledger holds a row for.
+**process**. It reads every row and lists every queue, then makes three passes in this order, in
+every instance.
 
-| the disagreement | the repair |
+| the disagreement | what the sweep does |
 |---|---|
 | a row whose process is gone | delete the queue, the row and the seat's server pidfile |
-| a queue no row claims, in an instance the ledger holds a row for | delete the queue |
+| a queue no row claims | print one line; **remove nothing** |
 | a live row with no queue | create the queue; the row is not rewritten |
 
+**It deletes a queue only together with its own dead row.** That is positive evidence: the ledger
+holds a row, the row names a process, and the process is gone. An ABSENT row is not evidence. It
+cannot tell an agent that left without finishing from a row this deployment lost, and the two want
+opposite treatment, so the sweep does neither and says what it found. A ledger with no rows
+therefore deletes nothing at all, in any instance.
+
+**A queue with no row stays until a person removes it.** The line names the remedy:
+
+```
+atelier.stray: queue with no row; nothing removes it; remove it with loc unsubscribe atelier.stray
+```
+
+A later `subscribe` to that endpoint takes the queue over WITH the mail in it, which is what "held
+until read" means (§subscribe, §unsubscribe).
+
 **It takes no argument.** A process id means something only on the machine holding it, so a sweep is
-machine-wide by nature. There is still no instance argument, because the ledger's own rows say which
-instances this sweep may touch. A queue in any other instance is not a finding, so it is never listed
-and never deleted, and a ledger with no rows reaps nothing.
+machine-wide by nature.
 
-**The boundary has a cost.** When the last seat of an instance leaves uncleanly, no row is left to
-hold that instance, so its queue is stranded. `loc unsubscribe <endpoint>` removes it.
-
-**A row it cannot read stops the second pass entirely,** and the sweep exits non-zero after naming
-the row. That row may be the one that claims a queue the pass would destroy, and there is no way to
-ask which. The other two passes still run.
+**A row it cannot read is printed and the sweep carries on.** The queue beside it is printed too, as
+a queue with no row, because an unreadable row claims nothing. Both lines are true, and neither one
+destroys anything, so there is no pass to stop and no reason to fail the run.
 
 **It publishes nothing.** A departure event says an agent left; a reap says a record was wrong, and
-the record may have gone stale hours earlier. It prints one line per change and returns the number
-of changes it made. With nothing to repair it prints nothing and exits **0**, which is what makes it
-safe to run on a timer.
+the record may have gone stale hours earlier. It prints one line per change, plus one per queue with
+no row, and returns the number of CHANGES it made — a printed queue is not a change. With nothing to
+repair and nothing to report it prints nothing and exits **0**, which is what makes it safe to run
+on a timer.
 
 The order of the passes is load-bearing in `subscribe` and `unsubscribe` too. Each is two writes,
 and a sweep can land between them, so `subscribe` writes the row and then creates the queue, and
-`unsubscribe` removes the row and then deletes the queue. The gap is then always the state a sweep
-resolves in the caller's favour: a subscribe interrupted mid-way is repaired, an unsubscribe
-interrupted mid-way is finished.
+`unsubscribe` removes the row and then deletes the queue. `subscribe`'s gap is a row with no queue,
+which the next beat fills. `unsubscribe`'s gap is a queue with no row, which no beat removes and no
+beat rebuilds: an unsubscribe interrupted there leaves the queue standing, and `loc unsubscribe
+<endpoint>` finishes it.
 
 ## emit
 
@@ -426,7 +444,9 @@ First one line for the daemon: `daemon: not running`, or `daemon: running, pid <
 yet`.
 
 Then one line per seat, from the same check the sweep acts on — so `status` is a dry run of the next
-beat and the two can never disagree about what is wrong:
+beat and the two can never disagree about what is wrong. **Every mismatch between the ledger and the
+queues is listed, in every instance, and each line says what the next beat will do about it,
+including when the answer is nothing:**
 
 ```
 workshop.scribe: row ok, queue ok
@@ -434,12 +454,15 @@ workshop.crier: row ok, queue ok, bell FAILED 2026-09-16T22:47:36Z: notifier exi
 workshop.clerk: queue missing, next beat repairs it
 atelier.scribe: pid dead, next beat reaps it
 workshop.legacy: row unreadable: <reason>
-atelier.stray: queue with no row, next beat removes it
+atelier.stray: queue with no row; nothing removes it; remove it with loc unsubscribe atelier.stray
 QUEUE_scribe: queue with an unqualified name; the sweep cannot see it; remove it with the broker's own tool
 ```
 
 **It performs none of those repairs.** Run it twice and the answer is the same, because a read that
 fixed what it reported would destroy the evidence the operator asked for.
+
+The `queue with no row` line is the one the next beat will NOT act on. The sweep prints the same
+sentence and leaves the queue where it is; the line names the verb that removes it.
 
 The row gives three facts. Each fact has its own mechanism. No fact follows from another.
 

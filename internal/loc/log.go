@@ -153,6 +153,11 @@ func LogBellFailed(seat, reason string, at time.Time) {
 // going away is how mail stops arriving for a seat, so the word matters: an
 // agent that left took its own queue, and an agent that was displaced or
 // reaped did not.
+//
+// NO BUILD WRITES `orphan` ANY MORE. The sweep stopped deleting a queue on the
+// absence of a row (#141), and that pass was its only writer. The word stays
+// in the format and the readers still parse it, because records written before
+// that change are still in the log and still mean what they said.
 func LogQueueDeleted(seat, reason string, at time.Time) {
 	logSeat(seat, "queue-deleted", reason, at)
 }

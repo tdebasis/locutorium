@@ -159,11 +159,13 @@ func TestStopRefusesAHomeWithNoConfigFileAndSignalsNothing(t *testing.T) {
 // what a restored backup or a second deployment's installer does. Every later
 // beat must still sweep the broker this daemon runs.
 //
-// PR #140 ALONE DOES NOT SAVE THIS. That rule limits the orphan pass to
-// instances the ledger holds a row for. The queue planted on the second broker
-// is in instance `house`, and the ledger holds a live `house` row for the
-// whole case, so the rule permits its deletion. Only the pinned address keeps
-// the sweep away from it.
+// NEITHER #140 NOR #141 SAVES THIS. #140's rule limited deletion to instances
+// the ledger holds a row for, and the planted queue is in instance `house`,
+// which the ledger holds for the whole case. #141 removed deletion on an
+// absent row altogether, so that queue is now safe from deletion on either
+// broker — and the daemon's writes still have to land on the right one. The
+// sweep REAPS a dead row's queue and CREATES a live row's missing queue, and
+// both of those act on whatever broker the provider reaches.
 //
 // The dead row is there so the sweep has work to do on its own broker, and the
 // live row's recreated queue is how this case knows the sweep ran at all. A
@@ -172,8 +174,8 @@ func TestStopRefusesAHomeWithNoConfigFileAndSignalsNothing(t *testing.T) {
 //
 // THE PLANT THAT TURNS THIS RED: make nats.brokerURL return
 // config.Value(config.NATSURL) unconditionally, so the pin is ignored. The
-// second broker's queue is then deleted as an orphan on the first beat after
-// the rewrite.
+// repair pass then makes the live row's queue on the second broker, and the
+// assertion below — that the queue is on THIS daemon's own broker — fails.
 func TestTheDaemonSweepsItsOwnBrokerAfterTheConfigIsRewritten(t *testing.T) {
 	home, port := scratchHouse(t)
 

@@ -60,7 +60,7 @@ func TestFindingsNamesEachDisagreement(t *testing.T) {
 	want := []string{
 		"dead pid workshop.gone",
 		"dead pid workshop.vanished",
-		"orphan queue workshop.stray",
+		"queue with no row workshop.stray",
 		"missing queue workshop.scribe",
 	}
 	if len(got) != len(want) {
@@ -73,13 +73,14 @@ func TestFindingsNamesEachDisagreement(t *testing.T) {
 	}
 }
 
-// THE ORDER IS THE REPAIR ORDER. Dead pids come before orphan queues, so the
-// queue a reap abandons is collected in the same run; orphan queues come
-// before missing queues, so a queue this run creates is never destroyed by it.
+// THE ORDER IS THE REPAIR ORDER. Dead pids come before queues with no row, so
+// the queue a reap destroys is not also reported as unclaimed in the same run;
+// queues with no row come before missing queues, so a queue this run creates is
+// never named as unclaimed by it.
 func TestFindingsOrdersThePassesForACallerActingInSequence(t *testing.T) {
 	rows := []*Registration{live(t, "workshop.scribe"), dead("workshop.gone")}
 	got := Findings(rows, []Unreadable{{Endpoint: "workshop.bad", Err: fmt.Errorf("boom")}}, []string{"workshop.stray"})
-	wantKinds := []FindingKind{DeadPID, OrphanQueue, MissingQueue, UnreadableRow}
+	wantKinds := []FindingKind{DeadPID, QueueNoRow, MissingQueue, UnreadableRow}
 	if len(got) != len(wantKinds) {
 		t.Fatalf("Findings = %v, want four findings", kinds(got))
 	}
@@ -91,73 +92,57 @@ func TestFindingsOrdersThePassesForACallerActingInSequence(t *testing.T) {
 }
 
 // An unreadable row does NOT count as a row, so the queue it may hold reports
-// as an orphan. That is what makes the caller's blanket skip necessary, and a
-// version that quietly counted it would hide the danger rather than remove it.
+// as a queue with no row, beside the unreadable row itself. Both facts are
+// true and the caller prints both. Neither one deletes anything, so counting
+// the unreadable row as a claim would only hide a queue from the operator.
 func TestFindingsDoesNotLetAnUnreadableRowClaimAQueue(t *testing.T) {
-	// `atelier.x` is the fire control: no row of any kind names that instance,
-	// so it must not be reported however the unreadable row is counted.
+	// `atelier.x` is in an instance no row of any kind names. It is reported
+	// too: the report holds nothing back (#141).
 	got := Findings(nil, []Unreadable{{Endpoint: "workshop.bad", Err: fmt.Errorf("boom")}}, []string{"workshop.bad", "atelier.x"})
-	var orphan, unread int
+	var noRow, unread int
 	for _, f := range got {
 		switch f.Kind {
-		case OrphanQueue:
-			orphan++
+		case QueueNoRow:
+			noRow++
 		case UnreadableRow:
 			unread++
 		}
 	}
-	if orphan != 1 || unread != 1 {
-		t.Errorf("Findings = %v, want one orphan and one unreadable row", kinds(got))
+	if noRow != 2 || unread != 1 {
+		t.Errorf("Findings = %v, want two queues with no row and one unreadable row", kinds(got))
 	}
 }
 
-// ------------------------------------------------------- the instance boundary
+// ------------------------------------------- a queue with no row is reported
 
-// An empty ledger reaps nothing. This is the shape of the failure the boundary
-// exists to stop: a process whose ledger held no rows reached a broker serving
-// another deployment, and its orphan pass destroyed every queue there.
-func TestFindingsOnAnEmptyLedgerReapsNothing(t *testing.T) {
+// AN EMPTY LEDGER REPORTS EVERY QUEUE AND THAT IS ALL. This is the shape of
+// the 2026-09-18 incident: a process whose ledger held no rows reached a
+// broker serving another deployment. It now has nothing to act on — every
+// finding here is a report, and the caller deletes a queue only beside a dead
+// row of its own, which an empty ledger cannot have.
+func TestFindingsOnAnEmptyLedgerReportsEveryQueueAndDeletesNothing(t *testing.T) {
 	queues := []string{
 		"atelier.clerk", "atelier.herald", "atelier.scribe",
 		"atelier.porter", "atelier.warden", "atelier.wright",
 	}
 	got := Findings(nil, nil, queues)
-	if len(got) != 0 {
-		t.Errorf("Findings = %v, want nothing", kinds(got))
+	if len(got) != len(queues) {
+		t.Fatalf("Findings = %v, want one finding per queue", kinds(got))
+	}
+	for _, f := range got {
+		if f.Kind != QueueNoRow {
+			t.Errorf("%s is reported as %v; an empty ledger can only report", f.Endpoint, f.Kind)
+		}
 	}
 }
 
-// A queue in an instance no row names is not a finding at all. It is never
-// reported, so the caller can never delete it.
-func TestFindingsIgnoresAQueueInAnInstanceTheLedgerDoesNotHold(t *testing.T) {
+// A queue in an instance no row names IS a finding. Nothing removes it, and
+// the operator cannot remove what the report does not name.
+func TestFindingsReportsAQueueInAnInstanceTheLedgerDoesNotHold(t *testing.T) {
 	rows := []*Registration{live(t, "workshop.scribe")}
 	queues := []string{"workshop.scribe", "atelier.clerk", "atelier.scribe"}
-	got := Findings(rows, nil, queues)
-	if len(got) != 0 {
-		t.Errorf("Findings = %v, want nothing", kinds(got))
-	}
-}
-
-// The boundary bounds the orphan pass; it does not disable it. An orphan
-// inside an instance the ledger holds is still reported.
-func TestFindingsStillReportsAnOrphanInAnInstanceTheLedgerHolds(t *testing.T) {
-	rows := []*Registration{live(t, "workshop.scribe")}
-	queues := []string{"workshop.scribe", "workshop.stray", "atelier.stray"}
 	got := kinds(Findings(rows, nil, queues))
-	want := []string{"orphan queue workshop.stray"}
-	if len(got) != len(want) || got[0] != want[0] {
-		t.Errorf("Findings = %v, want %v", got, want)
-	}
-}
-
-// A dead row holds its instance. The seat whose process died is exactly the
-// seat whose instance still needs cleaning up, so a ledger of dead rows must
-// not stop reaping.
-func TestFindingsADeadRowStillHoldsItsInstance(t *testing.T) {
-	rows := []*Registration{dead("atelier.scribe")}
-	queues := []string{"atelier.scribe", "atelier.stray"}
-	got := kinds(Findings(rows, nil, queues))
-	want := []string{"dead pid atelier.scribe", "orphan queue atelier.stray"}
+	want := []string{"queue with no row atelier.clerk", "queue with no row atelier.scribe"}
 	if len(got) != len(want) {
 		t.Fatalf("Findings = %v, want %v", got, want)
 	}
@@ -168,31 +153,65 @@ func TestFindingsADeadRowStillHoldsItsInstance(t *testing.T) {
 	}
 }
 
-// The instance comes from the ENDPOINT. A row file's contents are not checked
-// against its name, so the stored Instance field can say anything; the
-// endpoint is the one part the ledger's own naming guarantees.
-func TestFindingsReadsTheInstanceFromTheEndpoint(t *testing.T) {
+// Every instance is reported in one listing, in endpoint order, with no
+// instance treated differently from another.
+func TestFindingsReportsAQueueWithNoRowInEveryInstanceAtOnce(t *testing.T) {
+	rows := []*Registration{live(t, "workshop.scribe")}
+	queues := []string{"workshop.scribe", "workshop.stray", "atelier.stray"}
+	got := kinds(Findings(rows, nil, queues))
+	want := []string{"queue with no row atelier.stray", "queue with no row workshop.stray"}
+	if len(got) != len(want) {
+		t.Fatalf("Findings = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("finding %d = %q, want %q (whole: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+// A dead row is reported beside a queue with no row, and the two are different
+// findings about different endpoints. The caller deletes the first and prints
+// the second.
+func TestFindingsSeparatesADeadRowFromAQueueWithNoRow(t *testing.T) {
+	rows := []*Registration{dead("atelier.scribe")}
+	queues := []string{"atelier.scribe", "atelier.stray"}
+	got := kinds(Findings(rows, nil, queues))
+	want := []string{"dead pid atelier.scribe", "queue with no row atelier.stray"}
+	if len(got) != len(want) {
+		t.Fatalf("Findings = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("finding %d = %q, want %q (whole: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+// THE ROW'S STORED INSTANCE FIELD IS NOT READ. A row file's contents are not
+// checked against its name, so the field can say anything; an empty one
+// changes no finding.
+func TestFindingsIgnoresAnEmptyStoredInstance(t *testing.T) {
 	row := live(t, "workshop.scribe")
 	row.Instance = ""
 	got := kinds(Findings([]*Registration{row}, nil, []string{"workshop.scribe", "workshop.stray"}))
-	want := []string{"orphan queue workshop.stray"}
+	want := []string{"queue with no row workshop.stray"}
 	if len(got) != len(want) || got[0] != want[0] {
 		t.Errorf("Findings = %v, want %v", got, want)
 	}
 }
 
-// A stored instance field that names ANOTHER instance counts for nothing. The
-// case above uses an empty field, which a version that reads the field and
-// falls back to the endpoint would also pass. This one separates them: that
-// version would let one row claim a whole second instance, and every queue
-// there would become an orphan. It is the wrong-broker deletion again, reached
-// through a row file's contents instead of an empty ledger.
-func TestFindingsAStoredInstanceCannotClaimAnotherInstance(t *testing.T) {
+// A stored instance field that names ANOTHER instance counts for nothing
+// either — it cannot make a finding and it cannot SUPPRESS one. A version that
+// read the field and let a row claim a whole instance would hide every queue
+// there from the report, and the operator would never learn the queues exist.
+func TestFindingsAStoredInstanceCannotSuppressAFinding(t *testing.T) {
 	row := live(t, "workshop.scribe")
 	row.Instance = "atelier"
 	got := kinds(Findings([]*Registration{row}, nil, []string{"workshop.scribe", "atelier.clerk"}))
-	if len(got) != 0 {
-		t.Errorf("Findings = %v, want nothing: the row's endpoint is in workshop, so atelier is not this ledger's", got)
+	want := []string{"queue with no row atelier.clerk"}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Errorf("Findings = %v, want %v: no row claims atelier.clerk, whatever the field says", got, want)
 	}
 }
 

@@ -74,7 +74,7 @@ func New() (provider.Provider, error) { return &Provider{}, nil }
 // THE DAEMON MUST SWEEP THE BROKER IT RUNS. The sweep re-read nats_url on
 // every beat, so a config file rewritten under a running daemon moved the
 // sweep onto another deployment's broker, where this ledger claims nothing and
-// the orphan pass destroys live queues. The daemon hands its own server's
+// a reap acts on records it did not write. The daemon hands its own server's
 // address here once, at boot, and no later edit of the file can move it.
 //
 // THE PIN IS ON THE PROVIDER AND NOT IN A PACKAGE VARIABLE. runDaemon runs
