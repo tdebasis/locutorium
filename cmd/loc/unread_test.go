@@ -173,8 +173,9 @@ func TestUnreadRefusesABadArgumentBeforeItOpensAnything(t *testing.T) {
 // argument check needs.
 //
 // THE PLANT THAT TURNS THIS RED: select only on the result channel, dropping
-// the time.After case. The red is a timeout panic from `go test` rather than a
-// failed assertion, because the verb then waits on a count that never comes.
+// the time.After case. The verb then waits on a count that never comes, so the
+// case runs it through execWithin: a verb with no deadline fails here in five
+// seconds, and does not hold the whole suite until `go test` times out.
 func TestUnreadSaysUnknownWhenNoAnswerComesInTime(t *testing.T) {
 	// Closed in cleanup, so the stand-in returns and its goroutine ends with
 	// the case rather than outliving it.
@@ -190,7 +191,7 @@ func TestUnreadSaysUnknownWhenNoAnswerComesInTime(t *testing.T) {
 	unreadBound = 50 * time.Millisecond
 
 	start := time.Now()
-	code, out, errOut := exec("unread", e1)
+	code, out, errOut := execWithin(t, 5*time.Second, "unread", e1)
 	elapsed := time.Since(start)
 
 	assertUnknown(t, code, out, errOut)
