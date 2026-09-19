@@ -55,6 +55,9 @@ func recordLines(t *testing.T, dir string) []map[string]any {
 // seat and carrying the notifier's OWN reason. The reason is the notifier's
 // text and not a word this code chose, because "the pane is in copy mode" and
 // "there is no such pane" want different repairs.
+//
+// The line was `bell-failed` until #144. It is now the first try of a streak,
+// with the result `failed`.
 func TestBell_AFailedBellIsInTheDaysRecord(t *testing.T) {
 	dir := home(t, "provider = none\nwake_window_seconds = 1\n")
 	f := &fake{nudgeErr: fmt.Errorf("exit status 3")}
@@ -68,12 +71,15 @@ func TestBell_AFailedBellIsInTheDaysRecord(t *testing.T) {
 	f.ready(t)
 	f.ring()
 	if !waitFor(5*time.Second, func() bool { return len(recordLines(t, dir)) == 1 }) {
-		t.Fatalf("the day's record holds %v, want one bell-failed line", recordLines(t, dir))
+		t.Fatalf("the day's record holds %v, want one bell-try line", recordLines(t, dir))
 	}
 
 	got := recordLines(t, dir)[0]
-	if got["status"] != "bell-failed" {
-		t.Errorf("status = %v, want bell-failed", got["status"])
+	if got["status"] != "bell-try" {
+		t.Errorf("status = %v, want bell-try", got["status"])
+	}
+	if got["try"] != float64(1) || got["of"] != float64(3) || got["result"] != "failed" {
+		t.Errorf("line = %v; want try 1 of 3 with the result failed", got)
 	}
 	if got["seat"] != seat {
 		t.Errorf("seat = %v, want %q", got["seat"], seat)
@@ -93,10 +99,12 @@ func TestBell_AFailedBellIsInTheDaysRecord(t *testing.T) {
 	}
 }
 
-// A bell that RANG writes nothing here. Every wake would otherwise put a line
-// in the record for a thing that worked, and the record would stop being the
-// place a failure stands out.
-func TestBell_ARungBellIsNotInTheDaysRecord(t *testing.T) {
+// A bell that RANG IS in the day's record. This REVERSES what stood before
+// #144, when only failures were written: a delivered message showed `sent`
+// then `read` and nothing between, so after a failed bell nobody could say
+// from the record whether it was ever rung again (#144, gap 2). The cost is
+// one line per try, which the three-try bound keeps small.
+func TestBell_ARungBellIsInTheDaysRecord(t *testing.T) {
 	dir := home(t, "provider = none\nwake_window_seconds = 1\n")
 	f := &fake{}
 	d := f.deps()
@@ -109,7 +117,15 @@ func TestBell_ARungBellIsNotInTheDaysRecord(t *testing.T) {
 	if !waitFor(5*time.Second, func() bool { return len(f.bells()) == 1 }) {
 		t.Fatalf("the bell never rang, so this case would pass on an absent bell: %v", f.bells())
 	}
-	if lines := recordLines(t, dir); len(lines) != 0 {
-		t.Errorf("a bell that rang wrote %v to the day's record", lines)
+	if !waitFor(5*time.Second, func() bool { return len(recordLines(t, dir)) == 1 }) {
+		t.Fatalf("a bell that rang wrote %v to the day's record; want one line", recordLines(t, dir))
+	}
+	got := recordLines(t, dir)[0]
+	if got["status"] != "bell-try" || got["result"] != "rang" {
+		t.Errorf("line = %v; want a bell-try that rang", got)
+	}
+	// A TRY THAT RANG HAS NO REASON, so the line carries no such key.
+	if _, ok := got["reason"]; ok {
+		t.Errorf("line = %v; a ring that worked has no reason", got)
 	}
 }

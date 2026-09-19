@@ -28,6 +28,9 @@ func TestReadEventsReturnsBothFamiliesInAppendOrder(t *testing.T) {
 	dir := t.TempDir()
 	// Seeded newest-first so that a reader which returned directory order
 	// rather than sorted order would fail this case.
+	//
+	// The seat line is an OLD `bell-failed` one, which no build writes since
+	// #144. Old day files hold them, so the reader must still parse one.
 	seedLog(t, dir, "2026-01-16",
 		`{"seat":"workshop.scribe","status":"bell-failed","ts":"2026-01-16T10:00:00Z","reason":"no notifier"}`+"\n")
 	seedLog(t, dir, "2026-01-15",
@@ -157,12 +160,17 @@ func TestEventAtParsesTheStamp(t *testing.T) {
 func TestLogDirIsWhereTheWriterWrites(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("LOC_HOME", home)
-	LogBellFailed("workshop.scribe", "no notifier", time.Now())
+	LogBellTry("workshop.scribe", 2, 3, "failed", "no notifier", time.Now())
 	got, err := ReadEvents(LogDir())
 	if err != nil {
 		t.Fatalf("ReadEvents: %v", err)
 	}
 	if len(got) != 1 || got[0].Seat != "workshop.scribe" || got[0].Reason != "no notifier" {
-		t.Errorf("got %+v; want the line LogBellFailed just wrote", got)
+		t.Errorf("got %+v; want the line LogBellTry just wrote", got)
+	}
+	// The bell's own fields survive the round trip. They are what `loc status`
+	// reads to say how far into a streak a seat is.
+	if got[0].Status != "bell-try" || got[0].Try != 2 || got[0].Of != 3 || got[0].Result != "failed" {
+		t.Errorf("got %+v; want try 2 of 3 with the result failed", got[0])
 	}
 }

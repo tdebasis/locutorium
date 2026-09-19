@@ -183,21 +183,36 @@ func TestLogReadLandsInTheDayItHappened(t *testing.T) {
 	}
 }
 
-// Both seat events carry `seat` and no `uid`. A seat event with an empty uid
+// Every seat event carries `seat` and no `uid`. A seat event with an empty uid
 // would join to every other seat event in the file, under a key that matches
 // no message.
+//
+// The `bell-failed` case is gone with the writer: since #144 the bell writes
+// `bell-try` for every try and `bell-gave-up` for the end of a streak, and
+// this pins the shape of both. A try that RANG carries no `reason` key at all,
+// which is why the wanted fields are per case rather than one list.
 func TestSeatEventsCarryNoUID(t *testing.T) {
 	at := time.Date(2026, 9, 16, 8, 30, 0, 0, time.UTC)
 	cases := []struct {
 		name   string
 		write  func()
 		status string
-		reason string
+		// A line with no reason key reads back as nil rather than as "".
+		reason any
+		fields []string
 	}{
-		{"bell-failed", func() { LogBellFailed("workshop.scribe", "pane is in copy mode", at) },
-			"bell-failed", "pane is in copy mode"},
+		{"bell-try", func() { LogBellTry("workshop.scribe", 2, 3, "refused", "pane is in copy mode", at) },
+			"bell-try", "pane is in copy mode",
+			[]string{"seat", "status", "ts", "try", "of", "result", "reason"}},
+		{"bell-try that rang", func() { LogBellTry("workshop.scribe", 1, 3, "rang", "", at) },
+			"bell-try", nil,
+			[]string{"seat", "status", "ts", "try", "of", "result"}},
+		{"bell-gave-up", func() { LogBellGaveUp("workshop.scribe", 3, at) },
+			"bell-gave-up", nil,
+			[]string{"seat", "status", "ts", "after"}},
 		{"queue-deleted", func() { LogQueueDeleted("workshop.clerk", "orphan", at) },
-			"queue-deleted", "orphan"},
+			"queue-deleted", "orphan",
+			[]string{"seat", "status", "ts", "reason"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -205,8 +220,8 @@ func TestSeatEventsCarryNoUID(t *testing.T) {
 			c.write()
 
 			line := oneLine(t, at)
-			if got, want := keysInOrder(t, line), []string{"seat", "status", "ts", "reason"}; !equal(got, want) {
-				t.Fatalf("fields %v, want %v", got, want)
+			if got := keysInOrder(t, line); !equal(got, c.fields) {
+				t.Fatalf("fields %v, want %v", got, c.fields)
 			}
 			var got map[string]any
 			if err := json.Unmarshal([]byte(line), &got); err != nil {
@@ -231,11 +246,12 @@ func TestEveryShapeSharesTheDayFile(t *testing.T) {
 	LogSent(e)
 	LogFailed(NewEnvelope("ada", "mallory", "msg", "hi"), "bus unreachable")
 	LogRead(e.ID, "bob", time.Now().UTC())
-	LogBellFailed("bob", "no such pane", time.Now().UTC())
+	LogBellTry("bob", 3, 3, "failed", "no such pane", time.Now().UTC())
+	LogBellGaveUp("bob", 3, time.Now().UTC())
 	LogQueueDeleted("bob", "left", time.Now().UTC())
 
 	lines := dayLines(t, time.Now())
-	want := []string{"sent", "failed", "read", "bell-failed", "queue-deleted"}
+	want := []string{"sent", "failed", "read", "bell-try", "bell-gave-up", "queue-deleted"}
 	if len(lines) != len(want) {
 		t.Fatalf("got %d lines, want %d", len(lines), len(want))
 	}

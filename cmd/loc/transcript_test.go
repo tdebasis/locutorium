@@ -99,7 +99,12 @@ func TestTranscript_EveryOutcomeWord(t *testing.T) {
 		{
 			// The bell is the seat's, not the message's: it joins on the
 			// recipient's name and on being later than the send.
-			"pending with a failed bell",
+			//
+			// This is an OLD `bell-failed` line. No build has written one
+			// since #144; old day files hold them, and this arm pins that one
+			// still reads. The bell's own words are in
+			// TestTranscript_APendingMessageShowsTheBellsTries.
+			"pending with an old failed-bell line",
 			[]string{seatLine(to, "bell-failed", "2026-09-16T14:12:30Z", "exit status 3")},
 			"pending, bell failed 14:12:30Z: exit status 3",
 		},
@@ -615,5 +620,95 @@ func TestTranscript_ASeatEventBeforeTheSendDoesNotAttach(t *testing.T) {
 	out, _ = transcribe(t)
 	if !strings.Contains(out, "pending, bell failed 10:00:01Z: no pane") {
 		t.Errorf("control: the same event one second after the send should attach:\n%s", out)
+	}
+}
+
+// ------------------------------------------------------------------ the bell
+
+// THE TRIES AND THE GIVE-UP REACH THE SENDER (#144). A send that waits reports
+// `accepted, not yet read`, which is true and says nothing about whether the
+// recipient was ever told. This verb is where the sender looks, and the join
+// is the one the bell has always had: by seat, and by being later than the
+// send, because a bell event names no message.
+//
+// The last bell event decides the outcome, and every earlier try is still in
+// the record for `--uid` to print.
+func TestTranscript_APendingMessageShowsTheBellsTries(t *testing.T) {
+	const (
+		from = "workshop.scribe"
+		to   = "workshop.clerk"
+		sent = "2026-09-16T14:12:22Z"
+	)
+	for _, c := range []struct {
+		name  string
+		after []string
+		want  string
+	}{
+		{
+			"one try that was refused",
+			[]string{bellTryLine(to, "2026-09-16T14:12:30Z", 1, 3, "refused", "pane busy")},
+			"pending, bell tried 1 of 3, last refused (pane busy) 14:12:30Z",
+		},
+		{
+			"a try that rang carries no reason",
+			[]string{bellTryLine(to, "2026-09-16T14:12:30Z", 2, 3, "rang", "")},
+			"pending, bell tried 2 of 3, last rang 14:12:30Z",
+		},
+		{
+			// The whole streak, and the give-up is the last word on it.
+			"three tries and the give-up",
+			[]string{
+				bellTryLine(to, "2026-09-16T14:12:30Z", 1, 3, "refused", "pane busy"),
+				bellTryLine(to, "2026-09-16T14:13:30Z", 2, 3, "refused", "pane busy"),
+				bellTryLine(to, "2026-09-16T14:14:30Z", 3, 3, "failed", "exit status 3"),
+				bellGaveUpLine(to, "2026-09-16T14:14:30Z", 3),
+			},
+			"pending, bell gave up 14:14:30Z after 3 tries",
+		},
+		{
+			// A QUEUE DELETION IS STILL TERMINAL. The mail is gone, so how far
+			// the bell got says nothing about it.
+			"a deleted queue still wins",
+			[]string{
+				bellTryLine(to, "2026-09-16T14:12:30Z", 1, 3, "refused", "pane busy"),
+				seatLine(to, "queue-deleted", "2026-09-16T14:20:00Z", "expired"),
+			},
+			"lost: queue deleted 14:20:00Z (expired)",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			home := scratchRecord(t)
+			seedDay(t, home, "2026-09-16",
+				append([]string{sentLine("u1", sent, from, to, "the ledger is ready")}, c.after...)...)
+
+			out, _ := transcribe(t)
+			if !strings.Contains(out, c.want) {
+				t.Errorf("transcript:\n%s\nwant the outcome %q", out, c.want)
+			}
+			if strings.Contains(out, "bell failed") {
+				t.Errorf("a try was reported in the old words:\n%s", out)
+			}
+		})
+	}
+}
+
+// A BELL EVENT THAT BELONGS TO NO MESSAGE IS ITS OWN LINE, tries and give-up
+// alike. It is still something that happened to that seat.
+func TestTranscript_SeatShowsEveryBellTryAsItsOwnLine(t *testing.T) {
+	home := scratchRecord(t)
+	seedDay(t, home, "2026-09-16",
+		bellTryLine("workshop.clerk", "2026-09-16T15:00:00Z", 1, 3, "refused", "pane busy"),
+		bellTryLine("workshop.clerk", "2026-09-16T15:01:00Z", 2, 3, "rang", ""),
+		bellGaveUpLine("workshop.clerk", "2026-09-16T15:02:00Z", 3))
+
+	out, _ := transcribe(t, "--seat", "workshop.clerk", "2026-09-16")
+	for _, want := range []string{
+		"2026-09-16T15:00:00Z workshop.clerk  bell try 1 of 3: refused (pane busy)\n",
+		"2026-09-16T15:01:00Z workshop.clerk  bell try 2 of 3: rang\n",
+		"2026-09-16T15:02:00Z workshop.clerk  bell gave up after 3 tries\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("transcript:\n%s\nwant the line:\n%s", out, want)
+		}
 	}
 }

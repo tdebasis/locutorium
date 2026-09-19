@@ -35,6 +35,8 @@ const (
 	SendRequiresAttendance    = "send_requires_attendance"
 	IdleTimeout               = "idle_timeout"
 	HeartbeatLogRetentionDays = "heartbeat_log_retention_days"
+	WakeRetrySeconds          = "wake_retry_seconds"
+	WakeTries                 = "wake_tries"
 )
 
 // Keys is the deployment's whole configuration, in the order the file writes
@@ -47,6 +49,8 @@ var Keys = []Key{
 	{SendRequiresAttendance, "no", "whether send refuses when nobody is listening at the target"},
 	{IdleTimeout, "10m", "how long without activity before a seat reads as idle in status"},
 	{HeartbeatLogRetentionDays, "7", "heartbeat log files older than this are deleted when loc starts"},
+	{WakeRetrySeconds, "60", "the fixed gap between one try of a seat's bell and the next"},
+	{WakeTries, "3", "how many times a bell tries while mail is unread, before it gives up"},
 }
 
 // Default returns the table's value for name, or "" when the table has no such

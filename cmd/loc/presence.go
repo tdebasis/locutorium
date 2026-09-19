@@ -771,7 +771,7 @@ func seatLines(w io.Writer, pr provider.Presence) error {
 	if err != nil {
 		return err
 	}
-	bells := bellFailures(rows)
+	bells := bellStreaks(rows)
 	trouble := map[string]string{}
 	var orphans []string
 	for _, f := range model.Findings(rows, unreadable, queues) {
@@ -801,11 +801,11 @@ func seatLines(w io.Writer, pr provider.Presence) error {
 			state = "row ok, queue ok"
 		}
 		// The bell field is appended to whatever the row already says. A seat
-		// can have a missing queue AND a dead bell, and the operator needs
-		// both: the next beat repairs the one and repairs nothing about the
-		// other.
-		if ev, ok := bells[e]; ok {
-			state += fmt.Sprintf(", bell FAILED %s: %s", ev.TS, ev.Reason)
+		// can have a missing queue AND mail nobody could announce, and the
+		// operator needs both: the next beat repairs the one and repairs
+		// nothing about the other.
+		if s, ok := bells[e]; ok {
+			state += ", " + s.words()
 		}
 		if _, err := fmt.Fprintf(w, "%s: %s\n", e, state); err != nil {
 			return err
@@ -827,27 +827,59 @@ func seatLines(w io.Writer, pr provider.Presence) error {
 	return nil
 }
 
-// bellFailures is the THIRD FACT of the report: for each registered seat, the
-// bell failure that still stands.
+// bellState is what the record says about one seat's bell, said in one field.
+type bellState struct {
+	try, of int
+	result  string
+	reason  string
+	ts      string
+	gaveUp  bool
+}
+
+// words is the field as the row prints it.
+//
+// IT LEADS WITH THE MAIL AND NOT WITH THE BELL. What the operator has to act
+// on is mail nobody has read; how far a bell got is the detail under it.
+func (s bellState) words() string {
+	if s.gaveUp {
+		return fmt.Sprintf("mail unread, bell gave up at %s after %d tries", s.ts, s.of)
+	}
+	last := s.result
+	if s.reason != "" {
+		last += fmt.Sprintf(" (%s)", s.reason)
+	}
+	return fmt.Sprintf("mail unread, bell tried %d of %d, last %s at %s", s.try, s.of, last, s.ts)
+}
+
+// bellStreaks is the THIRD FACT of the report: for each registered seat, the
+// bell streak that still stands.
 //
 // `row ok, queue ok` answers two questions — the registry row exists, and the
 // queue exists. Neither of them says the seat's operator can be told that mail
 // arrived. On 2026-09-11 two seats were registered and attending with a dead
-// bell, and `status` said nothing was wrong (#79). The message log carries a
-// `bell-failed` seat event, and this reads it.
+// bell, and `status` said nothing was wrong (#79). The message log carries the
+// bell's seat events, and this reads them.
 //
-// A failure stands when it is LATER THAN THE REGISTRATION and no `read` by
-// that seat came after it. The registration bound drops a failure from a
-// previous occupant of the endpoint, whose bell is not this seat's bell. The
-// read bound drops a failure the seat has already answered: a seat that took
-// its mail has shown it can be reached, whatever the bell did.
+// THE FIELD IS THERE ONLY WHILE THE SEAT HAS UNREAD MAIL, and the record is
+// what says so: the bell rang for mail, and no `read` by that seat came after
+// the last try. A seat that read its mail loses the field, whatever the bell
+// did — which is the same read bound the failure field had, now carrying the
+// whole of the meaning (#144).
 //
-// The last `bell-failed` wins, and "last" is the order the lines were
-// appended in rather than the order of their stamps. The log is append-only
-// and every writer stamps a line as it writes it, so the two agree; where a
-// clock has stepped, the record's own order is the one this reports.
-func bellFailures(rows []*model.Registration) map[string]loc.Event {
-	out := map[string]loc.Event{}
+// A streak also has to be LATER THAN THE REGISTRATION. That bound drops a
+// streak from a previous occupant of the endpoint, whose bell is not this
+// seat's bell.
+//
+// The last line wins, and "last" is the order the lines were appended in
+// rather than the order of their stamps. The log is append-only and every
+// writer stamps a line as it writes it, so the two agree; where a clock has
+// stepped, the record's own order is the one this reports.
+//
+// AN OLD `bell-failed` LINE IS IGNORED. No build writes one, it carries no
+// count, and the state it reported — a streak that ended — is not a state this
+// field has any more.
+func bellStreaks(rows []*model.Registration) map[string]bellState {
+	out := map[string]bellState{}
 	// A LOG THAT CANNOT BE READ ADDS NOTHING AND FAILS NOTHING. An absent
 	// directory, an unreadable one — the report still owes the operator the
 	// two facts it has always given, and a deployment that has never sent a
@@ -857,7 +889,7 @@ func bellFailures(rows []*model.Registration) map[string]loc.Event {
 	if err != nil {
 		return out
 	}
-	failed := map[string]loc.Event{}
+	streak := map[string]bellState{}
 	lastRead := map[string]time.Time{}
 	for _, ev := range events {
 		at, ok := ev.At()
@@ -865,8 +897,16 @@ func bellFailures(rows []*model.Registration) map[string]loc.Event {
 			continue
 		}
 		switch {
-		case ev.Seat != "" && ev.Status == "bell-failed":
-			failed[ev.Seat] = ev
+		case ev.Seat != "" && ev.Status == "bell-try":
+			// A try replaces whatever stood, including a give-up: a new streak
+			// opens at try 1 and the bell is trying again.
+			streak[ev.Seat] = bellState{
+				try: ev.Try, of: ev.Of, result: ev.Result, reason: ev.Reason, ts: ev.TS,
+			}
+		case ev.Seat != "" && ev.Status == "bell-gave-up":
+			s := streak[ev.Seat]
+			s.gaveUp, s.of, s.ts = true, ev.After, ev.TS
+			streak[ev.Seat] = s
 		case ev.UID != "" && ev.Status == "read" && ev.By != "":
 			if at.After(lastRead[ev.By]) {
 				lastRead[ev.By] = at
@@ -874,32 +914,32 @@ func bellFailures(rows []*model.Registration) map[string]loc.Event {
 		}
 	}
 	for _, r := range rows {
-		ev, ok := failed[r.Endpoint]
+		s, ok := streak[r.Endpoint]
 		if !ok {
 			continue
 		}
-		at, _ := ev.At() // parsed above; a line that failed it is not in the map
+		at, _ := loc.Event{TS: s.ts}.At() // parsed above; a line that failed it is not in the map
 		// A registration this code cannot parse is not a bound it can apply,
-		// so the failure is not reported rather than reported unbounded.
+		// so the streak is not reported rather than reported unbounded.
 		reg, err := time.Parse(time.RFC3339, r.Registered)
 		if err != nil {
 			continue
 		}
 		// THE TWO STAMPS HAVE DIFFERENT PRECISION. A registration is written
-		// in milliseconds; a bell-failed line in whole seconds. The server
-		// registers and then rings the backlog with no window, so a notifier
-		// that is dead at startup fails within the same second, and a strict
-		// "after the registration" comparison hides exactly the failure #79
-		// was opened for (Assayer F1, 2026-09-16: 82ms after → hidden). So
-		// the failure is hidden only when it is before the registration's
-		// own second.
+		// in milliseconds; a bell line in whole seconds. The server registers
+		// and then rings the backlog with no window, so a notifier that is
+		// dead at startup fails within the same second, and a strict "after
+		// the registration" comparison hides exactly the failure #79 was
+		// opened for (Assayer F1, 2026-09-16: 82ms after → hidden). So the
+		// streak is hidden only when it is before the registration's own
+		// second.
 		if at.Before(reg.Truncate(time.Second)) {
 			continue
 		}
 		if lastRead[r.Endpoint].After(at) {
 			continue
 		}
-		out[r.Endpoint] = ev
+		out[r.Endpoint] = s
 	}
 	return out
 }

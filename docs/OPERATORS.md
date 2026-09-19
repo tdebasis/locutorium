@@ -79,11 +79,13 @@ durable; listeners reconnect.
 | `wake_window_seconds` | `5` | how long the seat's server coalesces arrivals before it rings |
 | `wake_breaker_per_minute` | `6` | max wakes per endpoint per minute; excess is suppressed, loudly, and nothing is lost |
 | `wake_breaker_per_hour` | `60` | the hourly cap |
-| `wake_retry_seconds` | `15` | a pane that was busy is asked again after this long. Each wait is twice the one before it, up to 60 seconds |
+| `wake_retry_seconds` | `60` | the fixed gap between one try of a seat's bell and the next |
+| `wake_tries` | `3` | how many times a bell tries while mail is unread, before it gives up |
 
 Change a key by editing the line; revert it by deleting the line.
 
-`loc start` writes every key above except the four `wake_` keys. Those four are read when a line
+`loc start` writes every key above except `wake_window_seconds`, `wake_breaker_per_minute` and
+`wake_breaker_per_hour`. Those three are read when a line
 holds them and carry the default above when no line does. Add the line yourself to change one.
 
 A default is not a deployment. A home with no `config` file at all is refused by every verb that
@@ -112,14 +114,20 @@ it:
 There is no fallback from one notifier to another. A bell that could not ring is written to
 `run/<endpoint>.delivery.log`, and the message waits in the queue.
 
-A `tmux` pane in copy mode refuses the bell, and so does a pane that is not at an empty prompt. The
-seat is busy, and both states end on their own. The server waits `wake_retry_seconds` and asks the
-pane again. Each wait is twice the one before it, up to 60 seconds. Every attempt asks the broker how
-much mail is waiting, so the bell carries the count the queue holds. The retry stops when the bell
-rings or when the queue reads empty.
+One flat rule governs the bell: while the seat has unread mail, the bell tries. A try is a try
+whatever it came to. It rang, a busy pane refused it, the breaker suppressed it, or the notifier
+failed. None of those changes what happens next.
 
-A broken bell is not retried. There is no pane address, or tmux cannot be read, or the courier exited
-non-zero. Asking again repairs none of these.
+The gap between tries is `wake_retry_seconds`, and it is fixed. A streak gets `wake_tries` tries.
+After the last try the bell gives up, and it does nothing more until mail arrives again. A new
+arrival rings at once and starts a fresh count. A queue that reads empty ends the streak, because
+the mail is read.
+
+Every try after the first asks the broker how much mail is waiting, so the bell carries the count
+the queue holds.
+
+A seat that is busy for longer than its tries last gets no further ring. It finds the mail on its
+next `read`, and `loc status` shows the state until then.
 
 A busy refusal typed nothing into the pane, so it does not count against `wake_breaker_per_minute` or
 `wake_breaker_per_hour`. A ring that typed does count, and so does a broken bell.
@@ -187,14 +195,22 @@ A `sent` line with no `read` line under the same `uid` is a message nobody has c
 **Seat events carry `seat` and no `uid`.**
 
 ```json
-{"seat":"workshop.scribe","status":"bell-failed","ts":"2026-09-16T17:02:12Z","reason":"exit status 3"}
+{"seat":"workshop.scribe","status":"bell-try","ts":"2026-09-16T17:02:12Z","try":1,"of":3,"result":"rang"}
+{"seat":"workshop.scribe","status":"bell-try","ts":"2026-09-16T17:03:12Z","try":2,"of":3,"result":"failed","reason":"exit status 3"}
+{"seat":"workshop.scribe","status":"bell-gave-up","ts":"2026-09-16T17:04:12Z","after":3}
 {"seat":"workshop.scribe","status":"queue-deleted","ts":"2026-09-16T18:40:00Z","reason":"orphan"}
 ```
 
-`bell-failed` says the seat's notifier could not ring. The mail is still in the queue, and the seat
-finds it on its next `read`. The line names no message: the server is told that mail arrived and
-never which message arrived. A run of busy refusals writes ONE line, for the first refusal. The
-attempts after it are in `run/<endpoint>.delivery.log`, one `nudge <endpoint> refused` line each.
+`bell-try` is ONE TRY of the seat's bell. `try` and `of` place it in its streak, and `result` is one
+of `rang`, `refused`, `suppressed` and `failed`. A try that rang carries no `reason`. The result is
+written down and it changes no count. `bell-gave-up` closes a streak that used all its tries.
+
+A bell line names no message: the server is told that mail arrived and never which message arrived.
+Mail that no bell announced is still in the queue, and the seat finds it on its next `read`. The
+notifier's own per-attempt lines are in `run/<endpoint>.delivery.log`.
+
+`bell-failed` was the old line, one per busy streak. No build writes one. `loc transcript` still
+reads one, and `loc status` ignores it.
 
 `queue-deleted` says a queue is gone, so mail stops reaching that seat. The reason is one of `left`
 (the agent unsubscribed), `displaced` (another agent took the seat with `--force`), `expired` (the
