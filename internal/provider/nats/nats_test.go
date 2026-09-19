@@ -528,13 +528,14 @@ func TestStatusWithAnEmptyRegistryPrintsNothing(t *testing.T) {
 
 func TestStatusPrintsAQuestionMarkForACountItCannotGet(t *testing.T) {
 	// A report that refuses to print because one number is missing is no
-	// report. Both ways a number goes missing are covered: no consumer, and
-	// no server.
+	// report. Both ways a number goes missing are covered: no queue, and no
+	// server. The count is the queue's depth, so a missing consumer is no
+	// longer one of the ways — the queue answers for itself.
 	h := newHarness(t, "ada", "bob")
 	nc, js := h.admin(t)
 	defer nc.Close()
-	if err := js.DeleteConsumer("QUEUE_bob", "bob"); err != nil {
-		t.Fatalf("delete consumer: %v", err)
+	if err := js.DeleteStream("QUEUE_bob"); err != nil {
+		t.Fatalf("delete stream: %v", err)
 	}
 
 	p := h.as(t, "ada")

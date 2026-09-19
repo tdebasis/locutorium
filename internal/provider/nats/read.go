@@ -53,8 +53,24 @@ func (m *message) Data() []byte { return m.m.Data }
 
 // Ack forgets the message — which is a deletion. It is called only once the
 // bytes have actually reached the reader.
+//
+// THE READER WAITS FOR THE BROKER TO CONFIRM THE DELETION. A plain
+// acknowledgement is a publish: it returns when the client has written it, and
+// the broker queues every inbound acknowledgement for another goroutine
+// (nats-server consumer.go pushAck, drained by processInboundAcks). A count
+// asked straight afterwards could therefore still hold the message this read
+// just took. AckSync waits for the reply, and the broker sends that reply only
+// after it has removed the message (processAck calls processAckMsg first;
+// processAckMsg removes a work-queue message in place through stream.ackMsg,
+// and only then does processAck answer). So a count asked after this returns
+// cannot include a message already read.
+//
+// The wait is the package's ordinary ack timeout. A timeout here is not a
+// loss: the message is still in p.unacked, so Close puts it back and the
+// broker delivers it again. The direction of failure stays DUPLICATE, NEVER
+// LOSS.
 func (m *message) Ack() error {
-	if err := m.m.Ack(); err != nil {
+	if err := m.m.AckSync(natsgo.AckWait(ackTimeout)); err != nil {
 		return err
 	}
 	m.p.taken(m.m)
