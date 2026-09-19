@@ -19,6 +19,7 @@ Errors print `loc: <message>` on stderr and exit **1**. Everything else exits **
 | `loc emit <kind> <endpoint> ...` | publish one lifecycle or activity event |
 | `loc status` | the daemon, every seat, and the mail waiting |
 | `loc status <endpoint>` | one agent's three facts, each with its reason |
+| `loc unread <endpoint>` | mail that endpoint has not taken: a number, or the word `unknown` |
 | `loc topics` | topics with traffic in the window |
 | `loc registry [<instance>] [--json]` | who is registered in an instance, asked of that instance's host; fails when no host answers |
 | `loc watch [<instance>]` | follow an instance's event stream, read-only |
@@ -475,6 +476,38 @@ when the broker is the thing that is wrong. An unregistered endpoint is a truthf
 question rather than a failure, so it exits **0**; a name that is not of the form
 `<instance>.<agent>`, or an `idle_timeout` this deployment cannot parse, exits **1**. An event counts
 as current for `idle_timeout` after it arrived.
+
+## unread
+
+```
+loc unread <endpoint>
+```
+
+How much mail one endpoint has not taken. **A number, or the word `unknown`.** Nothing else is ever
+printed, and the argument is a full `<instance>.<agent>` name.
+
+| what happened | stdout | stderr | exit |
+|---|---|---|---|
+| the count is known | the decimal count and a newline, `0` for an empty queue | empty | **0** |
+| the count cannot be had | `unknown` and a newline | `loc: <reason>` | **1** |
+| the argument is not one endpoint name | the verb list, for a wrong argument count; nothing, for a name that is not `<instance>.<agent>` | the refusal, for a bad name | **1** |
+
+Four things stop the count. There is no config file. The broker does not answer. The endpoint has
+no queue. The store will not say.
+
+**A queue that does not exist reads `unknown`, never `0`.** A destroyed queue and an empty one are
+different situations. A status line that showed them alike would call a broken seat a quiet one.
+
+`unknown` goes to **standard out** while the verb still exits **1**. This is deliberate. A caller
+that ignores the exit code shows whatever the verb printed. An empty string is also what "no mail"
+looks like. A failure that printed nothing would therefore read as a quiet mailbox. The reason for
+the failure is still one `loc:` line on standard error.
+
+`loc status` prints `?` for a count it could not read, and it keeps doing so. A report of many seats
+must not fail because one number is missing. This verb reports one seat to a script, so it fails
+instead.
+
+See `OPERATORS.md` §An unread count on the agent's status line for what to build on this.
 
 ## topics
 

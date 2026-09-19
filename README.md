@@ -135,7 +135,7 @@ prints every default it wrote. It also runs the heartbeat, which sweeps every fi
 | `loc transcript` | the day, read back | the message log joined by message: who sent what, and whether it was read |
 | `loc version` | the number | prints what this build was stamped as |
 
-`loc` dispatches sixteen verbs. `docs/CLI.md` lists all of them.
+`loc` dispatches seventeen verbs. `docs/CLI.md` lists all of them.
 
 </details>
 
