@@ -46,8 +46,9 @@ const (
 const maxWakeRetry = 60 * time.Second
 
 // errSuppressed is what a ring returns when THE BREAKER refused it. Nothing
-// reached the pane and nothing was typed, so a streak that meets a tripped
-// breaker keeps its place in the queue and asks again later; the breaker
+// reached the pane and nothing was typed, so both fire and retry schedule a
+// retry for it, exactly as they do for a busy pane, and the mail keeps its
+// place in the queue until the breaker allows a ring through; the breaker
 // un-trips on the hour.
 var errSuppressed = errors.New("suppressed by the breaker")
 
@@ -232,8 +233,14 @@ func (b *bell) fire() {
 	case err == nil:
 		b.rang(n)
 	case errors.Is(err, errSuppressed):
-		// The breaker said no. Nothing rings and nothing is scheduled: the
-		// queue keeps the truth and the next arrival asks again.
+		// A TRIPPED BREAKER LEFT A FIRST RING WITH NO RETRY (#151): the next
+		// arrival could be minutes away, and until then the mail waited with
+		// no bell. A retry recovers the count from the queue, the same count
+		// this fire just zeroed, so a retry loses nothing and is scheduled
+		// here exactly as retry schedules one for its own suppressed case.
+		b.mu.Lock()
+		b.scheduleRetry()
+		b.mu.Unlock()
 	case errors.Is(err, ErrBusy):
 		b.refused(err)
 	default:

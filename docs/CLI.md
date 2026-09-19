@@ -636,7 +636,9 @@ and no body:
 ```
 
 and appends `wake <endpoint> count=3` to `run/<endpoint>.delivery.log`. A tripped breaker says so
-once. Nothing is lost to a suppressed wake: the queue keeps the truth.
+once. Nothing is lost to a suppressed wake: the queue keeps the truth. A suppressed ring is not
+dropped. The server retries it on the same schedule a busy pane uses, and rings once the breaker
+allows it. The breaker still caps rings per minute and per hour while a retry waits.
 
 **A bell that could not ring says so.** If the notifier refuses or fails,
 `bell failed <endpoint>: <reason>` goes to `run/<endpoint>.delivery.log` *and* to stderr, which is
