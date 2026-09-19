@@ -385,6 +385,11 @@ func sweep(w io.Writer, open presenceOpener) (changes int, err error) {
 		return 0, err
 	}
 	err = open(func(pr provider.Presence) error {
+		// QUEUES AND NOTHING ELSE. A queue whose name is not an endpoint is in
+		// the other listing, and the sweep does not read that listing and
+		// never will: the name does not say which deployment made the queue,
+		// and a cleanup touches only its own house. `loc status` reports one;
+		// nothing here removes one (#136).
 		queues, err := pr.Queues()
 		if err != nil {
 			return err
@@ -762,12 +767,25 @@ func lastBeat() string {
 // inside an instance the ledger holds a row for, saying what the next beat
 // would do about it. A queue in any other instance is not reported, because
 // the next beat would not touch it.
+//
+// Last come the queues whose name is not an endpoint at all. The next beat
+// would not touch one of those either, and it CANNOT: it never sees them
+// (#136). They are reported here because a report is the only thing this tool
+// may do about them.
 func seatLines(w io.Writer, pr provider.Presence) error {
 	rows, unreadable, err := model.ListAll()
 	if err != nil {
 		return err
 	}
 	queues, err := pr.Queues()
+	if err != nil {
+		return err
+	}
+	// BOTH LISTINGS ARE TAKEN BEFORE ANYTHING IS PRINTED, so a failure of
+	// either leaves the report unwritten. A failure here is the failure
+	// `status` has always given for a listing it could not complete; there is
+	// no new failure mode.
+	unqualified, err := pr.UnqualifiedQueues()
 	if err != nil {
 		return err
 	}
@@ -813,6 +831,14 @@ func seatLines(w io.Writer, pr provider.Presence) error {
 	}
 	for _, q := range orphans {
 		if _, err := fmt.Fprintf(w, "%s: queue with no row, next beat removes it\n", q); err != nil {
+			return err
+		}
+	}
+	// The raw object name, because there is no endpoint to print. The line
+	// names the broker's tool rather than the sweep: an unqualified name does
+	// not say which deployment made the queue, so this one must not remove it.
+	for _, q := range unqualified {
+		if _, err := fmt.Fprintf(w, "%s: queue with an unqualified name; the sweep cannot see it; remove it with the broker's own tool\n", q); err != nil {
 			return err
 		}
 	}

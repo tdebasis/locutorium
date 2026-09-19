@@ -138,3 +138,71 @@ func TestEndpointOfStreamReversesTheSubstitution(t *testing.T) {
 		}
 	}
 }
+
+// The other listing (#136): a queue object whose name does not read back as an
+// endpoint, by its raw name. Seven such objects sat on one deployment for five
+// weeks, in no listing and in no report.
+//
+// The two listings partition the store's queue objects. This case asserts both
+// halves at once, because the defect was that a name fell out of both.
+func TestUnqualifiedQueuesListsWhatQueuesCannotName(t *testing.T) {
+	const seat = "workshop.scribe"
+	n := newNamespaced(t, []string{seat}, []string{seat})
+	nc, js := n.srv.Admin(t, "admin", testPassword)
+	defer nc.Close()
+	// TOPICS is not a queue at all. The other two are queue objects made
+	// before an endpoint carried an instance name.
+	for _, cfg := range []*natsgo.StreamConfig{
+		{Name: "TOPICS", Subjects: []string{"topic.>"}, Storage: natsgo.MemoryStorage, Replicas: 1},
+		{Name: "QUEUE_scribe", Subjects: []string{"queue.scribe"}, Storage: natsgo.MemoryStorage, Replicas: 1},
+		{Name: "QUEUE_one_two_three", Subjects: []string{"queue.one.two.three"}, Storage: natsgo.MemoryStorage, Replicas: 1},
+	} {
+		if _, err := js.AddStream(cfg); err != nil {
+			t.Fatalf("seed %s: %v", cfg.Name, err)
+		}
+	}
+
+	p := n.as(t, seat)
+	got, err := p.UnqualifiedQueues()
+	if err != nil {
+		t.Fatalf("UnqualifiedQueues: %v", err)
+	}
+	want := []string{"QUEUE_one_two_three", "QUEUE_scribe"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("UnqualifiedQueues = %v, want %v — raw names, sorted, and nothing that is not a queue object", got, want)
+	}
+	// The valid seat's queue belongs to the OTHER listing and to that one only.
+	queues, err := p.Queues()
+	if err != nil {
+		t.Fatalf("Queues: %v", err)
+	}
+	if !reflect.DeepEqual(queues, []string{seat}) {
+		t.Errorf("Queues = %v, want just %v — the bare names are not endpoints and are not here", queues, seat)
+	}
+}
+
+// An empty store has no unqualified queues, and that is not an error.
+func TestUnqualifiedQueuesOnAnEmptyStore(t *testing.T) {
+	n := newNamespaced(t, []string{"workshop.scribe"}, nil)
+	p := n.as(t, "workshop.scribe")
+	got, err := p.UnqualifiedQueues()
+	if err != nil || len(got) != 0 {
+		t.Errorf("UnqualifiedQueues = %v, %v; want nothing and no error", got, err)
+	}
+}
+
+// A listing that cannot complete is an error here too, never a short list. An
+// empty answer would read as "the deployment is clean".
+func TestUnqualifiedQueuesOnAnUnreachableMediumIsAnError(t *testing.T) {
+	n := newNamespaced(t, []string{"workshop.scribe"}, []string{"workshop.scribe"})
+	write(t, filepath.Join(n.home, "config"), "nats_url = "+closedPort(t)+"\n")
+
+	p := n.as(t, "workshop.scribe")
+	got, err := p.UnqualifiedQueues()
+	if err == nil {
+		t.Fatalf("UnqualifiedQueues = %v, nil; want an error from an unreachable medium", got)
+	}
+	if got != nil {
+		t.Errorf("UnqualifiedQueues returned %v beside its error", got)
+	}
+}

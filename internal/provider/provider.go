@@ -66,6 +66,21 @@ type Presence interface {
 	// direction on one pass and the duplicating direction on the other.
 	Queues() ([]string, error)
 
+	// UnqualifiedQueues lists every queue object on this medium whose name
+	// does NOT read back as an endpoint, in name order. It gives the RAW
+	// OBJECT NAME, because there is no endpoint to give: that is the defect
+	// itself. An object that is not a queue at all is not listed.
+	//
+	// NO CALLER MAY DESTROY ONE. The name says nothing about which deployment
+	// made the queue, and a cleanup touches only its own house. These are the
+	// queues a deployment made before an endpoint carried an instance name.
+	// `loc status` reports them so that an operator can remove them with the
+	// broker's own tool, and nothing else in this tool reads them.
+	//
+	// A listing that cannot complete is an error, never a short list, for the
+	// reason Queues gives.
+	UnqualifiedQueues() ([]string, error)
+
 	// QueueExists answers whether an endpoint is attended. A medium that
 	// cannot be reached is an ERROR here, never a "no": absence and ignorance
 	// are different answers, and only one of them justifies refusing a send.

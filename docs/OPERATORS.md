@@ -254,3 +254,9 @@ later beat, so a restored backup cannot point the sweep at another deployment's 
 listener did and when) · `run/log/YYYY-MM-DD.jsonl` (what happened to each message, and to each
 seat) · `loc read --peek` (look without taking) · `loc watch` (every envelope,
 read-only).
+
+A queue made before endpoints carried an instance name has a bare name, such as `QUEUE_scribe`.
+The sweep cannot see such a queue, and it never removes one: the name does not say which
+deployment made it. `loc status` prints one line for each of them. Remove them with the broker's
+own command-line tool.
+
