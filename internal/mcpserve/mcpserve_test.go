@@ -58,6 +58,11 @@ type fake struct {
 	nudgeErr  error
 	sendErr   error
 	slowLeave time.Duration
+
+	// nudgeErrs is what the notifier returns, one entry per ring, in order.
+	// Once it is spent the notifier falls back to nudgeErr, so a case that
+	// wants the same outcome for every ring sets nudgeErr alone.
+	nudgeErrs []error
 }
 
 func (f *fake) deps() Deps {
@@ -125,6 +130,11 @@ func (f *fake) deps() Deps {
 			defer f.mu.Unlock()
 			f.nudged = append(f.nudged, bell)
 			f.couriers = append(f.couriers, courier)
+			if len(f.nudgeErrs) > 0 {
+				err := f.nudgeErrs[0]
+				f.nudgeErrs = f.nudgeErrs[1:]
+				return err
+			}
 			return f.nudgeErr
 		}),
 		// A pid that is alive and is not this process, so "our parent" is a
