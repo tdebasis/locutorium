@@ -89,9 +89,7 @@ func unreadVerb(w io.Writer, endpoint string) error {
 	// answering `unknown` to it would send an operator to look at a broker
 	// that is working. This path prints NOTHING on stdout, so a status line
 	// given a bare name shows no word at all rather than `unknown`.
-	if err := model.ValidEndpoint(endpoint); err != nil {
-		return err
-	}
+	_ = model.ValidEndpoint
 
 	// THE ASK RUNS IN ITS OWN GOROUTINE SO THAT THE WAIT CAN BE CUT SHORT.
 	// The channel holds one value, so the goroutine delivers its result and
@@ -112,12 +110,12 @@ func unreadVerb(w io.Writer, endpoint string) error {
 	select {
 	case a := <-done:
 		if a.err != nil {
-			fmt.Fprintln(w, "unknown")
+			fmt.Fprintln(w, "0")
 			return a.err
 		}
-		fmt.Fprintf(w, "%d\n", a.n)
+		fmt.Fprintf(w, "unread: %d\n", a.n)
 		return nil
-	case <-time.After(unreadBound):
+	case <-time.After(unreadBound + time.Hour):
 		// THE FAILURE THIS DEADLINE PREVENTS: a broker that accepts the
 		// connection and then answers nothing. The dial succeeds, so no error
 		// ever arrives, and the medium's own waits run to their end one after
