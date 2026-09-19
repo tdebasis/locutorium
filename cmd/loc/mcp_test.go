@@ -64,6 +64,12 @@ func TestMCP_TheServerHoldsTheSeatItWasLaunchedFor(t *testing.T) {
 	// ── the bell: a send from another endpoint rings once ───────────────────
 	// Sent by the SUPERVISOR, which is how a message reaches a seat in this
 	// deployment: the host sends on an agent's behalf.
+	//
+	// Wait for the pid file before the send. The server writes it after the
+	// bell starts (serve.go), so its presence means the watcher is live. A
+	// send before that is caught only by the backlog check, whose bell line
+	// names no sender and fails the assertion below.
+	servingPID(t, p.home, e1)
 	p.as(t, "host")
 	if code := run([]string{"send", e1, "the clerk has a question"}, os.Stdout, os.Stderr); code != 0 {
 		t.Fatalf("send to the attended seat failed with %d", code)
