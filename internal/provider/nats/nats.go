@@ -314,30 +314,28 @@ func (p *Provider) Status(w io.Writer) error {
 // unread is how many messages an endpoint has not taken, or "?" when the
 // number cannot be had.
 //
-// THE CURSOR FIRST, THE STREAM ONLY WHEN THERE IS NONE. A reader keeps a
-// durable consumer, and a message it has been handed and has not yet
-// acknowledged is STILL STORED while no longer WAITING — so once a cursor
-// exists, the stream's count reports mail as owed that has already been put in
-// front of somebody, and the consumer's pending count is the honest number.
+// THE COUNT IS THE QUEUE'S DEPTH. A queue keeps work-queue retention and
+// explicit acknowledgements. A read takes one message, prints it, and
+// acknowledges it at once, and the acknowledgement deletes it; an interrupted
+// read puts back what it held (returnUnacked). So a stored message that is not
+// waiting exists in two cases only: for the milliseconds of a read in flight,
+// and after a reader died without putting its message back. In the second case
+// the broker redelivers the message when the acknowledgement wait runs out.
+// THE MAIL IS STILL OWED. The stream counts it. A consumer's pending figure
+// does not, so it reports 0 for mail that is coming back.
 //
-// With no cursor on it, the stream's own count is the figure and the identity
-// holds: work-queue retention drops a message when it is taken, which makes a
-// stored message exactly an untaken one. This is the case a namespaced
-// endpoint was in before this build could read, and it is why asking such an
-// endpoint for a consumer once printed "?" for every one of them.
+// The stream's count also cannot read low. The broker stores a message before
+// it acknowledges the publish (nats-server stream.go: StoreMsg, then the
+// PubAck, then the signal to the consumers), and the consumer's count is
+// raised on a separate goroutine after the PubAck has gone. A pending count
+// can therefore be served short of an acknowledged send, and the broker
+// corrects an over-count but never an under-count. That is the zero in #123.
 //
 // The backing object is named by substitution, because a subject may carry a
-// dot where a durable object's name may not; an un-namespaced identity keeps
-// the raw name the shell adapter used.
+// dot where a durable object's name may not.
 func (p *Provider) unread(endpoint string) string {
-	stream := presence.StreamName(endpoint)
-	if ci, err := p.js.ConsumerInfo(stream, durableName(endpoint)); err == nil && ci != nil {
-		return fmt.Sprintf("%d", ci.NumPending)
-	}
-	if presence.ValidEndpoint(endpoint) == nil {
-		if si, err := p.js.StreamInfo(stream); err == nil && si != nil {
-			return fmt.Sprintf("%d", si.State.Msgs)
-		}
+	if si, err := p.js.StreamInfo(presence.StreamName(endpoint)); err == nil && si != nil {
+		return fmt.Sprintf("%d", si.State.Msgs)
 	}
 	return "?"
 }

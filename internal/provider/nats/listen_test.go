@@ -25,7 +25,7 @@ import (
 func TestWatchQueue_RingsOnArrivalAndConsumesNothing(t *testing.T) {
 	h := newHarness(t, "alice")
 	p := h.as(t, "alice")
-	nc, _ := h.admin(t)
+	nc, js := h.admin(t)
 	defer nc.Close()
 
 	var rings atomic.Int64
@@ -35,10 +35,14 @@ func TestWatchQueue_RingsOnArrivalAndConsumesNothing(t *testing.T) {
 	}
 	defer stop()
 
-	if err := nc.Publish("queue.alice", []byte(`{"id":"m1"}`)); err != nil {
+	// THE PUBLISH GOES THROUGH THE STREAM, so that the store is done before
+	// this line returns. A core publish and a flush prove only that the server
+	// read the PUB: the stream stores on its own goroutine, and the count
+	// below would be asserted against an order nothing established. The
+	// subject is the same one, so the core subscriber still sees the arrival.
+	if _, err := js.Publish("queue.alice", []byte(`{"id":"m1"}`)); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
-	_ = nc.Flush()
 
 	deadline := time.Now().Add(3 * time.Second)
 	for rings.Load() == 0 && time.Now().Before(deadline) {
@@ -58,7 +62,7 @@ func TestWatchQueue_RingsOnArrivalAndConsumesNothing(t *testing.T) {
 func TestWatchQueue_ReportsTheSenderAndStillConsumesNothing(t *testing.T) {
 	h := newHarness(t, "alice")
 	p := h.as(t, "alice")
-	nc, _ := h.admin(t)
+	nc, js := h.admin(t)
 	defer nc.Close()
 
 	senders := make(chan string, 4)
@@ -73,10 +77,10 @@ func TestWatchQueue_ReportsTheSenderAndStillConsumesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if err := nc.Publish("queue.alice", raw); err != nil {
+	// Through the stream, for the reason given on the test above.
+	if _, err := js.Publish("queue.alice", raw); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
-	_ = nc.Flush()
 
 	select {
 	case got := <-senders:
@@ -138,19 +142,18 @@ func TestWatchQueue_AnUnreachableMediumIsAnError(t *testing.T) {
 func TestUnread_CountsWhatHasNotBeenTaken(t *testing.T) {
 	h := newHarness(t, "alice")
 	p := h.as(t, "alice")
-	nc, _ := h.admin(t)
+	nc, js := h.admin(t)
 	defer nc.Close()
 
 	for _, id := range []string{"m1", "m2", "m3"} {
-		if err := nc.Publish("queue.alice", []byte(`{"id":"`+id+`"}`)); err != nil {
+		if _, err := js.Publish("queue.alice", []byte(`{"id":"`+id+`"}`)); err != nil {
 			t.Fatalf("publish: %v", err)
 		}
 	}
-	_ = nc.Flush()
 
-	// One is fetched and not acknowledged, which puts a cursor on the queue:
-	// that is the state a running reader is in, and the state in which the
-	// stream's own count would over-report.
+	// One is fetched and not acknowledged. The reader holds it and has not
+	// taken it: the acknowledgement is what takes a message, and until it
+	// arrives the mail is still owed to this endpoint.
 	if _, ok, err := p.NextQueued("alice", 2*time.Second); err != nil || !ok {
 		t.Fatalf("NextQueued: (%v, %v)", ok, err)
 	}
@@ -158,8 +161,8 @@ func TestUnread_CountsWhatHasNotBeenTaken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unread: %v", err)
 	}
-	if n != 2 {
-		t.Errorf("Unread = %d; three were sent and one has been handed over", n)
+	if n != 3 {
+		t.Errorf("Unread = %d; three were sent and none has been acknowledged", n)
 	}
 }
 

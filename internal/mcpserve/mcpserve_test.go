@@ -626,7 +626,7 @@ func TestBell_AnUnanswerableBacklogRingsNothing(t *testing.T) {
 
 // THE BACKLOG FIGURE IS THE BROKER'S, NOT A SECOND COUNT.
 //
-// Unread is the consumer's NumPending, and it ALREADY INCLUDES every arrival
+// Unread is the queue's own message count, and it ALREADY INCLUDES every arrival
 // the watcher has counted since the last ring. Adding the two together counted
 // one message twice: a seat that received a single message in the stretch
 // between the watcher going live and the backlog sample was rung for two, and

@@ -184,8 +184,8 @@ func (b *bell) note(sender string) {
 // a five-second window to be told about mail that arrived an hour ago would be
 // waiting for no reason.
 //
-// THE FIGURE IS SET, NOT ADDED. Unread is the consumer's NumPending, and it
-// already counts every arrival the watcher has counted since the last ring:
+// THE FIGURE IS SET, NOT ADDED. Unread is the queue's own message count, and
+// it already counts every arrival the watcher has counted since the last ring:
 // the two are views of ONE queue, not two sources of messages. Adding them
 // rang for mail that does not exist — one message landing between the watcher
 // going live and this sample rang the pane for two — so the broker's figure
