@@ -170,8 +170,9 @@ deletes it. So if presenting fails part way — a dead terminal, a broken pipe �
 than lose, and `id` is the key for spotting the duplicate (PROTOCOL.md §5).
 
 **The read waits for the broker to confirm each deletion.** It does not send the acknowledgement and
-move on. The broker answers an acknowledgement only after it has removed the message, so `loc
-unread` and `loc status`, asked after a `read` exits, cannot count a message that read already took.
+move on. On a single broker, which is what `loc start` runs, the broker answers an acknowledgement
+only after it has removed the message, so `loc unread` and `loc status`, asked after a `read` exits,
+cannot count a message that read already took.
 
 A message that has been **fetched but not yet acknowledged is invisible to a following read** for
 the length of the consumer's ack-wait — the server's default of **30 s**, which this tool sets
@@ -456,14 +457,15 @@ the endpoint. A `read` by that seat after the event removes the field again — 
 mail, so something reaches it. The log is `$LOC_HOME/run/log/<day>.jsonl`. A log that `status`
 cannot read adds no field, and it does not fail the report.
 
-Then the unread count for each **registered seat**. The roster is the ledger, not the `endpoints`
-file: a seat exists because it subscribed. If the medium is unreachable this prints `?` rather than
-failing, so a `?` means "could not ask", not "zero". The number is the **queue's stored-message
-count**. A queue keeps work-queue retention and explicit acknowledgements, and an acknowledgement
-deletes the message. A read acknowledges as soon as it prints, and an interrupted read puts back
-what it held. A stored message is therefore a message nobody has taken. A reader that dies holding
-a message leaves that message stored, and the broker delivers it again when the acknowledgement
-wait runs out. The mail is still owed, and the count says so.
+Then the unread count for each **registered seat**. The seats come from the ledger, not from an
+`endpoints` file: a seat exists because it subscribed. If the medium is unreachable this prints `?`
+rather than failing, so a `?` means "could not ask", not "zero". The number is the **queue's
+stored-message count**. A queue keeps work-queue retention and explicit acknowledgements, and an
+acknowledgement deletes the message. A read acknowledges as soon as it prints, and an interrupted
+read puts back what it held. A stored message is therefore one that no read has acknowledged:
+either nobody has taken it, or a read holds it at this moment. A reader that dies holding a message
+leaves that message stored, and the broker delivers it again when the acknowledgement wait runs
+out. The mail is still owed, and the count says so.
 
 With an endpoint it is the presence report: four facts, **each with the reason for it**. *Away*
 because there is no process and *idle* because no event arrived inside the window are different
