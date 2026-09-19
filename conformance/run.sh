@@ -549,6 +549,21 @@ printf '# scratch list\n%s\n' "$CLEAN_NONCE" > "$CLEAN_T/list"
 check_not "cleanliness check fails on a tree that carries a listed word" \
   env LOC_FORBIDDEN_FILE="$CLEAN_T/list" "$CLEAN_T/conformance/check-clean.sh"
 rm -rf "$CLEAN_T"
+# An installed list must not switch the generic list off (#137). A maintainer's
+# own list can omit one home-path form, and then that form passed on his machine
+# and failed on a machine with no list. The installed list here names a nonce the
+# tree does not carry, so only the generic list can find the planted path. The
+# list sits outside the scanned tree, or the check would find the nonce in the
+# list file itself and fail this case for the wrong reason. The path is built at
+# run time because this file is itself scanned by the check.
+CLEAN_T="$(mktemp -d)"; mkdir -p "$CLEAN_T/tree/conformance"
+cp "$ROOT/conformance/check-clean.sh" "$CLEAN_T/tree/conformance/check-clean.sh"
+printf '# scratch list\nzzq%snomatch\n' "$(( RANDOM ))" > "$CLEAN_T/list"
+printf 'a line that says %s and should not survive review\n' \
+  "$(printf '/ho%s/zed/src' me)" > "$CLEAN_T/tree/leaky.md"
+check_not "cleanliness check applies the generic list when a deployment list is installed" \
+  env LOC_FORBIDDEN_FILE="$CLEAN_T/list" "$CLEAN_T/tree/conformance/check-clean.sh"
+rm -rf "$CLEAN_T"
 
 # THE LAST ACCEPTANCE OF THE VERBS. The suite booted with `loc start`, so it
 # stops with `loc stop`; the teardown trap runs it again if this line is never
