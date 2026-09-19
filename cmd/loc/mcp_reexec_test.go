@@ -23,6 +23,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	osexec "os/exec"
@@ -127,22 +128,50 @@ func mcpPIDPath(home, endpoint string) string {
 }
 
 // servingPID reads that file, or fails saying what its absence means.
+//
+// The server registers the seat, starts its bell listener, and only then
+// writes this file, in that order and on purpose. So a seat can read as
+// registered for a short time before the file exists. servingPID waits for
+// the file to appear and hold a full pid, instead of failing on the first
+// look.
 func servingPID(t *testing.T, home, endpoint string) int {
 	t.Helper()
 	path := mcpPIDPath(home, endpoint)
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read the serving process's pid at %s: %v — "+
+	const wait = 5 * time.Second
+	var pid int
+	// last is what the final look found, so a failure says more than "timed out".
+	last := "the file never appeared"
+	ok := waitFor(wait, func() bool {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			last = err.Error()
+			return false
+		}
+		// TWO LINES: the pid, then the start time the presence model records
+		// for it. The pid is the first line; the second is what keeps a
+		// recycled number from reading as the same process. os.WriteFile is
+		// not atomic, so a reader can find the file empty, or with only the
+		// first digits of the pid in it. Those digits parse as the pid of a
+		// different process, and the callers send a signal to what this
+		// returns. A first line therefore counts only when a newline ends it;
+		// anything less reads as "not yet", not as a bad file.
+		line, _, whole := strings.Cut(string(b), "\n")
+		if !whole {
+			last = fmt.Sprintf("it held %q, whose first line has no newline yet", string(b))
+			return false
+		}
+		p, err := strconv.Atoi(strings.TrimSpace(line))
+		if err != nil || p <= 0 {
+			last = fmt.Sprintf("it held %q, whose first line is not a pid", string(b))
+			return false
+		}
+		pid = p
+		return true
+	})
+	if !ok {
+		t.Fatalf("read the serving process's pid at %s: no valid pid after waiting %s (%s) — "+
 			"the registration carries the RUNTIME's pid, so without this file "+
-			"nothing can say which process is actually serving the seat", path, err)
-	}
-	// TWO LINES: the pid, then the start time the presence model records for
-	// it. The pid is the first line; the second is what keeps a recycled
-	// number from reading as the same process.
-	first := strings.TrimSpace(strings.SplitN(string(b), "\n", 2)[0])
-	pid, err := strconv.Atoi(first)
-	if err != nil {
-		t.Fatalf("%s held %q, whose first line is not a pid", path, string(b))
+			"nothing can say which process is actually serving the seat", path, wait, last)
 	}
 	return pid
 }
