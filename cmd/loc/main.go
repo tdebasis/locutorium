@@ -292,10 +292,10 @@ func send(p provider.Provider, w io.Writer, to, body string) error {
 	}
 	// WHERE ATTENDANCE COMES FROM. On a medium that carries presence, a queue
 	// exists exactly while an agent is subscribed to it, so its absence IS an
-	// absent recipient. That is a live fact, and it is the only roster this
-	// tool has: in the inner parlor there are no mailboxes for agents that are
-	// not running. A medium without presence cannot answer the question at
-	// all, so it does not refuse on it.
+	// absent recipient. That is a live fact, and it is the only attendance
+	// record this tool has: in the inner parlor there are no mailboxes for
+	// agents that are not running. A medium without presence cannot answer
+	// the question at all, so it does not refuse on it.
 	pr, hasPresence := p.(provider.Presence)
 	if hasPresence {
 		if err := model.ValidEndpoint(to); err != nil {

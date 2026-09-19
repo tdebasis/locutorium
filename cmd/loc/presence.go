@@ -527,7 +527,7 @@ func emitVerb(args []string) error {
 // history that does not exist. The supervisor answers because the supervisor
 // holds the registrations — it created them — and if none is running the
 // request goes unanswered, which is the truthful reply and a FAILURE rather
-// than an empty roster.
+// than an empty list.
 func registryVerb(w io.Writer, args []string) error {
 	instance, rest := leadingWord(args)
 	asJSON := false
@@ -551,9 +551,9 @@ func registryVerb(w io.Writer, args []string) error {
 	})
 }
 
-// renderRegistry prints a roster. --json hands back what the supervisor said,
-// unread: a consumer wants the reply, and a reply reshaped by this tool is a
-// second format for it to learn.
+// renderRegistry prints the list the host sent. --json hands back what the
+// supervisor said, unread: a consumer wants the reply, and a reply reshaped
+// by this tool is a second format for it to learn.
 func renderRegistry(w io.Writer, reply []byte, asJSON bool) error {
 	if asJSON {
 		_, err := fmt.Fprintln(w, strings.TrimRight(string(reply), "\n"))

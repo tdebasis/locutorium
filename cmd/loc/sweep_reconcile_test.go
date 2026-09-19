@@ -218,8 +218,7 @@ func TestFalsifierStatusReportsButRepairsNothing(t *testing.T) {
 // ------------------------------------------------ arm 8: status reads the ledger
 
 // The unread report iterates the ledger. No `endpoints` file exists any more,
-// so the ledger is the only roster there is, and every registered seat must
-// still be reported from it.
+// so every registered seat must still be reported from it.
 func TestFalsifierStatusReadsTheLedger(t *testing.T) {
 	p := newPresence(t)
 	p.subscribeLive(t, e1)

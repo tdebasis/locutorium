@@ -16,10 +16,10 @@ import (
 // registration names it. This file does. The server writes it when it takes
 // the seat, and removes it when it gives the seat up.
 //
-// THE PATH IS SPELLED HERE AND NOWHERE ELSE. It was written out three times —
-// the server's claim, the server's release, and the CLI's test for a seat
-// that rings its own bell. A path spelled in three places can be changed in
-// two.
+// THE PATH IS SPELLED HERE AND NOWHERE ELSE. Two callers use it: the
+// server's claim and the server's release. A third caller, the CLI's test
+// for a seat that rings its own bell, was removed when the bell moved into
+// the binary.
 func ServerPIDFile(endpoint string) string {
 	return filepath.Join(config.Home(), "run", endpoint+".mcp.pid")
 }

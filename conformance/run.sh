@@ -550,7 +550,7 @@ check_not "cleanliness check fails on a tree that carries a listed word" \
   env LOC_FORBIDDEN_FILE="$CLEAN_T/list" "$CLEAN_T/conformance/check-clean.sh"
 rm -rf "$CLEAN_T"
 # An installed list must not switch the generic list off (#137). A maintainer's
-# own list can omit one home-path form, and then that form passed on his machine
+# own list can omit one home-path form, and then that form passed on their machine
 # and failed on a machine with no list. The installed list here names a nonce the
 # tree does not carry, so only the generic list can find the planted path. The
 # list sits outside the scanned tree, or the check would find the nonce in the

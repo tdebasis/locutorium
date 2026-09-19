@@ -142,7 +142,7 @@ func (p *Provider) Emit(instance string, event []byte) error {
 }
 
 // Request asks a question of whoever is listening. Nobody listening is an
-// error: an empty roster and no roster at all are different answers, and a
+// error: an empty list and no list at all are different answers, and a
 // command that prints nothing and exits zero cannot tell them apart.
 func (p *Provider) Request(subject string, timeout time.Duration) ([]byte, error) {
 	if err := p.connect(); err != nil {

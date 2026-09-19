@@ -113,7 +113,7 @@ leaves nothing behind for the next `loc start` to misread.
 loc send <endpoint> <body>
 ```
 
-Delivers one message. The roster is the ledger: the endpoint must be a registered seat, and an
+Delivers one message. The endpoint must be a registered seat in the ledger, and an
 unknown name is refused before anything is sent.
 
 - **Body limit is 4000 characters, not bytes.** Counted in codepoints, so emoji cost one each. An
@@ -498,7 +498,7 @@ reached.
 **Read the first word.** The value's first word is the answer. It is exactly one of `yes`, `no` and
 `unknown`, and nothing else in the line carries the state. The text in parentheses is explanation
 and may hold any words at all. In the `unknown` case it is the medium's own error text, and two
-real ones read `this deployment has no config file; run 'loc start' to write one` and `no provider
+real ones read ``this deployment has no config file; run `loc start` to write one`` and `no provider
 configured (set 'provider = <name>' in …/config)`. A script that searched the whole line for `no`
 would call either of those an absent queue.
 
@@ -582,8 +582,8 @@ carried its details; this asks for the current picture instead of replaying a hi
 exist (PRESENCE.md §Who is here right now).
 
 The request goes out on `registry.<instance>` and the host answers, because the host holds the
-registrations — it created them. **Nobody answering is a failure, not an empty roster**: the command
-exits non-zero and names the subject that went unanswered. A host that answers with an empty roster
+registrations — it created them. **Nobody answering is a failure, not an empty list**: the command
+exits non-zero and names the subject that went unanswered. A host that answers with an empty list
 prints `(no agents registered)` and exits **0**; the two are different, and telling them apart is
 the point.
 
@@ -706,9 +706,9 @@ in the presence model's stamp** — because the pid alone starts naming a strang
 kernel reuses the number, and a reader asking "is this seat's server running" would then get a
 confident yes about somebody else. Both lines are compared, by the same liveness the presence model
 uses on the pids it records. **A server ended by SIGKILL leaves the file behind**, since removing it
-is part of departing and a kill runs nothing. A reader asking whether this seat's server is running
-compares both lines against the presence model's liveness and finds the file stale. No send depends
-on the answer: a send only queues.
+is part of departing and a kill runs nothing. No shipped command reads this file; an operator asking
+whether this seat's server is running compares both lines by hand against the presence model's
+liveness and finds the file stale. No send depends on the answer: a send only queues.
 
 **It is also the listener, and the only one.** It holds a core subscription on this endpoint's own queue subject, which
 sees every arrival and consumes nothing, and asks how much is waiting at start and after every

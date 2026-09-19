@@ -39,8 +39,8 @@ never a silent pass.
 
 `loc start` writes `config` when there is none, prints every default it wrote, and runs the broker.
 It never rewrites a `config` that is already there, so a key you edited survives every later start.
-There is no roster file: a seat exists while it is subscribed, and the ledger is what `loc status`
-reads.
+There is no single ledger file: a seat exists while it is subscribed, and the ledger — one file per
+endpoint under `run/presence` — is what `loc status` reads.
 
 **If the `config` file goes missing, run `loc start`.** It writes the file again from the key table.
 Every other verb that opens the broker refuses a home with no `config`, and says where it looked. A
@@ -125,7 +125,7 @@ A busy refusal typed nothing into the pane, so it does not count against `wake_b
 `wake_breaker_per_hour`. A ring that typed does count, and so does a broken bell.
 
 Identity comes from `LOC_IDENTITY` and from nothing else. A verb with no identity refuses
-(`loc_identity`). A refusal is correct; guessing is not.
+(`cannot determine sender identity: set LOC_IDENTITY`). A refusal is correct; guessing is not.
 
 ## An unread count on the agent's status line
 

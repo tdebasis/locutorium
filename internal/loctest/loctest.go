@@ -47,8 +47,9 @@ type Server struct {
 	// URL is the client URL (nats://127.0.0.1:<ephemeral>).
 	URL string
 	// MonitorURL is the HTTP monitoring endpoint, set only when Boot was asked
-	// for one; empty otherwise. The presence model's registry/status read
-	// connection state from here.
+	// for one; empty otherwise. Nothing in this build reads it: the shell
+	// implementation's registry and status once read connection state from
+	// here, and that implementation is deleted.
 	MonitorURL string
 }
 

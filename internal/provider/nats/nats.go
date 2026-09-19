@@ -280,7 +280,7 @@ func (p *Provider) topicSubjects() map[string]uint64 {
 // Status writes one line per REGISTERED SEAT: how many messages that seat has
 // not yet taken.
 //
-// THE LEDGER IS THE ROSTER, NOT THE `endpoints` FILE. A seat exists because it
+// THE LEDGER, NOT THE `endpoints` FILE. A seat exists because it
 // subscribed, and the ledger is the record of that; the static file was a list
 // somebody maintained by hand, so it reported seats that had gone and omitted
 // seats that had arrived. A row the ledger cannot read is left out of the
