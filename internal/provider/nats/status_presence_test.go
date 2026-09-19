@@ -108,9 +108,9 @@ func TestStatusPrintsAQuestionMarkForANamespacedEndpointWithNoQueue(t *testing.T
 	if err := p.Status(&out); err != nil {
 		t.Fatalf("Status: %v", err)
 	}
-	// ENDPOINT ORDER, NOT FILE ORDER. The roster is the ledger, and a ledger
-	// is a directory, so the report is sorted rather than left in whatever
-	// order a hand-maintained file happened to list.
+	// ENDPOINT ORDER, NOT FILE ORDER. The ledger is a directory, so the report
+	// is sorted rather than left in whatever order a hand-maintained file
+	// happened to list.
 	want := "workshop.clerk unread: ?\nworkshop.scribe unread: 1\n"
 	if out.String() != want {
 		t.Errorf("got:\n%q\nwant:\n%q", out.String(), want)

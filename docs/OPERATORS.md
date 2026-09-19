@@ -39,8 +39,8 @@ never a silent pass.
 
 `loc start` writes `config` when there is none, prints every default it wrote, and runs the broker.
 It never rewrites a `config` that is already there, so a key you edited survives every later start.
-There is no roster file: a seat exists while it is subscribed, and the ledger is what `loc status`
-reads.
+There is no single ledger file: a seat exists while it is subscribed, and the ledger — one file per
+endpoint under `run/presence` — is what `loc status` reads.
 
 **If the `config` file goes missing, run `loc start`.** It writes the file again from the key table.
 Every other verb that opens the broker refuses a home with no `config`, and says where it looked. A

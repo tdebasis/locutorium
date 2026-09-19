@@ -10,7 +10,7 @@ never means a particular deployment.
 | **the locutorium** | the bus: `loc`, the medium, the queues and topics | the one room where speaking is allowed |
 | **endpoint** | a named mailbox; a row in the ledger while its seat is subscribed | a member of the house |
 | **seat** | the running agent that holds an endpoint and speaks as it | the person in the chair |
-| **ledger** | which endpoints are registered right now. `loc status` reads it, and no roster file exists. | the attendance book's open page |
+| **ledger** | which endpoints are registered right now: one file per endpoint under `run/presence`, not a single file. `loc status` reads it. | the attendance book's open page |
 | **attendance** | a registered seat: its `loc mcp` server holds the endpoint and rings its bell | being present in the room |
 | **queue** | a per-endpoint stream, `QUEUE_<ep>`, work-queue retention: a message is removed when read | a word to one person, held until they come |
 | **topic** | the shared stream `TOPICS`, subjects `topic.<name>`, every reader has a cursor | the room where the house converses |

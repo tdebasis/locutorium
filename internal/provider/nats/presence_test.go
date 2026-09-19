@@ -228,7 +228,7 @@ func TestEmitAgainstADeadBrokerReturnsQuickly(t *testing.T) {
 
 // ---------------------------------------------------------------- registry
 
-// Nobody answering is an ERROR. An empty roster and no supervisor at all are
+// Nobody answering is an ERROR. An empty ledger and no supervisor at all are
 // different facts, and a command that prints nothing and exits zero cannot
 // tell them apart.
 func TestRequestWithNobodyAnswering(t *testing.T) {

@@ -489,8 +489,7 @@ func TestStatusCountsPendingPerEndpoint(t *testing.T) {
 
 // seedLedger writes one registration per endpoint, which is what a subscribe
 // would have left behind. STATUS READS THE LEDGER, not the `endpoints` file
-// (#27): the roster is the record of who subscribed, so a harness that names
-// endpoints has to leave that record.
+// (#27), so a harness that names endpoints has to leave that record.
 func seedLedger(t *testing.T, home string, endpoints ...string) {
 	t.Helper()
 	dir := filepath.Join(home, "run", "presence")
@@ -504,7 +503,7 @@ func seedLedger(t *testing.T, home string, endpoints ...string) {
 	}
 }
 
-// clearLedger empties the roster, which is what "nobody has subscribed" is.
+// clearLedger empties the ledger, which is what "nobody has subscribed" is.
 func clearLedger(t *testing.T, home string) {
 	t.Helper()
 	if err := os.RemoveAll(filepath.Join(home, "run", "presence")); err != nil {
