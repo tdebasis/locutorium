@@ -762,7 +762,8 @@ func TestWatchWritesWhatTheStreamCarried(t *testing.T) {
 // --------------------------------------------------------------------- status
 
 // An endpoint nobody registered is a truthful answer to a fair question, not a
-// failure — and it says which of the three facts it has no basis for.
+// failure. It says which of the four facts it has no basis for, and the medium
+// answers the one fact that is the medium's to answer.
 func TestStatusOfAnUnregisteredEndpoint(t *testing.T) {
 	newPresenceDeployment(t)
 
@@ -770,8 +771,79 @@ func TestStatusOfAnUnregisteredEndpoint(t *testing.T) {
 	assertResult(t, code, out, errOut, 0,
 		"atelier.clerk\n"+
 			"  registered: no\n"+
+			"  attending:  no (no queue: a send to this endpoint is refused)\n"+
 			"  process:    unknown (no registration)\n"+
 			"  activity:   unknown (no registration)\n", "")
+}
+
+// THE DEFECT IN #135. A seat whose queue is gone is registered, alive and
+// working by every fact this report held before, while every send to it is
+// refused. The attending fact is the one that sees it, and it is asked of the
+// medium because that is where the answer is.
+func TestStatusSeesARegisteredSeatWithNoQueue(t *testing.T) {
+	d := newPresenceDeployment(t)
+	if code, _, errOut := exec("subscribe", "workshop.scribe", "--pid", alivePid(),
+		"--type", "tmux", "--version", "3.2.0"); code != 0 {
+		t.Fatalf("subscribe exited %d (stderr %q)", code, errOut)
+	}
+	// The row survives and the queue does not, which is the state the sweep
+	// repairs and the state the seat could not previously see.
+	delete(d.spy.exists, "workshop.scribe")
+
+	code, out, errOut := exec("status", "workshop.scribe")
+	if code != 0 || errOut != "" {
+		t.Fatalf("exit=%d stderr=%q; want a report", code, errOut)
+	}
+	if !strings.Contains(out, "  attending:  no (no queue: a send to this endpoint is refused)\n") {
+		t.Errorf("a seat with no queue was not reported unreachable:\n%s", out)
+	}
+	if !strings.Contains(out, "  registered: yes") || !strings.Contains(out, "  process:    alive") {
+		t.Errorf("the report lost a local fact:\n%s", out)
+	}
+}
+
+// A seat that subscribed holds a queue, and the same question answers yes.
+func TestStatusSeesASubscribedSeatAttending(t *testing.T) {
+	newPresenceDeployment(t)
+	if code, _, errOut := exec("subscribe", "workshop.scribe", "--pid", alivePid(),
+		"--type", "tmux", "--version", "3.2.0"); code != 0 {
+		t.Fatalf("subscribe exited %d (stderr %q)", code, errOut)
+	}
+
+	code, out, errOut := exec("status", "workshop.scribe")
+	if code != 0 || errOut != "" {
+		t.Fatalf("exit=%d stderr=%q; want a report", code, errOut)
+	}
+	if !strings.Contains(out, "  attending:  yes (queue exists)\n") {
+		t.Errorf("a subscribed seat was not reported attending:\n%s", out)
+	}
+}
+
+// THE PROPERTY THAT MUST SURVIVE. This verb existed to answer when the broker
+// was the thing that was wrong. A medium that refuses the attendance question
+// costs the report that one line and nothing else: the other three facts print
+// and the verb still exits 0.
+func TestStatusAnswersWhenTheMediumCannot(t *testing.T) {
+	d := newPresenceDeployment(t)
+	if code, _, errOut := exec("subscribe", "workshop.scribe", "--pid", alivePid(),
+		"--type", "tmux", "--version", "3.2.0"); code != 0 {
+		t.Fatalf("subscribe exited %d (stderr %q)", code, errOut)
+	}
+	d.spy.existsErr = fmt.Errorf("connect: connection refused")
+
+	code, out, errOut := exec("status", "workshop.scribe")
+	if code != 0 || errOut != "" {
+		t.Fatalf("exit=%d stderr=%q; a broker that cannot answer must not fail the report", code, errOut)
+	}
+	if !strings.Contains(out, "  attending:  unknown (could not ask: connect: connection refused)\n") {
+		t.Errorf("the report did not say it could not ask:\n%s", out)
+	}
+	if strings.Contains(out, "  attending:  no") {
+		t.Errorf("a question that could not be asked was reported as an absent queue:\n%s", out)
+	}
+	if !strings.Contains(out, "  registered: yes") || !strings.Contains(out, "  process:    alive") {
+		t.Errorf("a broker that cannot answer cost the report a local fact:\n%s", out)
+	}
 }
 
 // The idle window is a deployment's to set, and one it has set wrongly is

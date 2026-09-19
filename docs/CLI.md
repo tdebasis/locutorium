@@ -18,7 +18,7 @@ Errors print `loc: <message>` on stderr and exit **1**. Everything else exits **
 | `loc sweep` | reconcile every row, queue and process |
 | `loc emit <kind> <endpoint> ...` | publish one lifecycle or activity event |
 | `loc status` | the daemon, every seat, and the mail waiting |
-| `loc status <endpoint>` | one agent's three facts, each with its reason |
+| `loc status <endpoint>` | one agent's four facts, each with its reason |
 | `loc unread <endpoint>` | mail that endpoint has not taken: a number, or the word `unknown` |
 | `loc topics` | topics with traffic in the window |
 | `loc registry [<instance>] [--json]` | who is registered in an instance, asked of that instance's host; fails when no host answers |
@@ -459,7 +459,7 @@ an endpoint has read, it has a cursor, and a message handed to it and not yet ac
 stored while no longer owed. Where there is no cursor yet, the queue's own count is the figure —
 under work-queue retention a stored message is an untaken one.
 
-With an endpoint it is the presence report: three facts, **each with the reason for it**. *Away*
+With an endpoint it is the presence report: four facts, **each with the reason for it**. *Away*
 because there is no process and *idle* because no event arrived inside the window are different
 situations, and a report that printed only the conclusion would hide which one it is looking at
 (PRESENCE.md §Command-line operations).
@@ -467,15 +467,42 @@ situations, and a report that printed only the conclusion would hide which one i
 ```
 workshop.scribe
   registered: no
+  attending:  no (no queue: a send to this endpoint is refused)
   process:    unknown (no registration)
   activity:   unknown (no registration)
 ```
 
-It touches no medium — every answer it gives is held locally, which is what lets it answer at all
-when the broker is the thing that is wrong. An unregistered endpoint is a truthful answer to a fair
-question rather than a failure, so it exits **0**; a name that is not of the form
-`<instance>.<agent>`, or an `idle_timeout` this deployment cannot parse, exits **1**. An event counts
-as current for `idle_timeout` after it arrived.
+**`attending` asks the broker whether this endpoint holds a queue.** It is the same question the
+send path asks, so a `no` here means a send to this endpoint is refused now. A seat whose queue is
+gone is registered, alive and working by the other three facts while it can receive nothing, and
+before this line existed the seat had no way to learn it (#135).
+
+The line has three values and not two.
+
+| value | what it means |
+|---|---|
+| `yes (queue exists)` | the broker holds a queue; a send to this endpoint is delivered |
+| `no (no queue: a send to this endpoint is refused)` | the broker was asked and holds no queue |
+| `unknown (could not ask: <reason>)` | no provider opened, the provider carries no presence, or the broker did not answer |
+
+`unknown` is never `no`. A question that could not be put says nothing about the endpoint, and a
+report that printed `no` for it would accuse a healthy seat on the strength of a broker it never
+reached.
+
+Three of the four facts are held locally, and the medium cannot take them away. **A broker that
+cannot answer costs this report the `attending` line alone**: the other three print and the verb
+still exits **0**. That is what lets it answer at all when the broker is the thing that is wrong.
+An unregistered endpoint is a truthful answer to a fair question rather than a failure, so it also
+exits **0**; a name that is not of the form `<instance>.<agent>`, or an `idle_timeout` this
+deployment cannot parse, exits **1**. An event counts as current for `idle_timeout` after it
+arrived.
+
+The `attending` question is asked only when a person or a consumer asks for this report. **Nothing
+polls it.** No daemon, no sweep and no bell checks it on a cadence, so a seat learns it is
+unreachable when it asks and not before.
+
+The ask waits as long as opening the provider waits, and no longer. Against a dead broker the
+shared provider can take about 13 seconds to give up. This verb adds no clock of its own.
 
 ## unread
 
