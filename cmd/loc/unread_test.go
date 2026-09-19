@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tdebasis/locutorium/internal/loctest"
 )
@@ -100,9 +101,15 @@ func TestUnreadSaysUnknownWhenTheCountCannotBeRead(t *testing.T) {
 		assertUnknown(t, code, out, errOut)
 	})
 
-	// A home with no config file is not a deployment, and the medium is never
-	// asked. The verb still owes the caller the one word it can act on.
-	t.Run("the home has no config file", func(t *testing.T) {
+	// THE DIAL IS REFUSED BEFORE IT LEAVES THE PROCESS. This home holds no
+	// config file, so nats_url resolves to the key table's default, and the
+	// provider's guard refuses that address under `go test`
+	// (internal/provider/nats/guard.go). The refusal that a home with no
+	// config file earns on its own is pinned where it belongs, in
+	// internal/provider/nats/guard_test.go
+	// (TestAHomeWithNoConfigFileIsRefusedAndNothingIsDialled). What this case
+	// holds is the verb's answer when the medium is never asked at all.
+	t.Run("the address is refused before anything is dialled", func(t *testing.T) {
 		home := t.TempDir()
 		t.Setenv("LOC_HOME", home)
 		t.Setenv("LOC_IDENTITY", e1)
@@ -148,5 +155,50 @@ func TestUnreadRefusesABadArgumentBeforeItOpensAnything(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "invalid endpoint name 'scribe'") {
 		t.Errorf("stderr: got %q, want the refusal to name what was wrong with the argument", errOut)
+	}
+}
+
+// A MEDIUM THAT NEVER ANSWERS IS THE SAME AS ONE THAT CANNOT, and the verb
+// says so on its own clock rather than on the medium's.
+//
+// The provider's waits are far longer than a status line's timer: a dial plus
+// two JetStream requests that each run to their default is about thirteen
+// seconds. A broker that accepts the connection and then goes quiet produces
+// no error at all, so nothing short of a deadline ends the wait. This case
+// stands in for that broker with a count that never returns.
+//
+// IT NEEDS NO BROKER AND NO HOME OF ITS OWN. The seam replaces the whole ask,
+// so nothing here opens a provider. The package's TestMain already puts every
+// case in a scratch LOC_HOME with a closed port, which is more than the
+// argument check needs.
+//
+// THE PLANT THAT TURNS THIS RED: select only on the result channel, dropping
+// the time.After case. The red is a timeout panic from `go test` rather than a
+// failed assertion, because the verb then waits on a count that never comes.
+func TestUnreadSaysUnknownWhenNoAnswerComesInTime(t *testing.T) {
+	// Closed in cleanup, so the stand-in returns and its goroutine ends with
+	// the case rather than outliving it.
+	held := make(chan struct{})
+	t.Cleanup(func() { close(held) })
+
+	realCount, realBound := unreadCount, unreadBound
+	t.Cleanup(func() { unreadCount, unreadBound = realCount, realBound })
+	unreadCount = func(string) (int, error) {
+		<-held
+		return 0, nil
+	}
+	unreadBound = 50 * time.Millisecond
+
+	start := time.Now()
+	code, out, errOut := exec("unread", e1)
+	elapsed := time.Since(start)
+
+	assertUnknown(t, code, out, errOut)
+	// Generous for a loaded runner. The bound is 50ms here and 2s in the
+	// shipped binary; anything approaching a second means the deadline did
+	// not fire and the verb waited on the medium.
+	if elapsed > time.Second {
+		t.Errorf("the verb took %s with a bound of %s; the deadline did not end the wait",
+			elapsed, 50*time.Millisecond)
 	}
 }
