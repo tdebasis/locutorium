@@ -32,6 +32,7 @@ type presenceSpy struct {
 
 	created, deleted []string
 	exists           map[string]bool
+	unqualified      []string
 	emitted          [][]byte
 	requested        []string
 	watched          string
@@ -73,6 +74,18 @@ func (s *presenceSpy) Queues() ([]string, error) {
 			out = append(out, e)
 		}
 	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// UnqualifiedQueues is the other listing: queue objects whose name is not an
+// endpoint, by raw name. The spy holds them apart from exists on purpose —
+// they are not endpoints, so no verb can ask after one by name.
+func (s *presenceSpy) UnqualifiedQueues() ([]string, error) {
+	if s.queuesErr != nil {
+		return nil, s.queuesErr
+	}
+	out := append([]string(nil), s.unqualified...)
 	sort.Strings(out)
 	return out, nil
 }

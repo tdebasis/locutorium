@@ -435,6 +435,7 @@ workshop.clerk: queue missing, next beat repairs it
 atelier.scribe: pid dead, next beat reaps it
 workshop.legacy: row unreadable: <reason>
 atelier.stray: queue with no row, next beat removes it
+QUEUE_scribe: queue with an unqualified name; the sweep cannot see it; remove it with the broker's own tool
 ```
 
 **It performs none of those repairs.** Run it twice and the answer is the same, because a read that
@@ -456,6 +457,12 @@ an older one belongs to a previous occupant of
 the endpoint. A `read` by that seat after the event removes the field again — the seat took its
 mail, so something reaches it. The log is `$LOC_HOME/run/log/<day>.jsonl`. A log that `status`
 cannot read adds no field, and it does not fail the report.
+
+The last line of that block names a queue whose name is not an endpoint. A deployment made it
+before an endpoint carried an instance name, so the name has no instance in it. The sweep does
+not see such a queue and never removes it. A bare name does not say which deployment made the
+queue, and a sweep removes only what its own deployment made. `status` names it, and the broker's
+own command-line tool removes it.
 
 Then the unread count for each **registered seat**. The seats come from the ledger, not from an
 `endpoints` file: a seat exists because it subscribed. If the medium is unreachable this prints `?`

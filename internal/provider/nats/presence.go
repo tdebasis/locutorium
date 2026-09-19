@@ -194,6 +194,10 @@ func (p *Provider) Watch(instance string, w io.Writer) error {
 // rather than wait, because it acts on what the list said.
 const queueListTimeout = 5 * time.Second
 
+// queueStreamPrefix marks a backing object as a queue of ours. An object
+// without it belongs to something else in the store and is never reported.
+const queueStreamPrefix = "QUEUE_"
+
 // endpointOfStream reads a backing-object name back as the endpoint it was
 // derived from, and says whether it is one of ours.
 //
@@ -202,42 +206,83 @@ const queueListTimeout = 5 * time.Second
 // underscore in the name was a dot. Anything that is not a queue object —
 // TOPICS, or whatever else shares the store — is not ours and is not returned.
 func endpointOfStream(name string) (string, bool) {
-	const prefix = "QUEUE_"
-	if !strings.HasPrefix(name, prefix) {
+	if !strings.HasPrefix(name, queueStreamPrefix) {
 		return "", false
 	}
-	endpoint := strings.ReplaceAll(strings.TrimPrefix(name, prefix), "_", ".")
+	endpoint := strings.ReplaceAll(strings.TrimPrefix(name, queueStreamPrefix), "_", ".")
 	if presence.ValidEndpoint(endpoint) != nil {
 		return "", false
 	}
 	return endpoint, true
 }
 
-// Queues lists every endpoint that has a queue here.
+// eachStream hands the name of every object in the store to visit, once.
 //
 // THE ERROR IS CHECKED AFTER THE CHANNEL DRAINS, WHICH IS THE WHOLE POINT. The
 // lister pages through the store and closes its channel both when it has
 // finished and when it has failed, so a caller that ranges and returns what it
 // collected reports a partial listing as a complete one. Reading Err after the
 // range is what makes "I could not finish" different from "there are no more".
-func (p *Provider) Queues() ([]string, error) {
-	if err := p.connect(); err != nil {
-		return nil, err
-	}
+//
+// Both listings below share this walk so that the rule above has one home. A
+// second copy of it is a second place for it to rot.
+// The caller connects first; this walks a connection it is given.
+func (p *Provider) eachStream(visit func(name string)) error {
 	js, err := jetstream.New(p.nc)
 	if err != nil {
-		return nil, fmt.Errorf("cannot list the queues: %v", err)
+		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), queueListTimeout)
 	defer cancel()
 	lister := js.ListStreams(ctx)
-	var out []string
 	for info := range lister.Info() {
-		if endpoint, ok := endpointOfStream(info.Config.Name); ok {
+		visit(info.Config.Name)
+	}
+	return lister.Err()
+}
+
+// Queues lists every endpoint that has a queue here.
+func (p *Provider) Queues() ([]string, error) {
+	if err := p.connect(); err != nil {
+		return nil, err
+	}
+	var out []string
+	err := p.eachStream(func(name string) {
+		if endpoint, ok := endpointOfStream(name); ok {
 			out = append(out, endpoint)
 		}
+	})
+	if err != nil {
+		return nil, fmt.Errorf("cannot list the queues: %v", err)
 	}
-	if err := lister.Err(); err != nil {
+	sort.Strings(out)
+	return out, nil
+}
+
+// UnqualifiedQueues lists every queue object whose name does not read back as
+// an endpoint, by its raw name.
+//
+// It is the complement of Queues over the same prefix, and the two together
+// account for every queue object in the store. An object without the QUEUE_
+// prefix — TOPICS, or whatever else shares the store — is not a queue of ours
+// and is in neither listing.
+//
+// Nothing here deletes one. See provider.Presence for why.
+func (p *Provider) UnqualifiedQueues() ([]string, error) {
+	if err := p.connect(); err != nil {
+		return nil, err
+	}
+	var out []string
+	err := p.eachStream(func(name string) {
+		if !strings.HasPrefix(name, queueStreamPrefix) {
+			return
+		}
+		if _, ok := endpointOfStream(name); ok {
+			return
+		}
+		out = append(out, name)
+	})
+	if err != nil {
 		return nil, fmt.Errorf("cannot list the queues: %v", err)
 	}
 	sort.Strings(out)
