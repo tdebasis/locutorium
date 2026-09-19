@@ -37,7 +37,7 @@ const listenReconnectWait = 1 * time.Second
 // deaf, which is the failure nobody notices. Each re-establishment calls
 // reconnected, because arrivals during the gap were seen by no one.
 func (p *Provider) WatchQueue(endpoint string, arrived func(sender string), reconnected func()) (func(), error) {
-	nc, err := Dial(config.Value(config.NATSURL),
+	nc, err := Dial(p.brokerURL(),
 		natsgo.Name("loc"),
 		natsgo.Timeout(ackTimeout),
 		natsgo.ErrorHandler(p.noteRefusal),

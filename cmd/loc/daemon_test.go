@@ -410,7 +410,7 @@ func TestABeatRecordsASweepThatFailed(t *testing.T) {
 	// kernel handed out and then closed, so there is no broker to reach.
 	writeFile(t, filepath.Join(home, "config"), "nats_url = "+loctest.ClosedPort(t)+"\n")
 	beatDir := filepath.Join(home, "run", "heartbeat")
-	beatOnce(&strings.Builder{}, beatDir)
+	beatOnce(&strings.Builder{}, beatDir, withPresence)
 	lines := beatLines(t, filepath.Join(beatDir, time.Now().Format("2006-01-02")+".log"))
 	if len(lines) != 1 || !strings.Contains(lines[0], "sweep failed:") {
 		t.Errorf("the log reads %v, want one line naming the failure", lines)

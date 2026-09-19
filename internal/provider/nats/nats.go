@@ -46,6 +46,11 @@ type Provider struct {
 	nc *natsgo.Conn
 	js natsgo.JetStreamContext
 
+	// pinned is the broker this provider talks to, whatever the file says
+	// now. Empty means "ask the config at every use", which is what a CLI
+	// verb wants. See At and brokerURL.
+	pinned string
+
 	// The read path's cursors — one bound pull subscription per backing
 	// object, so a drain that fetches one message at a time does not re-bind
 	// per message — and the messages it has handed out that have not been
@@ -60,8 +65,31 @@ type Provider struct {
 	refused []string
 }
 
-// New returns an unconnected provider.
+// New returns an unconnected provider. It reads the deployment's nats_url at
+// every use, which is right for a CLI process that does one thing and exits.
 func New() (provider.Provider, error) { return &Provider{}, nil }
+
+// At returns an unconnected provider PINNED to url.
+//
+// THE DAEMON MUST SWEEP THE BROKER IT RUNS. The sweep re-read nats_url on
+// every beat, so a config file rewritten under a running daemon moved the
+// sweep onto another deployment's broker, where this ledger claims nothing and
+// the orphan pass destroys live queues. The daemon hands its own server's
+// address here once, at boot, and no later edit of the file can move it.
+//
+// THE PIN IS ON THE PROVIDER AND NOT IN A PACKAGE VARIABLE. runDaemon runs
+// in-process inside the test binary, and a package variable would re-point
+// every case that came after it.
+func At(url string) *Provider { return &Provider{pinned: url} }
+
+// brokerURL is the address this provider dials: the pinned one when it has
+// one, and otherwise what the deployment says right now.
+func (p *Provider) brokerURL() string {
+	if p.pinned != "" {
+		return p.pinned
+	}
+	return config.Value(config.NATSURL)
+}
 
 // Close releases the connection, if one was ever opened.
 func (p *Provider) Close() {
@@ -89,7 +117,7 @@ func (p *Provider) connectWithin(dial time.Duration) error {
 	if p.nc != nil {
 		return nil
 	}
-	url := config.Value(config.NATSURL)
+	url := p.brokerURL()
 	// Dial carries the guard against the default broker under go test; see
 	// guard.go and the outage it records.
 	nc, err := Dial(url,
