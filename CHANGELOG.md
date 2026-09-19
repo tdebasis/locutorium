@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.0.9](https://github.com/tdebasis/locutorium/compare/v0.0.8...v0.0.9) (2026-09-19)
+
+
+### Features
+
+* **status:** say whether a seat is attending ([#160](https://github.com/tdebasis/locutorium/issues/160)) ([2eaa9ef](https://github.com/tdebasis/locutorium/commit/2eaa9ef41bf2aab59e5508cab941c687c3a4a185))
+
+
+### Bug Fixes
+
+* **status:** count unread mail as the queue depth ([#164](https://github.com/tdebasis/locutorium/issues/164)) ([5928135](https://github.com/tdebasis/locutorium/commit/5928135e2915b8cdabb194618a53277d5f133bb2))
+
 ## [0.0.8](https://github.com/tdebasis/locutorium/compare/v0.0.7...v0.0.8) (2026-09-19)
 
 
