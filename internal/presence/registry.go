@@ -32,12 +32,24 @@ const registryLabel = 12
 // from an agent that declared no display name at all.
 const notGiven = "(not given)"
 
+// noHouse is the header for a ledger file whose name yields no house. It is
+// placed after every real house by the sort below, and not by its spelling:
+// the open bracket sorts BEFORE every letter, so plain string order would put
+// it first.
+const noHouse = "(no house)"
+
 // Registry renders the whole record of every agent in rows, and names every
 // row in unreadable that could not be parsed.
 //
 // house selects one house; the empty string means every house on this machine.
 // An unreadable row belongs to the house its FILE NAME names, because the file
 // name is the ledger's key and is readable when nothing inside the file is.
+//
+// A FILE NAME THAT YIELDS NO HOUSE STILL GETS A HEADER. A stray `notes.json`
+// in the ledger directory is a name with no dot, so it has no house at all,
+// and it used to print under an empty one — a blank line. It goes under
+// noHouse instead, last, after every real house. With a house NAMED it is not
+// shown: the caller asked about one house, and this row is in none.
 //
 // An empty registry is an ANSWER AND NOT A FAILURE. Nobody registered is what
 // a fresh deployment looks like, and a caller that asked who is registered has
@@ -53,18 +65,25 @@ func Registry(house string, rows []*Registration, unreadable []Unreadable) strin
 
 	byHouse := map[string][]registryEntry{}
 	for _, r := range kept {
-		h := Instance(r.Endpoint)
-		byHouse[h] = append(byHouse[h], registryEntry{endpoint: r.Endpoint, reg: r})
+		byHouse[headerFor(r.Endpoint)] = append(byHouse[headerFor(r.Endpoint)],
+			registryEntry{endpoint: r.Endpoint, reg: r})
 	}
 	for _, u := range keptBad {
-		h := Instance(u.Endpoint)
-		byHouse[h] = append(byHouse[h], registryEntry{endpoint: u.Endpoint, err: u.Err})
+		byHouse[headerFor(u.Endpoint)] = append(byHouse[headerFor(u.Endpoint)],
+			registryEntry{endpoint: u.Endpoint, err: u.Err})
 	}
 	houses := make([]string, 0, len(byHouse))
 	for h := range byHouse {
 		houses = append(houses, h)
 	}
-	sort.Strings(houses)
+	// Real houses by name, and the houseless header last whatever it is
+	// spelled. The leftovers belong at the end of the report.
+	sort.Slice(houses, func(i, j int) bool {
+		if (houses[i] == noHouse) != (houses[j] == noHouse) {
+			return houses[j] == noHouse
+		}
+		return houses[i] < houses[j]
+	})
 
 	var b strings.Builder
 	for _, h := range houses {
@@ -99,6 +118,14 @@ type registryEntry struct {
 	err      error
 }
 
+// headerFor is the house line an endpoint prints under.
+func headerFor(endpoint string) string {
+	if h := Instance(endpoint); h != "" {
+		return h
+	}
+	return noHouse
+}
+
 func line(b *strings.Builder, label, value string) {
 	fmt.Fprintf(b, "    %-*s%s\n", registryLabel, label, value)
 }
@@ -111,12 +138,19 @@ func processFacts(reg *Registration) string {
 
 // displayFacts is `<name> (<role>)`, or `<name>` when the agent declared no
 // role. A Display the agent never sent is not given at all.
+//
+// THE NAME TAKES THE NOT-GIVEN RULE EVEN WHEN THERE IS A ROLE. `subscribe
+// --role` with no `--display` stores a Display holding a role and an empty
+// name, which is a real row and not a malformed one. Printing it as
+// `(Records)` makes an absent name look like the whole display, and the rule
+// this report keeps everywhere else is that an absent value and an empty one
+// do not look alike.
 func displayFacts(d *Display) string {
 	if d == nil {
 		return notGiven
 	}
 	if d.Role != "" {
-		return strings.TrimSpace(d.Name + " (" + d.Role + ")")
+		return orNotGiven(d.Name) + " (" + d.Role + ")"
 	}
 	return orNotGiven(d.Name)
 }
@@ -130,10 +164,13 @@ func orNotGiven(s string) string {
 
 // registryJSON is the envelope --json prints.
 //
-// THE RECORDS ARE THE STORED ONES, UNRESHAPED. A consumer already reads this
-// shape, and a second shape for the same records is a second format for it to
-// learn. The unreadable key appears only when a row could not be read, so its
-// presence is itself the signal.
+// EACH RECORD IS AS THIS BUILD READS IT: every field this build knows, with
+// the stored values unchanged. A field written by a newer build is not
+// carried, because the row is parsed into Registration and marshalled back
+// out, and a key Registration has no home for is dropped in between. A
+// consumer already reads this shape, and a second shape for the same records
+// would be a second format for it to learn. The unreadable key appears only
+// when a row could not be read, so its presence is itself the signal.
 type registryJSON struct {
 	Agents     []*Registration  `json:"agents"`
 	Unreadable []unreadableJSON `json:"unreadable,omitempty"`

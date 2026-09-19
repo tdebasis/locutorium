@@ -595,12 +595,17 @@ workshop
 
 Every label prints for every agent. A field the agent did not give prints `(not given)`, so an
 absent value and an empty one do not look alike. `display` is `<name> (<role>)`, or `<name>` when
-no role was given. A row the ledger cannot parse is named with `unreadable: <reason>` under its
-endpoint rather than dropped: a row that cannot be read is not a row that is not there.
+no role was given; an agent that gave a role and no name prints `(not given) (<role>)`, because the
+name is a field it did not give. A row the ledger cannot parse is named with `unreadable: <reason>`
+under its endpoint rather than dropped: a row that cannot be read is not a row that is not there.
+
+A ledger file whose name yields no instance — a stray `notes.json` — prints under the header
+`(no house)`, after every real instance. Naming an instance does not show it: it is in none.
 
 With `<instance>` omitted it means **every instance on this machine**. It needs no identity and
-works with `LOC_IDENTITY` unset. `--json` prints `{"agents":[…]}` holding the stored records
-unreshaped; an `"unreadable"` key is added only when a row could not be read.
+works with `LOC_IDENTITY` unset. `--json` prints `{"agents":[…]}`, each record as this build reads
+it: every field this build knows, with the stored values unchanged. A field written by a newer build
+is not carried. An `"unreadable"` key is added only when a row could not be read.
 
 Nobody registered prints `(no agents registered)` and exits **0**; an instance that holds nobody
 prints `(no agents registered in <instance>)` and exits **0**. An empty registry is an answer, not

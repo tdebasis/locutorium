@@ -265,3 +265,51 @@ func structure(report string) []string {
 	}
 	return out
 }
+
+// A role with NO display name is a real row: `subscribe --role` without
+// `--display` writes exactly that. The name is a field the agent did not give,
+// so it takes the same `(not given)` every other absent field takes. Printing
+// `(Records)` would make an absent name look like the whole display.
+func TestADisplayWithARoleAndNoNamePrintsNotGivenForTheName(t *testing.T) {
+	row := full("workshop.scribe")
+	row.Display = &Display{Role: "Records"}
+	got := Registry("", []*Registration{row}, nil)
+	if !strings.Contains(got, "    display:    (not given) (Records)\n") {
+		t.Errorf("a role with no name printed:\n%s", got)
+	}
+}
+
+// A ledger file whose name yields no house — a stray `notes.json`, a name with
+// no dot — is still reported, under a header that says it has no house. It
+// used to print under an EMPTY header, which is a blank line.
+func TestARowWithNoHousePrintsUnderItsOwnHeader(t *testing.T) {
+	bad := []Unreadable{{Endpoint: "notes", Err: errors.New("bad json")}}
+	rows := []*Registration{full("workshop.scribe")}
+	got := Registry("", rows, bad)
+	if strings.Contains(got, "\n\n") || strings.HasPrefix(got, "\n") {
+		t.Errorf("a houseless row printed under a blank header:\n%q", got)
+	}
+	// It sorts AFTER every real house, so the rows that have a house read as
+	// one list and the leftovers sit at the end.
+	want := []string{"workshop", "  workshop.scribe", "(no house)", "  notes"}
+	if order := structure(got); strings.Join(order, "|") != strings.Join(want, "|") {
+		t.Errorf("order %v, want %v", order, want)
+	}
+}
+
+// With a house named, a row that belongs to no house is not in it. The caller
+// asked about one house, and this row is not in any.
+func TestARowWithNoHouseIsNotInAnyNamedHouse(t *testing.T) {
+	bad := []Unreadable{{Endpoint: "notes", Err: errors.New("bad json")}}
+	got := Registry("workshop", []*Registration{full("workshop.scribe")}, bad)
+	if strings.Contains(got, "notes") || strings.Contains(got, "(no house)") {
+		t.Errorf("a houseless row appeared under a named house:\n%s", got)
+	}
+	b, err := RegistryJSON("workshop", []*Registration{full("workshop.scribe")}, bad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "notes") {
+		t.Errorf("a houseless row appeared in a named house's JSON: %s", b)
+	}
+}

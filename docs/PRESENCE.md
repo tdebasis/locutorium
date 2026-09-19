@@ -504,7 +504,9 @@ shape  { "agents": [ …one registration object per registered agent… ] }
 ```
 
 Each entry is the same shape as the `agent.subscribe` payload, so a consumer has one format to
-understand and can apply the listing exactly as it would apply the events it missed.
+understand and can apply the listing exactly as it would apply the events it missed. A reader gets
+each record as its build reads it: every field that build knows, with the stored values unchanged. A
+field written by a newer build is not carried.
 
 The ledger holds the registrations because whoever launched the agents wrote them there, beside the
 processes they describe. **The bus stores nothing**, and it is not asked: the registry answers with
