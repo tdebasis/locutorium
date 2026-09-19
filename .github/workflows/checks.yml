@@ -319,10 +319,23 @@ jobs:
     # own runner instead, while the repository stays private.
     # BEFORE the repository becomes public, change this back to macos-14. A
     # public repository must never run pull-request code on a person's
-    # machine, and hosted runners are free for public repositories.
+    # machine, and hosted runners are free for public repositories. The
+    # first step below enforces this at run time, but the runner must still
+    # be removed before the repository becomes public, because a fork can
+    # edit this file.
     runs-on: [self-hosted, macOS]
     timeout-minutes: 25
     steps:
+      - name: refuse a self-hosted run of a public repository
+        # Fails closed. If the repository becomes public while `runs-on`
+        # above still names the self-hosted runner, this step stops the job
+        # before the checkout, so no pull-request code reaches a person's
+        # machine. It does not replace removing the runner: a fork can edit
+        # this file.
+        if: runner.environment != 'github-hosted' && github.event.repository.private != true
+        run: |
+          echo "::error::this repository is not private and this job is on a self-hosted runner; set runs-on back to macos-14 and remove the runner"
+          exit 1
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: environment carries no operator secrets
         # This job now runs in a person's own account under a launchd
