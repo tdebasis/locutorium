@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.7](https://github.com/tdebasis/locutorium/compare/v0.0.6...v0.0.7) (2026-09-19)
+
+
+### Features
+
+* **cli:** add the unread verb, a count that a status line can trust ([#153](https://github.com/tdebasis/locutorium/issues/153)) ([4f80617](https://github.com/tdebasis/locutorium/commit/4f806173d5c6b57910ff4c01d5bc205ecb3af3c3))
+
+
+### Bug Fixes
+
+* **bell:** make a ring that the breaker suppressed later ([#152](https://github.com/tdebasis/locutorium/issues/152)) ([7f61a5d](https://github.com/tdebasis/locutorium/commit/7f61a5d93b7847e52d0e17dd591b8964be3d8124))
+* **bell:** ring again after a busy pane refuses ([#150](https://github.com/tdebasis/locutorium/issues/150)) ([2748f63](https://github.com/tdebasis/locutorium/commit/2748f6314bfdb92fa89141d5f9f0347e2e7df2fa))
+* **conformance:** isolate the tag-mode fixture from the real tags ([#128](https://github.com/tdebasis/locutorium/issues/128)) ([2f1a36b](https://github.com/tdebasis/locutorium/commit/2f1a36b74530ee2c8ff9ff004e955c991c6a7cd3))
+* **daemon:** refuse a home with no config file, and sweep only the daemon's own broker ([#147](https://github.com/tdebasis/locutorium/issues/147)) ([4b765d5](https://github.com/tdebasis/locutorium/commit/4b765d5558aeea20ad0ac754cc54a31a5c87889f))
+* **presence:** limit the sweep to instances in the ledger ([#140](https://github.com/tdebasis/locutorium/issues/140)) ([5f9fc0e](https://github.com/tdebasis/locutorium/commit/5f9fc0e2ec82a43f5dfb4c45e0508d69c61fb67c))
+
 ## [0.0.6](https://github.com/tdebasis/locutorium/compare/v0.0.5...v0.0.6) (2026-09-18)
 
 
