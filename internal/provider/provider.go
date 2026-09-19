@@ -76,10 +76,6 @@ type Presence interface {
 	// hard, because the caller is an agent's lifecycle hook.
 	Emit(instance string, event []byte) error
 
-	// Request asks a question of whoever is listening and returns the reply.
-	// Nobody listening is an error, which is the truthful answer.
-	Request(subject string, timeout time.Duration) ([]byte, error)
-
 	// Watch follows an instance's events, writing each as it arrives. It
 	// blocks, and returns when the connection closes.
 	Watch(instance string, w io.Writer) error

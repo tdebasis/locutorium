@@ -21,7 +21,7 @@ Errors print `loc: <message>` on stderr and exit **1**. Everything else exits **
 | `loc status <endpoint>` | one agent's four facts, each with its reason |
 | `loc unread <endpoint>` | mail that endpoint has not taken: a number, or the word `unknown` |
 | `loc topics` | topics with traffic in the window |
-| `loc registry [<instance>] [--json]` | who is registered in an instance, asked of that instance's host; fails when no host answers |
+| `loc registry [<instance>] [--json]` | every agent's whole registration record, read from the ledger; grouped by instance |
 | `loc watch [<instance>]` | follow an instance's event stream, read-only |
 | `loc version` | version string |
 
@@ -578,24 +578,39 @@ none — note that an unreachable medium looks the same as an empty one here.
 loc registry [<instance>] [--json]
 ```
 
-Who is registered in an instance, asked of that instance's host. Events describe changes and the bus
-keeps no history, so a consumer that started after an agent joined has missed the only event that
-carried its details; this asks for the current picture instead of replaying a history that does not
-exist (PRESENCE.md §Who is here right now).
+Every agent's whole registration record, grouped by instance. It reads the ledger on this machine
+(PRESENCE.md §Who is here right now), so it asks nothing over the bus and answers with the broker
+down.
 
-The request goes out on `registry.<instance>` and the host answers, because the host holds the
-registrations — it created them. **Nobody answering is a failure, not an empty list**: the command
-exits non-zero and names the subject that went unanswered. A host that answers with an empty list
-prints `(no agents registered)` and exits **0**; the two are different, and telling them apart is
-the point.
+```
+workshop
+  workshop.scribe
+    agent:      claude 2.1.278
+    process:    pid 4242, started Sat Sep 19 01:33:49 2026
+    registered: 2026-09-19T08:33:49.102Z
+    address:    %2
+    cwd:        /workspaces/scribe
+    display:    Scribe (Records)
+```
 
-With `<instance>` omitted it means the caller's own, taken from its identity. `--json` hands back
-what the host said, unreshaped — a consumer wants the reply, and a reply this tool had rewritten
-would be a second format to learn. The wait for an answer is a fixed two seconds.
+Every label prints for every agent. A field the agent did not give prints `(not given)`, so an
+absent value and an empty one do not look alike. `display` is `<name> (<role>)`, or `<name>` when
+no role was given. A row the ledger cannot parse is named with `unreadable: <reason>` under its
+endpoint rather than dropped: a row that cannot be read is not a row that is not there.
 
-**Under per-seat servers there is no host process to answer this**, so the question goes unanswered
-and the command fails with `no host is answering registry.<instance>`; `status <endpoint>` is the
-per-seat reading, and a ledger-backed fallback is tracked separately.
+With `<instance>` omitted it means **every instance on this machine**. It needs no identity and
+works with `LOC_IDENTITY` unset. `--json` prints `{"agents":[…]}` holding the stored records
+unreshaped; an `"unreadable"` key is added only when a row could not be read.
+
+Nobody registered prints `(no agents registered)` and exits **0**; an instance that holds nobody
+prints `(no agents registered in <instance>)` and exits **0**. An empty registry is an answer, not
+a failure. It exits **1** for a name that is not an instance name, an unknown flag, or a ledger
+directory it cannot read.
+
+It reports **no health fact**. Whether the process is alive, whether the queue exists and how much
+mail waits are `status`'s answers, derived from evidence this command does not look at. Two
+commands answering one question from two kinds of evidence would disagree one day, and neither
+output would say which of them is wrong.
 
 ## watch
 
@@ -840,8 +855,8 @@ verb that opens the medium refuses such a home and names the path it looked at. 
 and is silent on a key still takes the default above: that is what a hand-edited file relies on.
 
 Every key above except `monitor_url` is read by this build. The four wake keys are read by the
-seat's own `mcp` server, which is the only listener there is. `registry`'s wait for a host is fixed
-in the code, not a key.
+seat's own `mcp` server, which is the only listener there is. `registry` reads no key at all: it
+reads the ledger under this home and never opens the medium.
 
 When a breaker trips it says so in `run/<endpoint>.delivery.log` and **suppresses only the wake**.
 No message is lost; the next read still finds everything.

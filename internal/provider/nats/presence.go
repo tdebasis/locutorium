@@ -141,20 +141,6 @@ func (p *Provider) Emit(instance string, event []byte) error {
 	return p.nc.FlushTimeout(emitDial)
 }
 
-// Request asks a question of whoever is listening. Nobody listening is an
-// error: an empty list and no list at all are different answers, and a
-// command that prints nothing and exits zero cannot tell them apart.
-func (p *Provider) Request(subject string, timeout time.Duration) ([]byte, error) {
-	if err := p.connect(); err != nil {
-		return nil, err
-	}
-	msg, err := p.nc.Request(subject, nil, timeout)
-	if err != nil {
-		return nil, err
-	}
-	return msg.Data, nil
-}
-
 // Watch follows an instance's events, writing each payload as it arrives.
 //
 // THE RAW PAYLOAD IS WHAT IS WRITTEN. A consumer must tolerate fields it does

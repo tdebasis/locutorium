@@ -142,7 +142,7 @@ prints every default it wrote. It also runs the heartbeat, which sweeps every fi
 | `loc read [--peek]` | take what is yours | your queue, then the topics; without `--peek`, taken exactly once |
 | `loc status` | unread, by name | unread counts per endpoint |
 | `loc topics` | the rooms alive now | active topics in the window |
-| `loc registry` | who is at the door | asks an instance's host process over the bus. Each seat runs its own server, so no host process answers and the verb fails. |
+| `loc registry` | who is at the door | every registered agent's whole record, read from the ledger: type, version, pid, bell address, working folder, display name |
 | `loc watch` | the gallery | every envelope as it passes, read-only |
 | `loc transcript` | the day, read back | the message log joined by message: who sent what, and whether it was read |
 | `loc version` | the number | prints what this build was stamped as |
