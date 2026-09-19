@@ -643,6 +643,24 @@ once. Nothing is lost to a suppressed wake: the queue keeps the truth.
 the runtime's own log — stdout is the protocol's. No `wake` line is written for it: a failed bell is
 not a wake, and a log saying the pane was woken when it was not is worse than no log at all.
 
+**A busy pane is asked again.** The tmux notifier refuses a pane in copy mode and a pane that is not
+at an empty prompt. Both refusals say the seat is busy right now, and both end on their own. The
+server waits `wake_retry_seconds` and rings again. It asks the broker how much mail is waiting first,
+so the second bell carries the count the queue holds. A queue that reads empty ends the retry and
+logs `retry <endpoint> stopped: the queue is empty`. A ring that types logs its `wake` line and then
+`retry <endpoint> rang after <k> refusals`. Each wait is twice the one before it, up to 60 seconds.
+
+**A broken bell is not retried.** No pane address, a tmux that cannot be read, a courier that exited
+non-zero: asking again repairs none of these. The failure is recorded once and nothing is scheduled.
+
+**A busy refusal does not consume the breaker.** The caps limit how often the pane is typed into, and
+a refusal typed nothing. The minute and hour counters are given back for it. A ring that typed is
+charged, and a broken bell stays charged, because a notifier that failed will fail again.
+
+**The day's record holds one line per streak.** `bell-failed` is written for the first busy refusal
+and not for each retry. The delivery log keeps the per-attempt evidence: the notifier writes
+`nudge <endpoint> refused: <reason>` every time it refuses.
+
 **Four tools, and each is the verb of the same name** — `send {to, body}`, `read {peek?}`,
 `status {endpoint?}`, `topics {}`. Each runs this binary's own function and returns exactly what the
 command line prints, refusals included (`loc: <what>`). Around every call the server emits
@@ -714,6 +732,7 @@ the bell; something else must then run `subscribe` and `unsubscribe` around the 
 | `wake_window_seconds` | `5` | wakes are coalesced across this window (`loc mcp`) |
 | `wake_breaker_per_minute` | `6` | cap on wakes per minute (`loc mcp`) |
 | `wake_breaker_per_hour` | `60` | cap on wakes per hour (`loc mcp`) |
+| `wake_retry_seconds` | `15` | first wait before a busy pane is asked again; it doubles, up to 60s (`loc mcp`) |
 
 **`idle_window` is the old name of `idle_timeout`.** `loc` never rewrites a config file that exists,
 so a deployment that set the old key keeps a line that does nothing. The new key takes its own value,
@@ -721,7 +740,7 @@ which is `10m` unless the file sets it. Each run prints one line on stderr that 
 the value in force.
 
 **The defaults live in one table**, `internal/config/keys.go`. `loc start` writes the file from it on
-first run, with each key's comment above it, so the file and the code cannot drift apart. The three
+first run, with each key's comment above it, so the file and the code cannot drift apart. The four
 wake keys are the deployment's and are not in that table.
 
 **A default is not a deployment.** Every key above has one, so a home with no `config` file reads a
@@ -729,7 +748,7 @@ whole configuration that nobody chose, and its `nats_url` is another deployment'
 verb that opens the medium refuses such a home and names the path it looked at. A file that exists
 and is silent on a key still takes the default above: that is what a hand-edited file relies on.
 
-Every key above except `monitor_url` is read by this build. The three wake keys are read by the
+Every key above except `monitor_url` is read by this build. The four wake keys are read by the
 seat's own `mcp` server, which is the only listener there is. `registry`'s wait for a host is fixed
 in the code, not a key.
 
