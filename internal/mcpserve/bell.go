@@ -383,9 +383,17 @@ func (b *bell) retry() {
 	}
 	n, err := b.s.d.Unread(b.s.d.Endpoint)
 	if err != nil {
-		// A queue that cannot be counted gives no number to ring for, and the
-		// next arrival opens a streak of its own.
-		b.endStreak()
+		// A COUNT THAT CANNOT BE READ IS NOT AN EMPTY QUEUE. The broker can
+		// time out with the connection still up, so no reconnect comes to ask
+		// for the backlog, and the mail is still waiting. Ending the streak
+		// here left mail with no bell, no retry and no line in the log. The
+		// streak is kept and the question is asked again; the wait is already
+		// bounded by maxWakeRetry. The text of the error is not logged,
+		// because a client error can carry the broker's address.
+		b.mu.Lock()
+		b.scheduleRetry()
+		b.mu.Unlock()
+		b.s.log(fmt.Sprintf("retry %s could not read the count; it asks again", b.s.d.Endpoint))
 		return
 	}
 	if n <= 0 {

@@ -647,7 +647,9 @@ not a wake, and a log saying the pane was woken when it was not is worse than no
 at an empty prompt. Both refusals say the seat is busy right now, and both end on their own. The
 server waits `wake_retry_seconds` and rings again. It asks the broker how much mail is waiting first,
 so the second bell carries the count the queue holds. A queue that reads empty ends the retry and
-logs `retry <endpoint> stopped: the queue is empty`. A ring that types logs its `wake` line and then
+logs `retry <endpoint> stopped: the queue is empty`. A count that cannot be read does not end the
+retry: the server logs `retry <endpoint> could not read the count; it asks again`, and it waits for
+the next turn. A ring that types logs its `wake` line and then
 `retry <endpoint> rang after <k> refusals`. Each wait is twice the one before it, up to 60 seconds.
 
 **A broken bell is not retried.** No pane address, a tmux that cannot be read, a courier that exited
