@@ -160,6 +160,46 @@ func TestBell_ARetryThatFindsAnEmptyQueueStops(t *testing.T) {
 	}
 }
 
+// A COUNT THAT CANNOT BE READ IS NOT AN EMPTY QUEUE. The broker can time out
+// with the connection still up, and the mail is still waiting. A retry that
+// ended the streak there would leave mail with no bell, no retry and no line
+// in the log, which is the failure the retry exists to remove. The retry says
+// that it could not read the count, and it asks again.
+//
+// PLANT: in retry, make the `err != nil` arm call endStreak and return.
+func TestBell_ARetryThatCannotReadTheCountAsksAgain(t *testing.T) {
+	dir := home(t, "provider = none\n")
+	f := &fake{unread: 3, nudgeErrs: []error{busy("not a prompt")}}
+	b, sch, _ := retryBell(t, f, nil)
+
+	b.arrived("")
+	b.fire()
+
+	f.unreadErr = errors.New("context deadline exceeded")
+	sch.run(t, 0)
+
+	if got := f.bells(); len(got) != 1 {
+		t.Errorf("the seat was rung %v; the count was not known, so there was nothing to ring for", got)
+	}
+	if !retryArmed(b) {
+		t.Fatal("no retry is waiting; a count that cannot be read was taken for an empty queue")
+	}
+	if got := sch.delays(); len(got) != 2 || got[1] != 30*time.Second {
+		t.Errorf("the scheduled waits were %v; want [15s 30s]", got)
+	}
+	if log := delivery(t, dir); !strings.Contains(log, "retry "+seat+" could not read the count") {
+		t.Errorf("the failed read was not written down: %q", log)
+	}
+
+	// The broker answers again, and the mail that waited is announced.
+	f.unreadErr = nil
+	sch.run(t, 1)
+	got := f.bells()
+	if len(got) != 2 || got[1] != "🔔 3 new → read" {
+		t.Errorf("the bells were %v; the three messages that waited must be announced", got)
+	}
+}
+
 // A BROKEN BELL IS NOT RETRIED. There is no pane address, or tmux cannot be
 // read, or the courier exited non-zero: asking again repairs none of these,
 // and a retry every fifteen seconds would be a loop with no end.
