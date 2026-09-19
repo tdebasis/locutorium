@@ -47,6 +47,13 @@ Every other verb that opens the broker refuses a home with no `config`, and says
 live daemon keeps its own broker while the file is gone, but its sweep fails each beat, and the
 heartbeat log records that. `loc start` is the way back.
 
+The refusal reaches more than the sweep. No agent can send while the file is gone. An agent server
+that loses its connection cannot connect again, so that agent receives nothing until the file is
+back. A server that stays connected continues to work.
+
+`loc start` writes the defaults. It cannot restore a key that a person edited in the lost file. After
+a recovery, compare the new file with your own record of the old one, and edit it again.
+
 ## The service
 
 `./install.sh` builds `loc`, copies the stamped binary into `lib/locutorium`, and links `loc` at that
