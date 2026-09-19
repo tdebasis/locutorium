@@ -151,8 +151,12 @@ case "$n" in
 esac
 ```
 
+The script cannot hang. **The verb answers within 2 seconds**, even against a broker that accepts
+the connection and then says nothing.
+
 The script must name the **full endpoint**, `<instance>.<agent>`. A bare agent name is not an
-endpoint and the verb refuses it. `LOC_IDENTITY` already holds the full name.
+endpoint and the verb refuses it, printing nothing at all. `LOC_IDENTITY` already holds the full
+name.
 
 The warning branch catches `unknown` and everything else the verb could not produce, an empty answer
 included. Read it as "I cannot see your mail", not as "you have none". The reason is on standard

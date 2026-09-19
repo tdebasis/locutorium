@@ -495,6 +495,10 @@ printed, and the argument is a full `<instance>.<agent>` name.
 Four things stop the count. There is no config file. The broker does not answer. The endpoint has
 no queue. The store will not say.
 
+**The verb answers within 2 seconds.** A broker that accepts the connection and then says nothing
+reads `unknown` at that deadline. The medium's own waits are longer, so the verb keeps its own
+clock and a caller cannot be held past it.
+
 **A queue that does not exist reads `unknown`, never `0`.** A destroyed queue and an empty one are
 different situations. A status line that showed them alike would call a broken seat a quiet one.
 
@@ -502,6 +506,10 @@ different situations. A status line that showed them alike would call a broken s
 that ignores the exit code shows whatever the verb printed. An empty string is also what "no mail"
 looks like. A failure that printed nothing would therefore read as a quiet mailbox. The reason for
 the failure is still one `loc:` line on standard error.
+
+A bad argument prints **nothing at all** on standard out, and never `unknown`. A wrong argument
+count prints the verb list instead; a name that is not `<instance>.<agent>` prints only the refusal,
+on standard error. A status-line author should treat empty output as a reading that failed.
 
 `loc status` prints `?` for a count it could not read, and it keeps doing so. A report of many seats
 must not fail because one number is missing. This verb reports one seat to a script, so it fails
