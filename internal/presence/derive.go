@@ -6,20 +6,81 @@ import (
 	"time"
 )
 
-// Derive renders the three facts an endpoint's status reports, EACH WITH THE
+// Attendance is the answer to one question: does this endpoint hold a queue?
+// It is the question the send path asks, and a seat whose queue is gone is a
+// seat that cannot receive mail.
+//
+// IT HAS THREE STATES AND NOT TWO. "The broker says there is no queue" and
+// "the broker could not be asked" are different facts, and a bool reports the
+// second as the first. The zero value is the third state, so a caller that
+// forgets to fill this in says it did not ask rather than reporting an absent
+// queue.
+type Attendance struct {
+	asked  bool
+	exists bool
+	reason string
+}
+
+// Asked records what the medium answered.
+func Asked(exists bool) Attendance {
+	return Attendance{asked: true, exists: exists}
+}
+
+// NotAsked records that the question could not be put, and why. The reason
+// belongs to the medium. It says nothing about the endpoint.
+func NotAsked(reason string) Attendance {
+	return Attendance{reason: reason}
+}
+
+// Derive renders the four facts an endpoint's status reports, EACH WITH THE
 // REASON FOR IT.
 //
 // They are not collapsed into one word on purpose. Away because there is no
 // process, idle because nothing has happened lately, and idle because the
 // window elapsed with events missing are different situations, and a report
 // that prints only the conclusion hides which one it is looking at.
-func Derive(endpoint string, reg *Registration, act *Activity, now time.Time, window time.Duration) string {
+//
+// The attending fact is the only one that needs the medium, and the caller
+// asks the medium and hands the answer in. A medium that cannot answer costs
+// this report one line. It does not cost the report the other three.
+func Derive(endpoint string, reg *Registration, att Attendance, act *Activity, now time.Time, window time.Duration) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n", endpoint)
 	fmt.Fprintf(&b, "  registered: %s\n", registeredLine(reg))
+	fmt.Fprintf(&b, "  attending:  %s\n", attendingLine(att))
 	fmt.Fprintf(&b, "  process:    %s\n", processLine(reg))
 	fmt.Fprintf(&b, "  activity:   %s\n", activityLine(reg, act, now, window))
 	return b.String()
+}
+
+// attendingLine derives the reachable fact from the medium's answer.
+//
+// THE FIRST WORD OF THE VALUE CARRIES THE ANSWER, AND NOTHING ELSE IN THE LINE
+// DOES. It is exactly one of `yes`, `no` and `unknown`. What follows it in
+// parentheses is explanation. That text may hold any words at all, a state
+// word among them, and a reader must not take the answer out of it.
+//
+// The parenthesis is not this function's to control. The unknown branch prints
+// the medium's own error text, and two real ones say "this deployment has no
+// config file" and "no provider configured". A check that read the whole line
+// for `no` would report those as an absent queue, which is the opposite of
+// what they mean. Read the first word.
+//
+// activityLine below keeps a different rule, and keeps it because every word
+// in every one of its lines is written here.
+func attendingLine(att Attendance) string {
+	switch {
+	case !att.asked:
+		reason := att.reason
+		if reason == "" {
+			reason = "the question was never put"
+		}
+		return fmt.Sprintf("unknown (could not ask: %s)", reason)
+	case att.exists:
+		return "yes (queue exists)"
+	default:
+		return "no (no queue: a send to this endpoint is refused)"
+	}
 }
 
 func registeredLine(reg *Registration) string {

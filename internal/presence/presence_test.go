@@ -9,6 +9,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	// The attending line embeds the medium's own error text, so the cases for
+	// it take that text from the packages that raise it.
+	"github.com/tdebasis/locutorium/internal/config"
+	"github.com/tdebasis/locutorium/internal/provider"
 )
 
 // ------------------------------------------------------------------- names
@@ -270,7 +275,7 @@ func TestAnUnreadableRecordIsReported(t *testing.T) {
 
 // A record that cannot even be opened is reported too — a deployment whose run
 // area has been trampled on says so rather than answering "nobody is here",
-// which is the one wrong answer these three facts exist to avoid.
+// which is the one wrong answer these four facts exist to avoid.
 func TestARecordThatCannotBeOpenedIsReported(t *testing.T) {
 	scratch(t)
 	// A directory where a record belongs: readable as an entry, unreadable as
@@ -473,10 +478,14 @@ func TestAlivenessIsThePair(t *testing.T) {
 
 // --------------------------------------------------------------- derivation
 
-// The three facts are reported SEPARATELY, each with the reason for it. Away
+// The four facts are reported SEPARATELY, each with the reason for it. Away
 // because there is no process, idle because nothing has happened lately, and
 // idle because the window elapsed are different situations, and collapsing
 // them into one word hides which one is being looked at.
+//
+// The cases below hand in no attendance answer, so every report here carries
+// the unknown line. That is the point of the zero value: a caller that never
+// asked says so, and the other three facts are unaffected by it.
 func TestDerivation(t *testing.T) {
 	now := time.Date(2026, 1, 14, 10, 0, 0, 0, time.UTC)
 	window := 10 * time.Minute
@@ -544,7 +553,7 @@ func TestDerivation(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := Derive("workshop.scribe", tc.reg, tc.act, now, window)
+			got := Derive("workshop.scribe", tc.reg, Attendance{}, tc.act, now, window)
 			if !strings.HasPrefix(got, "workshop.scribe\n") {
 				t.Errorf("the report does not name the endpoint it is about:\n%s", got)
 			}
@@ -560,6 +569,162 @@ func TestDerivation(t *testing.T) {
 				t.Errorf("an idle report carries the working word:\n%s", got)
 			}
 		})
+	}
+}
+
+// The attending fact has THREE STATES and the report must keep them apart. On
+// 2026-09-18 a seat with no queue read `registered: yes · process: alive ·
+// activity: active` while every send to it was refused (#135). A report that
+// printed "no" for a question it could not put would repeat that failure in
+// the other direction: it would accuse a healthy seat on the strength of a
+// broker it never reached.
+//
+// THE CONTRACT IS THE FIRST WORD OF THE VALUE. The parenthesis after it is
+// explanation and may hold any words, because in the unknown state it holds
+// the medium's own error text. Two real ones say "this deployment has no
+// config file" and "no provider configured", and the last two cases below feed
+// exactly those in. A check written against the whole line would read them as
+// an absent queue. This one reads the first word.
+func TestTheAttendingFact(t *testing.T) {
+	now := time.Date(2026, 1, 14, 10, 0, 0, 0, time.UTC)
+	window := 10 * time.Minute
+	live := reg("workshop.scribe", os.Getpid(), StartedAt(os.Getpid()))
+
+	// Taken from the packages that raise them, not retyped, so these cases
+	// follow the text if it changes. Both are reachable from status: the
+	// provider defaults to nats, which refuses without a config file, and a
+	// home naming no provider at all raises the other.
+	noDeployment := config.ErrNoDeployment.Error()
+	_, err := provider.Open("")
+	if err == nil {
+		t.Fatal("opening the empty provider name did not fail; this case has no error text to plant")
+	}
+	noProvider := err.Error()
+
+	cases := []struct {
+		name      string
+		att       Attendance
+		wantFirst string
+		wantLine  string
+	}{
+		{
+			name:      "the queue is there",
+			att:       Asked(true),
+			wantFirst: "yes",
+			wantLine:  "  attending:  yes (queue exists)\n",
+		},
+		{
+			name:      "the queue is gone",
+			att:       Asked(false),
+			wantFirst: "no",
+			wantLine:  "  attending:  no (no queue: a send to this endpoint is refused)\n",
+		},
+		{
+			name:      "the medium carries no presence",
+			att:       NotAsked("provider 'file' does not support presence"),
+			wantFirst: "unknown",
+			wantLine:  "  attending:  unknown (could not ask: provider 'file' does not support presence)\n",
+		},
+		{
+			name:      "the broker refused to answer",
+			att:       NotAsked("connect: connection refused"),
+			wantFirst: "unknown",
+			wantLine:  "  attending:  unknown (could not ask: connect: connection refused)\n",
+		},
+		{
+			name:      "nobody asked",
+			att:       Attendance{},
+			wantFirst: "unknown",
+			wantLine:  "  attending:  unknown (could not ask: the question was never put)\n",
+		},
+		{
+			// The real text carries the word `no` inside it. The answer is
+			// still unknown, and only the first word says so.
+			name:      "this home holds no config file",
+			att:       NotAsked(noDeployment),
+			wantFirst: "unknown",
+			wantLine:  "  attending:  unknown (could not ask: " + noDeployment + ")\n",
+		},
+		{
+			// This one BEGINS with the word `no`, one word inside the
+			// parenthesis. Nothing about it means the queue is absent.
+			name:      "this home names no provider",
+			att:       NotAsked(noProvider),
+			wantFirst: "unknown",
+			wantLine:  "  attending:  unknown (could not ask: " + noProvider + ")\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Derive("workshop.scribe", live, tc.att, nil, now, window)
+			if !strings.Contains(got, tc.wantLine) {
+				t.Errorf("the report does not carry %q:\n%s", tc.wantLine, got)
+			}
+			// THE ASSERTION THE CONTRACT IS MADE OF. One word, exactly, and
+			// it is the whole of the answer.
+			if first := firstWordOfAttending(t, got); first != tc.wantFirst {
+				t.Errorf("the attending answer is %q, want %q\n%s", first, tc.wantFirst, got)
+			}
+			// The four facts are one report. The attending fact is asked of
+			// the medium, and a medium that cannot answer must not cost the
+			// report the three facts that are held locally.
+			for _, other := range []string{"registered: yes", "process:    alive", "activity:   idle"} {
+				if !strings.Contains(got, other) {
+					t.Errorf("the report lost %q in the %s case:\n%s", other, tc.name, got)
+				}
+			}
+		})
+	}
+}
+
+// firstWordOfAttending reads the attending answer the way the contract says to
+// read it: the first word of the value, and nothing after it.
+func firstWordOfAttending(t *testing.T, report string) string {
+	t.Helper()
+	for _, l := range strings.Split(report, "\n") {
+		if !strings.HasPrefix(l, "  attending:") {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l), "attending:"))
+		return strings.Fields(value + " ")[0]
+	}
+	t.Fatalf("the report carries no attending line:\n%s", report)
+	return ""
+}
+
+// A value with no word at all is a report of nothing, and the reader above
+// must not index into an empty slice to discover it.
+func TestTheAttendingAnswerIsAlwaysOneOfThree(t *testing.T) {
+	for _, att := range []Attendance{Asked(true), Asked(false), Attendance{}, NotAsked("x")} {
+		got := Derive("workshop.scribe", nil, att, nil,
+			time.Date(2026, 1, 14, 10, 0, 0, 0, time.UTC), 10*time.Minute)
+		switch first := firstWordOfAttending(t, got); first {
+		case "yes", "no", "unknown":
+		default:
+			t.Errorf("the attending answer is %q, which is not one of the three states", first)
+		}
+	}
+}
+
+// The attending line sits SECOND, directly under registered. The two answer
+// halves of one question — the ledger holds a row, and the broker holds a
+// queue — and a reader who takes the first for the whole is the reader #135
+// is about.
+func TestTheAttendingLineFollowsRegistered(t *testing.T) {
+	got := Derive("workshop.scribe", nil, Asked(false), nil,
+		time.Date(2026, 1, 14, 10, 0, 0, 0, time.UTC), 10*time.Minute)
+	lines := strings.Split(got, "\n")
+	want := []string{
+		"workshop.scribe",
+		"  registered: no",
+		"  attending:  no (no queue: a send to this endpoint is refused)",
+		"  process:    unknown (no registration)",
+		"  activity:   unknown (no registration)",
+	}
+	for i, w := range want {
+		if i >= len(lines) || lines[i] != w {
+			t.Fatalf("line %d is not the fact expected there.\nwant: %q\ngot:\n%s", i, w, got)
+		}
 	}
 }
 

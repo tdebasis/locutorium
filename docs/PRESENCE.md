@@ -557,12 +557,23 @@ omitted the publish time is used, which is only correct for something reporting 
 |---|---|
 | `registry [<instance>] [--json]` | Lists current registrations with their details — type, version, process, display, working directory, and how long each has been registered. With `<instance>` omitted it means the caller's configured instance; with no identity configured it refuses (non-zero). Listing every instance is undefined in the inner parlor. This is the request described in *Who is here right now*. |
 | `watch [<instance>]` | Follows the event stream, printing events as they arrive. Read-only. |
-| `status <endpoint>` | Reports one agent: registered or not, process alive or not, and its current activity state with the reason for that conclusion. |
+| `status <endpoint>` | Reports one agent: registered or not, attending or not, process alive or not, and its current activity state with the reason for each conclusion. |
 
-**`status` reports its three inputs separately**, rather than collapsing them into one word. *Away*
+**`status` reports its four inputs separately**, rather than collapsing them into one word. *Away*
 because no process, *idle* because no activity within the window, and *idle* because the window has
 elapsed with events missing are different situations, and a tool that prints only the conclusion
 hides which one it is looking at.
+
+**`attending` is the reachable question**, and this document separates it from the alive question
+above. The verb asks the medium whether the endpoint holds a queue — the same question the send
+path asks — so a seat whose queue is gone reads as unreachable instead of reading as healthy. The
+line takes three values, because *the broker holds no queue* and *the broker could not be asked* are
+different facts. Registered, alive and working are read locally and the medium cannot take them
+away: a broker that will not answer costs this report the `attending` line and nothing else, and the
+verb still exits zero. See CLI.md §status for the exact wording.
+
+**Nothing polls it.** A seat learns its own attendance when it asks for this report. No daemon
+beat, no sweep pass and no bell checks the question on a cadence.
 
 ### Exit codes
 

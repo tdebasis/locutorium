@@ -48,7 +48,7 @@ type readArgs struct {
 }
 
 type statusArgs struct {
-	Endpoint string `json:"endpoint,omitempty" jsonschema:"one endpoint's three facts; omitted, the unread counts"`
+	Endpoint string `json:"endpoint,omitempty" jsonschema:"one endpoint's four facts; omitted, the unread counts"`
 }
 
 type topicsArgs struct{}
@@ -72,7 +72,11 @@ func (s *server) addTools(srv *mcp.Server) {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "status",
-		Description: "With an endpoint, that agent's three facts. Without one, the unread count per endpoint.",
+		Description: "With an endpoint, that agent's four facts: registered, attending " +
+			"(whether its queue exists, so a send to it can be delivered), process, activity. " +
+			"The attending fact is asked of the broker, so with an endpoint this call reaches " +
+			"the broker, and a dead broker can make it wait about 13 seconds. " +
+			"Without one, the unread count per endpoint.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in statusArgs) (*mcp.CallToolResult, any, error) {
 		return s.call("status", func(w io.Writer) error { return s.d.Status(w, in.Endpoint) })
 	})

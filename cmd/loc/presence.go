@@ -602,9 +602,15 @@ func watchVerb(w io.Writer, args []string) error {
 
 // --------------------------------------------------------------------- status
 
-// statusEndpoint reports one agent's three facts. It touches NO MEDIUM: every
-// answer it gives is held locally, which is what lets it answer at all when
-// the broker is the thing that is wrong.
+// statusEndpoint reports one agent's four facts: registered, attending,
+// process, activity.
+//
+// THREE OF THE FOUR ARE HELD LOCALLY and the medium cannot take them away.
+// The fourth, attending, is the one question only the broker can answer, so
+// this verb asks it. Every failure to ask becomes the `unknown` state and not
+// an error. The other three lines still print and the verb still exits 0 when
+// the broker is the thing that is wrong, which is the property that made this
+// verb worth having on the day the bus was down.
 func statusEndpoint(w io.Writer, endpoint string) error {
 	if err := model.ValidEndpoint(endpoint); err != nil {
 		return err
@@ -623,8 +629,37 @@ func statusEndpoint(w io.Writer, endpoint string) error {
 	}
 	// An unregistered endpoint is a truthful answer to a fair question, not a
 	// failure: the caller asked whether anyone is there, and nobody is.
-	_, err = io.WriteString(w, model.Derive(endpoint, reg, act, time.Now(), window))
+	_, err = io.WriteString(w, model.Derive(endpoint, reg, askAttendance(endpoint), act, time.Now(), window))
 	return err
+}
+
+// askAttendance puts the send path's own question to the medium: is there a
+// queue for this endpoint?
+//
+// IT RETURNS NO ERROR. Three things stop the question — no provider opens, the
+// provider carries no presence, or the broker refuses to answer — and none of
+// them is a fact about the endpoint. Each becomes `unknown` with the reason
+// attached, so that the caller can still print the three local facts.
+//
+// The ask is as bounded as the provider's own open is, and no more. A dead
+// broker can hold the shared provider open for about 13 seconds (PR #153
+// measured it and left it alone). This verb does not add a timeout of its own,
+// because a second clock over a mechanism that already has one gives a
+// deployment two answers about how long it waits.
+func askAttendance(endpoint string) model.Attendance {
+	var att model.Attendance
+	err := withPresence(func(pr provider.Presence) error {
+		exists, err := pr.QueueExists(endpoint)
+		if err != nil {
+			return err
+		}
+		att = model.Asked(exists)
+		return nil
+	})
+	if err != nil {
+		return model.NotAsked(err.Error())
+	}
+	return att
 }
 
 // --------------------------------------------------------------- bare status

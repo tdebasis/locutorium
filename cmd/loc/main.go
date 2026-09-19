@@ -53,7 +53,8 @@ presence — called by adapters
 presence — called by a person, or by a consumer
   registry [<instance>] [--json]
                             who is registered, asked of the instance's host
-  status [<endpoint>]       one agent's three facts; bare, the whole deployment
+  status [<endpoint>]       one agent's four facts, attending among them;
+                            bare, the whole deployment
   unread <endpoint>         mail not taken: a number, or the word unknown
   watch [<instance>]        follow the event stream, read-only (^C to stop)
 
@@ -192,9 +193,10 @@ func dispatch(args []string, w, errw io.Writer) error {
 		return withProvider(func(p provider.Provider) error { return p.Topics(w) })
 
 	case "status":
-		// With an endpoint it is the presence report — three facts, each with
-		// its reason. Bare it is the message plane's unread counts, which is
-		// what it has always been.
+		// With an endpoint it is the presence report: four facts, each with
+		// its reason. The fourth is `attending`, which asks the broker
+		// whether this endpoint holds a queue. Bare it is the message plane's
+		// unread counts, which is what it has always been.
 		if len(rest) > 0 {
 			return statusEndpoint(w, rest[0])
 		}
