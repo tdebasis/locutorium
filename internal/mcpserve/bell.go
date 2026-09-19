@@ -1,6 +1,7 @@
 package mcpserve
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -25,6 +26,10 @@ import (
 //	wake_breaker_per_minute  cap per calendar minute
 //	wake_breaker_per_hour    cap per calendar hour
 //
+// A fourth key belongs to this listener alone:
+//
+//	wake_retry_seconds       the first wait before a busy pane is asked again
+//
 // A suppressed wake loses NOTHING: the messages are in the queue, and the next
 // read finds all of them. That is what makes a cap safe to have.
 
@@ -32,7 +37,19 @@ const (
 	defaultWakeWindow    = 5
 	defaultBreakerMinute = 6
 	defaultBreakerHour   = 60
+	defaultWakeRetry     = 15
 )
+
+// maxWakeRetry caps the doubling. A pane that has been busy for a minute is
+// somebody's long turn, and a wait that kept doubling past this would leave
+// the mail unannounced for an hour after the turn ended.
+const maxWakeRetry = 60 * time.Second
+
+// errSuppressed is what a ring returns when THE BREAKER refused it. Nothing
+// reached the pane and nothing was typed, so a streak that meets a tripped
+// breaker keeps its place in the queue and asks again later; the breaker
+// un-trips on the hour.
+var errSuppressed = errors.New("suppressed by the breaker")
 
 // defaultCourierName is what the courier is called when the bell cannot say
 // who sent the mail. The startup backlog path asks the broker HOW MUCH mail is
@@ -47,10 +64,28 @@ type bell struct {
 	perMin  int
 	perHour int
 
+	// retryBase is the first wait after a busy refusal, and what the wait
+	// returns to once the streak ends.
+	retryBase time.Duration
+
+	// afterFunc is time.AfterFunc, and only the retry timer goes through it.
+	// A case replaces it to read the delay the retry was scheduled for, which
+	// is the thing under test; a case that measured the wall clock would be
+	// testing the machine's scheduler instead.
+	afterFunc func(time.Duration, func()) *time.Timer
+
 	mu      sync.Mutex
 	pending int
 	timer   *time.Timer
 	stopped bool
+
+	// The busy streak. retryTimer is armed while a refused bell is waiting to
+	// ring again, retryDelay is how long the NEXT wait is, and refusals counts
+	// the busy refusals since the streak opened. All three are cleared
+	// together, by clearRetry.
+	retryTimer *time.Timer
+	retryDelay time.Duration
+	refusals   int
 
 	// The senders seen in the open window, in arrival order and each one
 	// once. They name the courier and nothing else: they never reach the bell
@@ -70,10 +105,12 @@ type bell struct {
 // keep working; what is lost is the wake, and the agent can still read.
 func (s *server) startBell() func() {
 	b := &bell{
-		s:       s,
-		window:  time.Duration(configInt("wake_window_seconds", defaultWakeWindow)) * time.Second,
-		perMin:  configInt("wake_breaker_per_minute", defaultBreakerMinute),
-		perHour: configInt("wake_breaker_per_hour", defaultBreakerHour),
+		s:         s,
+		window:    time.Duration(configInt("wake_window_seconds", defaultWakeWindow)) * time.Second,
+		perMin:    configInt("wake_breaker_per_minute", defaultBreakerMinute),
+		perHour:   configInt("wake_breaker_per_hour", defaultBreakerHour),
+		retryBase: time.Duration(configInt("wake_retry_seconds", defaultWakeRetry)) * time.Second,
+		afterFunc: time.AfterFunc,
 	}
 	s.b = b
 
@@ -88,15 +125,23 @@ func (s *server) startBell() func() {
 	b.backlog()
 
 	return func() {
-		b.mu.Lock()
-		b.stopped = true
-		if b.timer != nil {
-			b.timer.Stop()
-			b.timer = nil
-		}
-		b.mu.Unlock()
+		b.stop()
 		stop()
 	}
+}
+
+// stop shuts the bell down. Both timers are cancelled and the stopped flag is
+// raised, so a timer that had already fired and is waiting on the lock finds
+// the flag and rings nothing.
+func (b *bell) stop() {
+	b.mu.Lock()
+	b.stopped = true
+	if b.timer != nil {
+		b.timer.Stop()
+		b.timer = nil
+	}
+	b.clearRetry()
+	b.mu.Unlock()
 }
 
 // arrived records one arrival and opens the coalescing window if it is shut.
@@ -177,9 +222,34 @@ func (b *bell) fire() {
 	senders := b.senders
 	b.senders = nil
 	b.timer = nil
-	if b.stopped || n <= 0 {
-		b.mu.Unlock()
+	stopped := b.stopped
+	b.mu.Unlock()
+	if stopped || n <= 0 {
 		return
+	}
+
+	switch err := b.ring(n, courierName(senders)); {
+	case err == nil:
+		b.rang(n)
+	case errors.Is(err, errSuppressed):
+		// The breaker said no. Nothing rings and nothing is scheduled: the
+		// queue keeps the truth and the next arrival asks again.
+	case errors.Is(err, ErrBusy):
+		b.refused(err)
+	default:
+		b.broken(err)
+	}
+}
+
+// ring hands the notifier one line for n, and reports what came back: nil
+// means the pane took it, errSuppressed means the breaker refused it, an
+// error wrapping ErrBusy means the seat is busy, and anything else means the
+// bell is broken. Called with the lock free.
+func (b *bell) ring(n int, courier string) error {
+	b.mu.Lock()
+	if b.stopped {
+		b.mu.Unlock()
+		return errSuppressed
 	}
 	now := b.s.d.Now()
 	b.roll(now)
@@ -195,17 +265,13 @@ func (b *bell) fire() {
 				"wakes suppressed, the queue keeps the truth",
 				b.s.d.Endpoint, minN, b.perMin, hourN, b.perHour))
 		}
-		return
+		return errSuppressed
 	}
 	b.minuteN++
 	b.hourN++
+	minute, hour := b.minuteBucket, b.hourBucket
 	b.mu.Unlock()
 
-	// A BELL THAT COULD NOT RING SAYS SO, and is never recorded as a wake.
-	// The breaker has already been charged for it, which is deliberate: a
-	// notifier that fails will fail again, and a broken bell must not become a
-	// way to hammer the pane once it is fixed.
-	courier := courierName(senders)
 	// The line names the sender whenever the name survived the shape check. A
 	// backlog, or a name that did not, falls back to the count alone rather than
 	// printing a placeholder: "from loc-bell" would be noise wearing a fact's
@@ -214,25 +280,185 @@ func (b *bell) fire() {
 	if courier != defaultCourierName {
 		line = fmt.Sprintf(bellLineFrom, n, courier)
 	}
-	if err := b.s.d.Notify.Ring(b.s.d.Endpoint, b.s.address, line, courier); err != nil {
-		b.s.warn(fmt.Sprintf("bell failed %s: %v", b.s.d.Endpoint, err))
-		// THE WARNING AND THE EVENT GO TO DIFFERENT READERS. The warning
-		// lands in this seat's own delivery log, which is plain text and is
-		// found by somebody who already suspects this seat. The event lands
-		// in the day's record beside the `sent` line for the mail that could
-		// not be announced, which is where a sender asking "why has nobody
-		// answered me" is already looking.
-		//
-		// It carries no uid. The watch reports an arrival and Unread reports
-		// a count, so the server knows that mail is waiting and never which
-		// message is waiting (WatchQueue, internal/provider/provider.go).
-		//
-		// The clock is the server's injected one, the same clock the breaker
-		// rolls its buckets on, so a case that pins time pins this line too.
-		loc.LogBellFailed(b.s.d.Endpoint, err.Error(), b.s.d.Now())
+	err := b.s.d.Notify.Ring(b.s.d.Endpoint, b.s.address, line, courier)
+	if errors.Is(err, ErrBusy) {
+		// A BUSY REFUSAL TYPED NOTHING, so it gets the charge back. The cap
+		// exists to stop the pane being hammered, and a refusal that never
+		// reached the pane hammered nothing. Left charged, six refusals in a
+		// minute would trip the breaker and silence the ring the seat is
+		// waiting for.
+		b.mu.Lock()
+		b.giveBack(minute, hour)
+		b.mu.Unlock()
+	}
+	return err
+}
+
+// rang records a wake and closes any busy streak.
+func (b *bell) rang(n int) {
+	b.s.log(fmt.Sprintf("wake %s count=%d", b.s.d.Endpoint, n))
+	b.mu.Lock()
+	k := b.refusals
+	b.clearRetry()
+	b.mu.Unlock()
+	if k > 0 {
+		b.s.log(fmt.Sprintf("retry %s rang after %d refusals", b.s.d.Endpoint, k))
+	}
+}
+
+// refused handles a busy refusal and schedules the ring that follows it.
+//
+// ONE RECORD PER STREAK. The warning and the day's record are written for the
+// FIRST refusal of a streak and never again, because a streak is one event —
+// a seat that is busy — and a line every fifteen seconds would bury the day's
+// record under it. Each later attempt still leaves the notifier's own
+// `nudge <endpoint> refused: <reason>` line in the delivery log, so the count
+// of attempts is readable there.
+func (b *bell) refused(err error) {
+	b.mu.Lock()
+	first := b.refusals == 0
+	b.refusals++
+	b.scheduleRetry()
+	b.mu.Unlock()
+	if !first {
 		return
 	}
-	b.s.log(fmt.Sprintf("wake %s count=%d", b.s.d.Endpoint, n))
+	// A BELL THAT COULD NOT RING SAYS SO, and is never recorded as a wake.
+	b.s.warn(fmt.Sprintf("bell failed %s: %v", b.s.d.Endpoint, err))
+	b.record(err)
+}
+
+// broken handles a failure that asking again cannot repair: there is no pane
+// address, tmux cannot be read, the courier exited non-zero. The breaker keeps
+// the charge for it, which is deliberate: a notifier that fails will fail
+// again, and a broken bell must not become a way to hammer the pane once it is
+// fixed. A busy refusal differs because it never reached the pane at all.
+func (b *bell) broken(err error) {
+	b.s.warn(fmt.Sprintf("bell failed %s: %v", b.s.d.Endpoint, err))
+	b.mu.Lock()
+	b.clearRetry()
+	b.mu.Unlock()
+	b.record(err)
+}
+
+// record puts one bell-failed line in the day's record.
+//
+// THE WARNING AND THE EVENT GO TO DIFFERENT READERS. The warning lands in
+// this seat's own delivery log, which is plain text and is found by somebody
+// who already suspects this seat. The event lands in the day's record beside
+// the `sent` line for the mail that could not be announced, which is where a
+// sender asking "why has nobody answered me" is already looking.
+//
+// It carries no uid. The watch reports an arrival and Unread reports a count,
+// so the server knows that mail is waiting and never which message is waiting
+// (WatchQueue, internal/provider/provider.go).
+//
+// The clock is the server's injected one, the same clock the breaker rolls its
+// buckets on, so a case that pins time pins this line too.
+func (b *bell) record(err error) {
+	loc.LogBellFailed(b.s.d.Endpoint, err.Error(), b.s.d.Now())
+}
+
+// retry rings again for a seat that was busy.
+//
+// IT ASKS THE QUEUE, NOT ITS OWN MEMORY. The seat may have read the mail while
+// the pane was busy, and a bell that rang for a number it remembered would
+// wake a seat for an empty queue.
+func (b *bell) retry() {
+	b.mu.Lock()
+	b.retryTimer = nil
+	if b.stopped {
+		b.mu.Unlock()
+		return
+	}
+	// THE NEXT WAIT IS TWICE THIS ONE. A pane busy now is likely to be busy
+	// in a moment, and a fixed fifteen seconds would ask a long turn four
+	// times a minute for as long as it runs.
+	b.retryDelay = min(b.retryDelay*2, maxWakeRetry)
+	b.mu.Unlock()
+
+	if b.s.d.Unread == nil {
+		b.endStreak()
+		return
+	}
+	n, err := b.s.d.Unread(b.s.d.Endpoint)
+	if err != nil {
+		// A queue that cannot be counted gives no number to ring for, and the
+		// next arrival opens a streak of its own.
+		b.endStreak()
+		return
+	}
+	if n <= 0 {
+		b.endStreak()
+		b.s.log(fmt.Sprintf("retry %s stopped: the queue is empty", b.s.d.Endpoint))
+		return
+	}
+
+	// The retry asks the broker how much mail is waiting and never who sent
+	// it, so it names no seat, exactly as the backlog path does.
+	switch err := b.ring(n, defaultCourierName); {
+	case err == nil:
+		b.rang(n)
+	case errors.Is(err, errSuppressed):
+		// A TRIPPED BREAKER IS NOT A REFUSAL BY THE PANE. The streak's count
+		// does not grow for it, and the mail is still waiting, so the retry is
+		// scheduled again.
+		b.mu.Lock()
+		b.scheduleRetry()
+		b.mu.Unlock()
+	case errors.Is(err, ErrBusy):
+		b.refused(err)
+	default:
+		b.broken(err)
+	}
+}
+
+// scheduleRetry arms the retry timer if none is armed. Called under the lock.
+//
+// ONE TIMER PER STREAK. An arrival that lands mid-streak and is refused finds
+// a retry already waiting, and a second timer would ask twice and halve the
+// wait the doubling just set.
+func (b *bell) scheduleRetry() {
+	if b.stopped || b.retryTimer != nil {
+		return
+	}
+	if b.retryDelay <= 0 {
+		b.retryDelay = b.retryBase
+	}
+	b.retryTimer = b.afterFunc(b.retryDelay, b.retry)
+}
+
+// endStreak closes a streak that ended without a ring.
+func (b *bell) endStreak() {
+	b.mu.Lock()
+	b.clearRetry()
+	b.mu.Unlock()
+}
+
+// clearRetry cancels any armed retry and forgets the streak. Called under the
+// lock.
+func (b *bell) clearRetry() {
+	if b.retryTimer != nil {
+		b.retryTimer.Stop()
+		b.retryTimer = nil
+	}
+	b.retryDelay = 0
+	b.refusals = 0
+}
+
+// giveBack returns the minute and hour charges for a ring that TYPED NOTHING.
+// Called under the lock.
+//
+// THE BUCKETS ARE NAMED. A bucket that rolled over between the charge and the
+// refund never held this charge, and a refund there would raise the cap for a
+// minute that has spent nothing.
+func (b *bell) giveBack(minute, hour int64) {
+	if b.minuteBucket == minute && b.minuteN > 0 {
+		b.minuteN--
+	}
+	if b.hourBucket == hour && b.hourN > 0 {
+		b.hourN--
+	}
 }
 
 // courierName is what the courier session is called. That name is the one
