@@ -483,8 +483,8 @@ as current for `idle_timeout` after it arrived.
 loc unread <endpoint>
 ```
 
-How much mail one endpoint has not taken. **A number, or the word `unknown`.** Nothing else is ever
-printed, and the argument is a full `<instance>.<agent>` name.
+How much mail one endpoint has not taken. **A number, or the word `unknown`.** When the argument is
+one valid endpoint name, standard out holds one of those two and no other text.
 
 | what happened | stdout | stderr | exit |
 |---|---|---|---|
@@ -507,9 +507,10 @@ that ignores the exit code shows whatever the verb printed. An empty string is a
 looks like. A failure that printed nothing would therefore read as a quiet mailbox. The reason for
 the failure is still one `loc:` line on standard error.
 
-A bad argument prints **nothing at all** on standard out, and never `unknown`. A wrong argument
-count prints the verb list instead; a name that is not `<instance>.<agent>` prints only the refusal,
-on standard error. A status-line author should treat empty output as a reading that failed.
+A bad argument never prints `unknown`, because no count was asked for. A name that is not
+`<instance>.<agent>` prints nothing on standard out and the refusal on standard error. A wrong
+argument count prints the verb list on standard out, as it does for every verb. A status-line author
+should treat every answer that is not a number as a reading that failed.
 
 `loc status` prints `?` for a count it could not read, and it keeps doing so. A report of many seats
 must not fail because one number is missing. This verb reports one seat to a script, so it fails

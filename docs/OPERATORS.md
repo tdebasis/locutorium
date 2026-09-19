@@ -155,7 +155,7 @@ The script cannot hang. **The verb answers within 2 seconds**, even against a br
 the connection and then says nothing.
 
 The script must name the **full endpoint**, `<instance>.<agent>`. A bare agent name is not an
-endpoint and the verb refuses it, printing nothing at all. `LOC_IDENTITY` already holds the full
+endpoint and the verb refuses it, with nothing on standard out. `LOC_IDENTITY` already holds the full
 name.
 
 The warning branch catches `unknown` and everything else the verb could not produce, an empty answer
