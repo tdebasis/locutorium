@@ -52,7 +52,7 @@ presence — called by adapters
 
 presence — called by a person, or by a consumer
   registry [<instance>] [--json]
-                            who is registered, asked of the instance's host
+                            who is registered, read from the ledger
   status [<endpoint>]       one agent's four facts, attending among them;
                             bare, the whole deployment
   unread <endpoint>         mail not taken: a number, or the word unknown

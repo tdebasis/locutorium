@@ -74,16 +74,16 @@ func TestPresence_Subscribe_WithoutARoleOmitsTheKey(t *testing.T) {
 // registered has to appear there too.
 func TestRegistryRenderingCarriesTheRole(t *testing.T) {
 	d := newPresenceDeployment(t)
-	d.spy.reply = []byte(`{"agents":[{"endpoint":"workshop.clerk","instance":"workshop",` +
-		`"agent":{"type":"tmux","version":"3.2.0"},"process":{"pid":4242,"started":"2026-01-14T09:12:04.006Z"},` +
-		`"display":{"name":"The Clerk","role":"Records"},` +
-		`"cwd":"/workspaces/clerk","registered":"2026-01-14T09:12:04.318Z"}]}`)
+	writeFile(t, d.ledger("workshop.clerk.json"), `{"endpoint":"workshop.clerk","instance":"workshop",`+
+		`"agent":{"type":"tmux","version":"3.2.0"},"process":{"pid":4242,"started":"2026-01-14T09:12:04.006Z"},`+
+		`"display":{"name":"The Clerk","role":"Records"},`+
+		`"cwd":"/workspaces/clerk","registered":"2026-01-14T09:12:04.318Z"}`)
 
 	code, out, errOut := exec("registry", "workshop")
 	if code != 0 || errOut != "" {
 		t.Fatalf("exit %d, stderr %q", code, errOut)
 	}
-	if !strings.Contains(out, "Records") {
+	if !strings.Contains(out, "display:    The Clerk (Records)") {
 		t.Errorf("roster %q does not carry the registered role %q", out, "Records")
 	}
 }

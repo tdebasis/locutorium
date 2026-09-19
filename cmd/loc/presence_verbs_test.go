@@ -34,13 +34,11 @@ type presenceSpy struct {
 	exists           map[string]bool
 	unqualified      []string
 	emitted          [][]byte
-	requested        []string
 	watched          string
 
-	createErr, deleteErr, existsErr, emitErr, requestErr, watchErr error
-	queuesErr                                                      error
-	reply                                                          []byte
-	watchOut                                                       string
+	createErr, deleteErr, existsErr, emitErr, watchErr error
+	queuesErr                                          error
+	watchOut                                           string
 }
 
 func (s *presenceSpy) CreateQueue(endpoint string) error {
@@ -100,14 +98,6 @@ func (s *presenceSpy) QueueExists(endpoint string) (bool, error) {
 func (s *presenceSpy) Emit(instance string, event []byte) error {
 	s.emitted = append(s.emitted, event)
 	return s.emitErr
-}
-
-func (s *presenceSpy) Request(subject string, _ time.Duration) ([]byte, error) {
-	s.requested = append(s.requested, subject)
-	if s.requestErr != nil {
-		return nil, s.requestErr
-	}
-	return s.reply, nil
 }
 
 func (s *presenceSpy) Watch(instance string, w io.Writer) error {
@@ -282,46 +272,63 @@ func TestPresenceVerbsRefusals(t *testing.T) {
 	}
 }
 
-// With the instance left out, these verbs mean the caller's own — and a caller
+// With the instance left out, `watch` means the caller's own — and a caller
 // whose identity is not an endpoint has no instance to take one from. It is
-// refused rather than guessed: there is no "every instance".
+// refused rather than guessed: each instance is a separate subject, so there
+// is no bus form that means "every instance".
+//
+// `REGISTRY` IS THE OTHER ANSWER, AND IT IS HERE TO BE SEEN BESIDE THIS ONE.
+// It reads the ledger, and the ledger holds every instance on this machine at
+// once, so an omitted instance there means all of them rather than a question
+// it cannot form. It takes no identity and does not refuse without one.
 func TestAnInstanceOmittedComesFromTheCallersIdentity(t *testing.T) {
 	d := newPresenceDeployment(t)
-	d.spy.reply = []byte(`{"agents":[]}`)
 
 	// The sweep is not here: it takes no instance, because a process id means
 	// something only on the machine holding it, so a sweep is machine-wide by
 	// nature and has no caller's-instance form to fall back to.
-	for _, verb := range []string{"registry", "watch"} {
-		t.Run(verb+" takes the caller's instance", func(t *testing.T) {
-			if code, _, errOut := exec(verb); code != 0 {
-				t.Errorf("%s exited %d (stderr %q), want the caller's own instance to serve", verb, code, errOut)
-			}
-		})
+	if code, _, errOut := exec("watch"); code != 0 {
+		t.Errorf("watch exited %d (stderr %q), want the caller's own instance to serve", code, errOut)
 	}
 	if d.spy.watched != "workshop" {
 		t.Errorf("watch followed %q, want the caller's instance %q", d.spy.watched, "workshop")
 	}
-	if len(d.spy.requested) != 1 || d.spy.requested[0] != "registry.workshop" {
-		t.Errorf("registry asked %v, want registry.workshop", d.spy.requested)
-	}
 
 	t.Setenv("LOC_IDENTITY", "scribe")
-	for _, verb := range []string{"registry", "watch"} {
-		t.Run(verb+" with an unqualified identity", func(t *testing.T) {
-			code, out, errOut := exec(verb)
-			want := "loc: no instance given, and the caller's identity 'scribe' is not " +
-				"an endpoint of the form <instance>.<agent> to take one from\n"
-			assertResult(t, code, out, errOut, 1, "", want)
-		})
-	}
+	t.Run("watch with an unqualified identity", func(t *testing.T) {
+		code, out, errOut := exec("watch")
+		want := "loc: no instance given, and the caller's identity 'scribe' is not " +
+			"an endpoint of the form <instance>.<agent> to take one from\n"
+		assertResult(t, code, out, errOut, 1, "", want)
+	})
 
 	t.Setenv("LOC_IDENTITY", "")
-	for _, verb := range []string{"registry", "watch"} {
-		t.Run(verb+" with no identity at all", func(t *testing.T) {
-			_, _, errOut := exec(verb)
-			if !strings.Contains(errOut, "cannot determine sender identity") {
-				t.Errorf("got %q, want the identity refusal", errOut)
+	t.Run("watch with no identity at all", func(t *testing.T) {
+		_, _, errOut := exec("watch")
+		if !strings.Contains(errOut, "cannot determine sender identity") {
+			t.Errorf("got %q, want the identity refusal", errOut)
+		}
+	})
+}
+
+// Registry asks nothing of the caller's identity, at either of the two ways
+// there are to have none. The registrations are on this machine, and who is
+// asking does not change who is registered.
+func TestRegistryNeedsNoIdentity(t *testing.T) {
+	for _, identity := range []string{"scribe", ""} {
+		t.Run("identity "+identity, func(t *testing.T) {
+			d := newPresenceDeployment(t)
+			writeFile(t, d.ledger("workshop.scribe.json"),
+				`{"endpoint":"workshop.scribe","instance":"workshop","agent":{"type":"tmux","version":"3.2.0"},`+
+					`"process":{"pid":4242,"started":"2026-01-14T09:12:04.006Z"},"registered":"2026-01-14T09:12:04.318Z"}`)
+			t.Setenv("LOC_IDENTITY", identity)
+
+			code, out, errOut := exec("registry")
+			if code != 0 || errOut != "" {
+				t.Fatalf("exit %d, stderr %q", code, errOut)
+			}
+			if !strings.Contains(out, "  workshop.scribe\n") {
+				t.Errorf("registry printed %q, want every house on this machine", out)
 			}
 		})
 	}
@@ -332,7 +339,6 @@ func TestPresenceVerbsOnAProviderWithoutPresence(t *testing.T) {
 	for _, args := range [][]string{
 		{"subscribe", "workshop.scribe", "--pid", alivePid(), "--type", "tmux", "--version", "3.2.0"},
 		{"unsubscribe", "workshop.scribe"},
-		{"registry", "workshop"},
 		{"watch", "workshop"},
 	} {
 		t.Run(args[0], func(t *testing.T) {
@@ -694,60 +700,146 @@ func TestEmitCarriesEveryReferenceItWasGiven(t *testing.T) {
 
 // -------------------------------------------------------------------- registry
 
+// The verb reads the ledger on disk. Nothing here touches the medium, and the
+// spy's queues are never consulted: a registry answered from the broker and a
+// registry answered from the ledger would be two answers to one question.
 func TestRegistryRendering(t *testing.T) {
-	roster := `{"agents":[{"endpoint":"workshop.scribe","instance":"workshop",` +
+	const scribe = `{"endpoint":"workshop.scribe","instance":"workshop",` +
 		`"agent":{"type":"tmux","version":"3.2.0"},"process":{"pid":4242,"started":"2026-01-14T09:12:04.006Z"},` +
-		`"cwd":"/workspaces/scribe","registered":"2026-01-14T09:12:04.318Z"}]}`
+		`"display":{"name":"Scribe","role":"Records"},` +
+		`"cwd":"/workspaces/scribe","address":"%2","registered":"2026-01-14T09:12:04.318Z"}`
+	const clerk = `{"endpoint":"atelier.clerk","instance":"atelier",` +
+		`"agent":{"type":"claude","version":"2.1.278"},"process":{"pid":4311,"started":"2026-01-14T09:12:05.006Z"},` +
+		`"cwd":"/workspaces/clerk","registered":"2026-01-14T09:12:05.318Z"}`
 
-	t.Run("one line per agent", func(t *testing.T) {
+	plant := func(t *testing.T) *presenceDeployment {
+		t.Helper()
 		d := newPresenceDeployment(t)
-		d.spy.reply = []byte(roster)
+		writeFile(t, d.ledger("workshop.scribe.json"), scribe)
+		writeFile(t, d.ledger("atelier.clerk.json"), clerk)
+		return d
+	}
+
+	t.Run("every house, grouped", func(t *testing.T) {
+		plant(t)
+
+		code, out, errOut := exec("registry")
+		if code != 0 || errOut != "" {
+			t.Fatalf("exit %d, stderr %q", code, errOut)
+		}
+		want := "atelier\n" +
+			"  atelier.clerk\n" +
+			"    agent:      claude 2.1.278\n" +
+			"    process:    pid 4311, started 2026-01-14T09:12:05.006Z\n" +
+			"    registered: 2026-01-14T09:12:05.318Z\n" +
+			"    address:    (not given)\n" +
+			"    cwd:        /workspaces/clerk\n" +
+			"    display:    (not given)\n" +
+			"workshop\n" +
+			"  workshop.scribe\n" +
+			"    agent:      tmux 3.2.0\n" +
+			"    process:    pid 4242, started 2026-01-14T09:12:04.006Z\n" +
+			"    registered: 2026-01-14T09:12:04.318Z\n" +
+			"    address:    %2\n" +
+			"    cwd:        /workspaces/scribe\n" +
+			"    display:    Scribe (Records)\n"
+		if out != want {
+			t.Errorf("registry printed:\n%s\nwant:\n%s", out, want)
+		}
+	})
+
+	t.Run("one house only", func(t *testing.T) {
+		plant(t)
 
 		code, out, errOut := exec("registry", "workshop")
 		if code != 0 || errOut != "" {
 			t.Fatalf("exit %d, stderr %q", code, errOut)
 		}
-		for _, want := range []string{"workshop.scribe", "tmux 3.2.0", "pid 4242", "/workspaces/scribe"} {
-			if !strings.Contains(out, want) {
-				t.Errorf("roster %q does not carry %q", out, want)
-			}
+		if strings.Contains(out, "atelier") {
+			t.Errorf("another house leaked in: %q", out)
+		}
+		if !strings.Contains(out, "  workshop.scribe\n") {
+			t.Errorf("the asked-for house is missing: %q", out)
 		}
 	})
 
-	t.Run("--json hands back what the host said", func(t *testing.T) {
-		d := newPresenceDeployment(t)
-		d.spy.reply = []byte(roster)
+	t.Run("--json holds the stored records", func(t *testing.T) {
+		plant(t)
 
 		code, out, errOut := exec("registry", "workshop", "--json")
-		assertResult(t, code, out, errOut, 0, roster+"\n", "")
+		assertResult(t, code, out, errOut, 0, `{"agents":[`+scribe+"]}\n", "")
 	})
 
-	t.Run("an empty roster is still an answer", func(t *testing.T) {
-		d := newPresenceDeployment(t)
-		d.spy.reply = []byte(`{"agents":[]}`)
+	t.Run("an empty ledger is still an answer", func(t *testing.T) {
+		newPresenceDeployment(t)
 
-		code, out, errOut := exec("registry", "workshop")
+		code, out, errOut := exec("registry")
 		assertResult(t, code, out, errOut, 0, "(no agents registered)\n", "")
 	})
 
-	t.Run("an answer that is not a registry", func(t *testing.T) {
-		d := newPresenceDeployment(t)
-		d.spy.reply = []byte("who is asking?")
+	t.Run("a house nobody is registered in is still an answer", func(t *testing.T) {
+		plant(t)
+
+		code, out, errOut := exec("registry", "smithy")
+		assertResult(t, code, out, errOut, 0, "(no agents registered in smithy)\n", "")
+	})
+
+	// A row that cannot be read is NAMED, not dropped. A listing that skips it
+	// reports a registered seat as absent, and the endpoint is readable from
+	// the file name when nothing inside the file is.
+	t.Run("an unreadable row is named", func(t *testing.T) {
+		d := plant(t)
+		writeFile(t, d.ledger("workshop.mason.json"), "{not json")
 
 		code, out, errOut := exec("registry", "workshop")
-		if code != 1 || out != "" || !strings.Contains(errOut, "is not a registry") {
-			t.Errorf("exit=%d stdout=%q stderr=%q; want a refusal naming the bad answer", code, out, errOut)
+		if code != 0 || errOut != "" {
+			t.Fatalf("exit %d, stderr %q", code, errOut)
+		}
+		if !strings.Contains(out, "  workshop.mason\n") || !strings.Contains(out, "unreadable:") {
+			t.Errorf("the broken row was dropped: %q", out)
 		}
 	})
 
-	t.Run("nobody answering is a failure, not an empty roster", func(t *testing.T) {
-		d := newPresenceDeployment(t)
-		d.spy.requestErr = fmt.Errorf("no responders available for request")
+	// The broker is never opened, so nothing this verb does can wait on it.
+	t.Run("the medium is never asked", func(t *testing.T) {
+		d := plant(t)
+		d.spy.queuesErr = fmt.Errorf("the broker is down")
+		d.spy.existsErr = fmt.Errorf("the broker is down")
 
-		code, out, errOut := exec("registry", "workshop")
-		assertResult(t, code, out, errOut, 1, "",
-			"loc: no host is answering registry.workshop (the request went unanswered)\n")
+		code, _, errOut := exec("registry")
+		if code != 0 || errOut != "" {
+			t.Errorf("exit %d, stderr %q; the verb reached the medium", code, errOut)
+		}
 	})
+
+	// A ledger directory that cannot be listed is a failure: the verb cannot
+	// say who is registered, and an empty list would say nobody is.
+	t.Run("a ledger that cannot be read is a failure", func(t *testing.T) {
+		d := newPresenceDeployment(t)
+		d.blockTheLedger(t)
+
+		code, out, _ := exec("registry")
+		if code != 1 || out != "" {
+			t.Errorf("exit=%d stdout=%q, want a refusal", code, out)
+		}
+	})
+}
+
+// The verb never opens a provider, so a medium that carries no presence is not
+// a reason it cannot answer. Every registration it reports is on this machine.
+func TestRegistryNeedsNoPresenceExtension(t *testing.T) {
+	d := newDeployment(t, "ada")
+	writeFile(t, filepath.Join(d.home, "run", "presence", "workshop.scribe.json"),
+		`{"endpoint":"workshop.scribe","instance":"workshop","agent":{"type":"tmux","version":"3.2.0"},`+
+			`"process":{"pid":4242,"started":"2026-01-14T09:12:04.006Z"},"registered":"2026-01-14T09:12:04.318Z"}`)
+
+	code, out, errOut := exec("registry")
+	if code != 0 || errOut != "" {
+		t.Fatalf("exit %d, stderr %q", code, errOut)
+	}
+	if !strings.Contains(out, "  workshop.scribe\n") {
+		t.Errorf("registry printed %q, want the ledger row", out)
+	}
 }
 
 // ---------------------------------------------------------------------- watch

@@ -91,8 +91,8 @@ type presence struct {
 }
 
 // newPresence boots a presence deployment for one test and returns it wired up.
-// No host process is run: the registry is host-held (PRESENCE.md §Who is here
-// right now), and its absence is one of the things under test.
+// No host process is run, and none is needed: the registry is read from the
+// ledger on this machine (PRESENCE.md §Who is here right now).
 func newPresence(t *testing.T) *presence {
 	t.Helper()
 	home := t.TempDir()
@@ -705,19 +705,26 @@ func TestPresence_Emit_ToolPostRefsToolPreInRefsArray(t *testing.T) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 7. registry: no host running is a failure, not an empty success
-//    PRESENCE.md §Who is here right now; §Exit codes. Only the design-agnostic
-//    no-host refusal is tested; listing registrations (the happy path) is a
-//    documented GAP — see the notes.
+// 7. registry: it answers with no host process and with no broker
+//    PRESENCE.md §Who is here right now; §Exit codes. The registrations are
+//    read from the ledger on this machine, so nothing has to be listening for
+//    the question to have an answer.
 // ════════════════════════════════════════════════════════════════════════════
 
-func TestPresence_Registry_NoHostRunning_Fails(t *testing.T) {
+func TestPresence_Registry_AnswersWithNoHostRunning(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
-	// This deployment runs no host process, so the request goes unanswered: the
-	// verb must FAIL saying so, never print an empty list and exit 0.
-	checkRefusal(t, "no host|unanswered|no reply|timed out|timeout|no registry|no answer",
-		"registry", "workshop")
+	exec("subscribe", e2, "--pid", pidStr(livePid(t)), "--type", "tmux", "--version", "3.2.0")
+
+	// This deployment runs no host process, and there is nothing for one to
+	// answer: the verb reads the ledger the subscribe above wrote.
+	code, out, errOut := exec("registry", "workshop")
+	if code != 0 || errOut != "" {
+		t.Fatalf("registry exited %d (stderr %q), want the ledger's answer", code, errOut)
+	}
+	if !strings.Contains(out, e2) {
+		t.Errorf("registry printed %q, want the registered endpoint %q", out, e2)
+	}
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -929,11 +936,14 @@ func TestPresence_RefusedSend_SpeaksOnStderrOnly(t *testing.T) {
 		"send", "atelier.clerk", "into the void")
 }
 
-func TestPresence_RegistryFailure_SpeaksOnStderrOnly(t *testing.T) {
+// Registry is no longer one of the failures here: an empty registry is an
+// answer and a house nobody is registered in is an answer. What it still
+// refuses is a name that is not an instance name, and the refusal follows the
+// same discipline — stderr, nothing on stdout.
+func TestPresence_RegistryOfAnUnnameableInstance_SpeaksOnStderrOnly(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
-	checkOnStderr(t, "no host|unanswered|no reply|timed out|timeout|no registry|no answer",
-		"registry", "workshop")
+	checkOnStderr(t, "invalid instance name", "registry", "workshop.scribe")
 }
 
 // ════════════════════════════════════════════════════════════════════════════

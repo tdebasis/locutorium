@@ -168,9 +168,6 @@ func TestQueueOperationsOnAnUnreachableMedium(t *testing.T) {
 	if exists {
 		t.Error("a medium that could not be reached reported an attended endpoint")
 	}
-	if _, err := p.Request("registry.workshop", 100*time.Millisecond); err == nil {
-		t.Error("Request against a dead broker reported success")
-	}
 	if err := p.Watch("workshop", io.Discard); err == nil {
 		t.Error("Watch against a dead broker reported success")
 	}
@@ -223,44 +220,6 @@ func TestEmitAgainstADeadBrokerReturnsQuickly(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > emitDial+time.Second {
 		t.Errorf("Emit took %s against a dead broker; it is bounded at %s", elapsed, emitDial)
-	}
-}
-
-// ---------------------------------------------------------------- registry
-
-// Nobody answering is an ERROR. An empty list and no supervisor at all are
-// different facts, and a command that prints nothing and exits zero cannot
-// tell them apart.
-func TestRequestWithNobodyAnswering(t *testing.T) {
-	_, p := supervisor(t)
-
-	if _, err := p.Request("registry.workshop", 500*time.Millisecond); err == nil {
-		t.Error("a request nobody answered came back as a reply")
-	}
-}
-
-func TestRequestReturnsTheReply(t *testing.T) {
-	h, p := supervisor(t)
-	nc, _ := h.admin(t)
-	defer nc.Close()
-
-	responder, err := nc.Subscribe("registry.workshop", func(m *natsgo.Msg) {
-		_ = m.Respond([]byte(`{"agents":[]}`))
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = responder.Unsubscribe() }()
-	if err := nc.Flush(); err != nil {
-		t.Fatal(err)
-	}
-
-	reply, err := p.Request("registry.workshop", 2*time.Second)
-	if err != nil {
-		t.Fatalf("Request: %v", err)
-	}
-	if string(reply) != `{"agents":[]}` {
-		t.Errorf("reply = %s, want what the responder said", reply)
 	}
 }
 

@@ -205,7 +205,7 @@ underscore barred. That makes the dots-to-underscores substitution used for back
 (below) **injective by construction**: no endpoint can contain the `_` the substitution introduces, so
 two endpoints can never collide on a backing name. And an endpoint always appears in this
 fully-qualified `<instance>.<agent>` form — on the wire, in a CLI argument, in an event payload, in a
-registry reply. A bare agent name is never a valid endpoint: a consumer watching two instances could
+registry listing. A bare agent name is never a valid endpoint: a consumer watching two instances could
 not tell two agents of the same name apart.
 
 ### Where things are published
@@ -217,7 +217,7 @@ not tell two agents of the same name apart.
 
 **Events are not mail.** They have their own subject family, beside the queue and the topic rather
 than inside either, so they never enter the message plane's streams and are **not retained**: a
-consumer that needs the past asks the registry rather than replaying a history that does not exist.
+consumer that needs the past reads the registry rather than replaying a history that does not exist.
 
 **Events go to one subject per instance**, not one per agent. A consumer watching an instance sees
 every agent in it with a single subscription, and sees nothing from any other instance.
@@ -409,7 +409,7 @@ must not treat a missing event as evidence of anything.
 
 The idle window is what makes that survivable. A dropped `activity.end` resolves itself when the
 window passes; a dropped `tool.pre` costs nothing; a dropped `agent.subscribe` is the one real loss,
-and is recoverable by asking the registry.
+and is recoverable by reading the registry.
 
 **If the medium is unavailable, the operation returns an error immediately. There is no retry.**
 
@@ -491,30 +491,33 @@ Events describe **changes**. They do not describe **current state**, and the bus
 so a consumer that starts after an agent has already subscribed has missed the only event carrying
 that agent's type, version and details.
 
-**The registry answers that, and the host holds it.** A consumer joining late asks for the current
+**The registry answers that, and the ledger holds it.** A consumer joining late reads the current
 registry rather than replaying a history that does not exist; from then on it follows events. This
 keeps derived state out of the bus without requiring every consumer to have been present since the
 beginning.
 
-**It is a request and a reply, not a stored topic:**
+**It is read from disk, not asked of anybody:**
 
 ```
-request   registry.<instance>          (no body)
-reply     { "agents": [ …one registration object per live agent… ] }
+read   run/presence/<endpoint>.json    one file per registered agent
+shape  { "agents": [ …one registration object per registered agent… ] }
 ```
 
 Each entry is the same shape as the `agent.subscribe` payload, so a consumer has one format to
-understand and can apply a reply exactly as it would apply the events it missed.
+understand and can apply the listing exactly as it would apply the events it missed. A reader gets
+each record as its build reads it: every field that build knows, with the stored values unchanged. A
+field written by a newer build is not carried.
 
-The host answers because the host holds the registrations — it created them. **The bus stores
-nothing**; if no host is running, the request goes unanswered, which is the truthful reply.
+The ledger holds the registrations because whoever launched the agents wrote them there, beside the
+processes they describe. **The bus stores nothing**, and it is not asked: the registry answers with
+the broker down.
 
-With the instance omitted, `registry` means the caller's **own** instance, taken from its configured
-identity; a caller with no identity configured is refused — non-zero, with a message saying so. There
-is no "list every instance" in the inner parlor: each instance is a separate request subject with its
-own host, so asking for all of them is undefined.
+With the instance omitted, `registry` means **every instance on this machine**. The ledger is one
+directory holding every instance's rows, so that listing is a file read rather than a question with
+no subject to put it on. It needs no identity, and a caller with none configured is answered the
+same as one with an identity.
 
-The same request is what a person's tooling uses to list registered agents with their details.
+The same read is what a person's tooling uses to list registered agents with their details.
 
 **After a host restart** the host rebuilds by asking the broker which endpoints in its namespace are
 connected, and checking each recorded process. Agents outlive their host, so a restarted host must
@@ -555,7 +558,7 @@ omitted the publish time is used, which is only correct for something reporting 
 
 | Operation | Effect |
 |---|---|
-| `registry [<instance>] [--json]` | Lists current registrations with their details — type, version, process, display, working directory, and how long each has been registered. With `<instance>` omitted it means the caller's configured instance; with no identity configured it refuses (non-zero). Listing every instance is undefined in the inner parlor. This is the request described in *Who is here right now*. |
+| `registry [<instance>] [--json]` | Lists current registrations with their details — type, version, process, display, delivery address, working directory, and when each was registered. With `<instance>` omitted it means every instance on this machine. It needs no identity and no broker. It reports no health fact: process liveness and attendance are `status`'s answers. This is the read described in *Who is here right now*. |
 | `watch [<instance>]` | Follows the event stream, printing events as they arrive. Read-only. |
 | `status <endpoint>` | Reports one agent: registered or not, attending or not, process alive or not, and its current activity state with the reason for each conclusion. |
 
@@ -578,10 +581,15 @@ beat, no sweep pass and no bell checks the question on a cadence.
 ### Exit codes
 
 An operation that could not do what was asked exits non-zero and says why on standard error.
-Registering an endpoint that is already taken, sweeping from the wrong machine, or asking the
-registry when no host is running are each **failures, not empty successes** — a command that prints
-nothing and exits zero is indistinguishable from one that found nothing, which is the ambiguity this
-whole design exists to avoid.
+Registering an endpoint that is already taken, or sweeping from the wrong machine, are each
+**failures, not empty successes** — a command that prints nothing and exits zero is
+indistinguishable from one that found nothing, which is the ambiguity this whole design exists to
+avoid.
+
+An empty registry is the other case and is **not** a failure: the ledger was read, it holds nobody,
+and `registry` says so and exits zero. What it exits non-zero for is a name that is not an instance
+name, an unknown flag, or a ledger directory it could not read — the three states in which it did
+not learn who is registered.
 
 ## Adapters
 
@@ -628,8 +636,8 @@ at the boundary must deliver it when an agent returns.
 **Failures are announced, not inferred.** A refused send says so. An expiry is an event. A failure to
 launch is reported by the host. Nothing important is communicated by silence.
 
-**The bus holds no derived state.** It carries events; consumers build their own picture, and ask the
-registry for current state when they join.
+**The bus holds no derived state.** It carries events; consumers build their own picture, and read
+the registry for current state when they join.
 
 **Nothing accumulates inside the inner parlor.** A subscription is destroyed with its agent, and the
 queue with the subscription — bounded, as above, by the expiry check interval.

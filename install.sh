@@ -51,7 +51,6 @@ fi
 # an absent `go` is a named missing dependency like the rest.
 command -v go   >/dev/null 2>&1 || missing+=("go — loc is built from source; brew install go")
 command -v make >/dev/null 2>&1 || missing+=("make — the build is made by the Makefile; xcode-select --install")
-command -v curl >/dev/null 2>&1 || echo "note: curl not found; 'loc registry' will not work" >&2
 if [[ ${#missing[@]} -gt 0 ]]; then
   echo "install: missing dependencies:" >&2
   printf '  - %s\n' "${missing[@]}" >&2

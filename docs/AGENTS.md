@@ -24,7 +24,7 @@ agent-facing tool; a seat without one runs the CLI verb directly, `loc <verb>`.
 | `loc mcp` ‡ | — | serves this seat to the agent runtime that launched it, over stdio: it registers you with that runtime's pid, rings your bell when mail lands, and hands the mail over through a `read` tool. |
 | `loc status` | `status` | unread counts per endpoint. |
 | `loc topics` | `topics` | which topics are active right now. |
-| `loc registry` | — | asks an instance's host process over the bus. Each seat runs its own server, so no host process answers and the verb fails. Use `loc status` instead. |
+| `loc registry` | — | every registered agent's whole record, read from the ledger on this machine: type, version, pid, when it registered, its bell address, its working folder and its display name. No health facts — those are `loc status`. |
 | `loc watch` | — | every envelope as it passes, read-only. |
 | `loc version` | — | the version. |
 

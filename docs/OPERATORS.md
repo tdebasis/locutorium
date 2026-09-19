@@ -73,7 +73,7 @@ durable; listeners reconnect.
 |---|---|---|
 | `provider` | — (required) | which medium adapter to use. The name is looked up in a registry compiled into the binary, so a name it was not built with is refused rather than searched for |
 | `nats_url` | `nats://127.0.0.1:4222` | where the medium listens |
-| `monitor_url` | — (no default) | the medium's HTTP monitor. `loc registry` asks the instance's host over the bus instead, so this key is optional |
+| `monitor_url` | — (no default) | the medium's HTTP monitor. Nothing in this build requires it, so this key is optional |
 | `topic_window` | `7d` | how long a topic's messages live |
 | `send_requires_attendance` | `no` | *say-semantics*: refuse a send to an endpoint that is not attending, so the sender learns at the only moment it can act |
 | `wake_window_seconds` | `5` | how long the seat's server coalesces arrivals before it rings |
@@ -250,7 +250,7 @@ later beat, so a restored backup cannot point the sweep at another deployment's 
 ## When something is wrong
 
 `loc status` (unread per endpoint, and whether a seat is registered) ·
-`loc registry` (who is attending) · `run/<endpoint>.delivery.log` (what the
+`loc registry` (who is registered, and what each one registered) · `run/<endpoint>.delivery.log` (what the
 listener did and when) · `run/log/YYYY-MM-DD.jsonl` (what happened to each message, and to each
 seat) · `loc read --peek` (look without taking) · `loc watch` (every envelope,
 read-only).

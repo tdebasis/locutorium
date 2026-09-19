@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -24,11 +23,6 @@ import (
 // The presence verbs. Each one is a THIN skin: it reads the arguments, asks
 // internal/presence what the model says, and asks the medium for the one thing
 // only the medium can do. Nothing here decides what a fact means.
-
-// registryTimeout is how long a registry request waits for the instance's
-// supervisor. Long enough that a busy host answers, short enough that a person
-// who has none is told so rather than left waiting.
-const registryTimeout = 2 * time.Second
 
 // presenceOpener yields one presence extension to one verb. It is the shape of
 // withPresence.
@@ -524,67 +518,55 @@ func emitVerb(args []string) error {
 
 // -------------------------------------------------------------------- registry
 
-// registryVerb asks an instance's supervisor who is registered right now.
+// registryVerb prints the whole registration record of every agent registered
+// on this machine, grouped by instance.
 //
-// Events describe CHANGES and the bus keeps no history, so a consumer that
-// starts after an agent subscribed has missed the only event carrying that
-// agent's details. It asks for the current picture instead of replaying a
-// history that does not exist. The supervisor answers because the supervisor
-// holds the registrations — it created them — and if none is running the
-// request goes unanswered, which is the truthful reply and a FAILURE rather
-// than an empty list.
+// IT READS THE LEDGER AND ASKS NOTHING OVER THE BUS. It used to send a request
+// on `registry.<instance>` and wait two seconds for a host process to answer
+// it. No production code ever answered that subject — each seat runs its own
+// server and no supervisor holds the registrations — so the verb printed `no
+// host is answering` on every deployment it ever ran on. The registrations are
+// on this machine, in the ledger the subscribe wrote, so the answer is read
+// from there and the verb works with the broker down.
+//
+// IT NEEDS NO IDENTITY. With no argument it means every instance on this
+// machine, which is a question the ledger can answer and the bus could not:
+// there is no subject that means "every instance". So there is nothing here to
+// resolve an omitted instance from, and the report is the same with
+// LOC_IDENTITY unset.
+//
+// IT REPORTS NO HEALTH FACT. Process liveness, queue attendance and unread
+// mail are `loc status`'s answers. Two commands that answer one question from
+// two kinds of evidence will disagree one day, and neither output says which
+// of them is wrong.
 func registryVerb(w io.Writer, args []string) error {
 	instance, rest := leadingWord(args)
 	asJSON := false
 	if err := parseFlags(rest, nil, map[string]*bool{"--json": &asJSON}); err != nil {
 		return err
 	}
-	instance, err := instanceOf(instance)
-	if err != nil {
-		return err
-	}
-	if err := model.ValidInstance(instance); err != nil {
-		return err
-	}
-	subject := "registry." + instance
-	return withPresence(func(pr provider.Presence) error {
-		reply, err := pr.Request(subject, registryTimeout)
-		if err != nil {
-			return fmt.Errorf("no host is answering %s (the request went unanswered)", subject)
-		}
-		return renderRegistry(w, reply, asJSON)
-	})
-}
-
-// renderRegistry prints the list the host sent. --json hands back what the
-// supervisor said, unread: a consumer wants the reply, and a reply reshaped
-// by this tool is a second format for it to learn.
-func renderRegistry(w io.Writer, reply []byte, asJSON bool) error {
-	if asJSON {
-		_, err := fmt.Fprintln(w, strings.TrimRight(string(reply), "\n"))
-		return err
-	}
-	var roster struct {
-		Agents []model.Registration `json:"agents"`
-	}
-	if err := json.Unmarshal(reply, &roster); err != nil {
-		return fmt.Errorf("the answer on this subject is not a registry: %v", err)
-	}
-	if len(roster.Agents) == 0 {
-		_, err := fmt.Fprintln(w, "(no agents registered)")
-		return err
-	}
-	for _, a := range roster.Agents {
-		role := ""
-		if a.Display != nil && a.Display.Role != "" {
-			role = "  (" + a.Display.Role + ")"
-		}
-		if _, err := fmt.Fprintf(w, "%-24s %s %s  pid %d  since %s  %s%s\n",
-			a.Endpoint, a.Agent.Type, a.Agent.Version, a.Process.PID, a.Registered, a.Cwd, role); err != nil {
+	// An instance that is not a name is a typing error and is refused. An
+	// instance that is a name and holds nobody is an empty answer, not a
+	// refusal: the caller asked who is registered there and has been told.
+	if instance != "" {
+		if err := model.ValidInstance(instance); err != nil {
 			return err
 		}
 	}
-	return nil
+	rows, unreadable, err := model.ListAll()
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		b, err := model.RegistryJSON(instance, rows, unreadable)
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(w, string(b))
+		return err
+	}
+	_, err = io.WriteString(w, model.Registry(instance, rows, unreadable))
+	return err
 }
 
 // ---------------------------------------------------------------------- watch
