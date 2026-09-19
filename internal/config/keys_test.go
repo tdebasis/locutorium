@@ -3,9 +3,11 @@ package config
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -133,6 +135,48 @@ func TestARenamedKeyIsReportedOnce(t *testing.T) {
 	for _, want := range []string{"idle_window", "idle_timeout", "10m"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("the warning does not name %q: %q", want, got)
+		}
+	}
+}
+
+// Value must actually fire the warning, not merely leave WarnRenamedKeys
+// correct on its own. THE PLANT THAT TURNS THIS RED: delete the
+// warnOnce.Do call from Value.
+//
+// warnOnce is package state and Value is called by other tests in this
+// package, so this test resets it first: without that, whichever test runs
+// first would spend the one warning and this one would read silence.
+func TestValueWiresTheRenameWarning(t *testing.T) {
+	warnOnce = sync.Once{}
+
+	home := t.TempDir()
+	t.Setenv("LOC_HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "config"), []byte("idle_window = 3m\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := os.Stderr
+	os.Stderr = w
+
+	Value(IdleTimeout)
+
+	os.Stderr = saved
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+
+	got := buf.String()
+	for _, want := range []string{"idle_window", "idle_timeout"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Value(%q) did not write the rename warning to stderr: got %q, want it to contain %q", IdleTimeout, got, want)
 		}
 	}
 }
