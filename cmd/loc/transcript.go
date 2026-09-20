@@ -57,6 +57,22 @@ type logEvent struct {
 	Body   string `json:"body"`
 	Reason string `json:"reason"`
 	By     string `json:"by"`
+
+	// The bell's fields. `try` and `of` place one try in its streak, `result`
+	// says what came of it, and `after` is on the give-up line alone. An old
+	// `bell-failed` line carries none of them and still reads: no build has
+	// written one since #144, and old day files hold them.
+	Try    int    `json:"try"`
+	Of     int    `json:"of"`
+	Result string `json:"result"`
+	After  int    `json:"after"`
+
+	// `rang` and `last` are on the give-up line alone: how many of the
+	// streak's tries reached the pane, and the final try's result. An EMPTY
+	// `last` is a give-up line written before those two existed. It does not
+	// know, and this verb says so rather than reading the absent `rang` as 0.
+	Rang int    `json:"rang"`
+	Last string `json:"last"`
 }
 
 // message is every event that shares one uid, in the order they were written.
@@ -299,7 +315,7 @@ func outcomes(msgs []*message, seatEvents []*logEvent) (map[string]string, map[*
 				words[m.uid] = fmt.Sprintf("lost: queue deleted %s (%s)", stamp(m.sentTS, e.TS), e.Reason)
 				continue
 			}
-			words[m.uid] = fmt.Sprintf("pending, bell failed %s: %s", stamp(m.sentTS, e.TS), e.Reason)
+			words[m.uid] = "pending, " + bellWords(e, stamp(m.sentTS, e.TS))
 		default:
 			// A status this build does not know is printed as it stands. The
 			// record outlives any one version of this reader, and a word it
@@ -310,9 +326,54 @@ func outcomes(msgs []*message, seatEvents []*logEvent) (map[string]string, map[*
 	return words, claimed
 }
 
+// bellWords says one bell event beside the message it could not be joined to
+// by id, with that event's time already rendered.
+//
+// A TRY, NOT A FAILURE. Since #144 the bell writes every try with its result,
+// so this says how far into the streak the seat's bell got and what the last
+// try came to. `bell failed <ts>: <reason>` is what an OLD `bell-failed` line
+// still reads as; no build writes one.
+func bellWords(e *logEvent, ts string) string {
+	switch e.Status {
+	case "bell-try":
+		last := e.Result
+		if e.Reason != "" {
+			last += fmt.Sprintf(" (%s)", e.Reason)
+		}
+		return fmt.Sprintf("bell tried %d of %d, last %s %s", e.Try, e.Of, last, ts)
+	case "bell-gave-up":
+		// A FINISHED STREAK SAYS HOW MANY TRIES RANG. A bell that rang and was
+		// not answered is a different fact from a bell that never rang, and
+		// "gave up" said only the second.
+		if e.Last == "" {
+			// A give-up line from before it carried the two fields.
+			return fmt.Sprintf("bell gave up %s after %d tries", ts, e.After)
+		}
+		return fmt.Sprintf("bell made %d of %d tries, %s, last %s %s",
+			e.After, e.After, rangWords(e.Rang), e.Last, ts)
+	default:
+		return fmt.Sprintf("bell failed %s: %s", ts, e.Reason)
+	}
+}
+
+// rangWords is how many of a streak's tries reached the pane, said in words. A
+// streak with none is the one a reader has to tell from the others, so 0 gets
+// a word rather than a digit.
+func rangWords(n int) string {
+	if n == 0 {
+		return "none rang"
+	}
+	return fmt.Sprintf("%d rang", n)
+}
+
+// bellStatus reports whether a status word is one of the bell's.
+func bellStatus(s string) bool {
+	return s == "bell-try" || s == "bell-gave-up" || s == "bell-failed"
+}
+
 // lastSeatEvent is the seat event that decides a pending message's fate, or
 // nil: the earliest queue deletion after the send, else the latest bell
-// failure after the send.
+// event after the send.
 //
 // THE JOIN IS `seat == to` AND `ts > sent ts`, and the second half is what
 // makes it mean anything. A bell that failed an hour before this message
@@ -335,12 +396,15 @@ func lastSeatEvent(m *message, seatEvents []*logEvent) *logEvent {
 		if e.Seat != m.to || e.TS <= m.sentTS {
 			continue
 		}
-		switch e.Status {
-		case "queue-deleted":
+		switch {
+		case e.Status == "queue-deleted":
 			if deleted == nil || e.TS < deleted.TS || (e.TS == deleted.TS && e.seq < deleted.seq) {
 				deleted = e
 			}
-		case "bell-failed":
+		case bellStatus(e.Status):
+			// THE LATEST BELL EVENT, which under the flat rule is the last try
+			// of the streak or the give-up that closed it. The earlier tries
+			// are still in the record and `--seat` prints them one line each.
 			if bell == nil || e.TS > bell.TS || (e.TS == bell.TS && e.seq > bell.seq) {
 				bell = e
 			}
@@ -409,6 +473,18 @@ func stamp(sentTS, ts string) string {
 // message.
 func seatWords(e *logEvent) string {
 	switch e.Status {
+	case "bell-try":
+		last := e.Result
+		if e.Reason != "" {
+			last += fmt.Sprintf(" (%s)", e.Reason)
+		}
+		return fmt.Sprintf("bell try %d of %d: %s", e.Try, e.Of, last)
+	case "bell-gave-up":
+		if e.Last == "" {
+			return fmt.Sprintf("bell gave up after %d tries", e.After)
+		}
+		return fmt.Sprintf("bell made %d of %d tries, %s, last %s",
+			e.After, e.After, rangWords(e.Rang), e.Last)
 	case "bell-failed":
 		return fmt.Sprintf("bell failed: %s", e.Reason)
 	case "queue-deleted":

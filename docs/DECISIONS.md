@@ -556,3 +556,62 @@ queue or it is not.
   nothing.
 - **`queue-deleted` with reason `orphan` has no writer.** The format keeps the word and the readers
   still parse it, because records written before this change are still in the log.
+
+---
+
+## 17. One flat rule for the bell
+
+**Decision (2026-09-19):** While a seat has unread mail, its bell tries. A try is a try whether it
+rang, whether a busy pane refused it, whether the breaker suppressed it, or whether the notifier
+failed. The gap between tries is fixed, `wake_retry_seconds`, which defaults to 60 seconds. A
+streak gets `wake_tries` tries, which defaults to 3. After the last try the bell gives up and does
+nothing more for that streak. A new arrival rings at once and starts a fresh count. A streak also
+ends, silently, when the unread count reaches 0.
+
+Every try is written to the day's record with its result, and the end of the streak is written too.
+The result is one of `rang`, `refused`, `suppressed` and `failed`. The result never changes the
+counting.
+
+**The end of a streak records how many of its tries rang, and what the last one came to.** A bell
+that rang and was not answered is a different fact from a bell that never rang: the first is a seat
+that is not looking, the second is a broken bell or a busy pane, and they want different repairs.
+The line carries `rang` and `last` beside `after`, and `rang` is written even when it is 0.
+`loc status` and `loc transcript` say `made <n> of <n> tries, <k> rang, last <result>` rather than
+`gave up`, which read as the second state whichever one had happened.
+
+**This supersedes two rulings of 2026-09-18.** Under #145 a bell a busy pane refused rang again
+until the mail was read, on a wait that doubled to a cap of 60 seconds. Under #151 a ring the
+breaker suppressed was made later on that same schedule. A bell that broke was recorded once and
+never tried again. A ring that worked left no line in the shared record at all.
+
+**Why one rule.** What matters is that the mail is unread. How a ring fared says nothing about
+that, so the three outcomes do not deserve three schedules. One rule is easier to reason about, and
+easier to read in a record: a reader sees the tries and their results in one shape, in order,
+instead of inferring a retry loop from an absent line. A reminder once a minute is not a nag. The
+numbers are configuration, so a house that wants a different cadence sets one.
+
+**The known cost.** A seat busy for longer than its three tries gets no further ring until more
+mail arrives or it looks by itself. That is a real loss against the endless retry, and it is the
+price of a bound. `loc status` shows the state on the seat's row while the mail is unread, and
+`loc transcript` shows it beside the message.
+
+**Consequences:**
+
+- A bell that rang is now an event. That answers gap 2 of issue #144: after a try that did not get
+  through, "the bell was tried again and worked" and "nobody tried and the recipient looked by
+  themselves" were the same record.
+- The record grows by at most `wake_tries` lines plus one for each streak, which the bound keeps
+  small. Under the old rule a busy streak wrote one line and could run for hours.
+- **A broken bell is tried again.** A notifier that was fixed a minute later used to announce
+  nothing until the next message arrived.
+- `bell-failed` is retired. No build writes one. `loc transcript` still reads one, because day
+  files written before this rule hold them. `loc status` ignores one: it carries no count, and the
+  state it reported is not a state the new field has.
+- **`loc status` changed what its bell field means.** It was the last failure that still stood. It
+  is now the streak that is running while the seat has unread mail.
+- A `bell-gave-up` line with no `last` was written before `rang` and `last` existed. It does not
+  know whether the seat was ever told, and a reader prints the older wording rather than reading
+  the absent `rang` as a 0.
+- There is no warning at send time. The bell for this message has not rung when `send` returns, so
+  a send-time warning could report only the seat's previous streak.
+- The hourly breaker is unchanged. A ring it suppresses is a try with the result `suppressed`.

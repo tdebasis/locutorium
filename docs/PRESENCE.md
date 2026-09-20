@@ -429,6 +429,15 @@ anyway would mean specifying behaviour for a situation nobody has observed, whic
 evidence the situation occurs. **Add it if it is ever seen**, most likely when a host becomes
 something that starts automatically at login and the two come up together.
 
+**The bell is the one thing that does try again, and one flat rule governs it.** While a seat has
+unread mail, its bell tries. A try is a try whether it rang, whether a busy pane refused it,
+whether the breaker suppressed it, or whether the notifier failed. The gap between tries is fixed,
+and so is the number of tries. After the last try the bell gives up. It does nothing more until
+mail arrives again. A new arrival rings at once and starts a fresh count. The day's record holds
+every try with its result, and the result changes no count. The end of a streak records how many
+of its tries rang, because a bell that rang and was not answered is a different fact from a bell
+that never rang. The two numbers are deployment keys. `docs/CLI.md` holds them and their defaults.
+
 ## Trust, in the inner parlor
 
 **Actions are trusted.** Within one machine there is no question of who may unsubscribe whom, or of

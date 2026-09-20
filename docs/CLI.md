@@ -247,14 +247,24 @@ outcome comes from the last event under that `uid`, in file order and then line 
 |---|---|
 | `read <ts> by <seat>` | the last event is `read` |
 | `pending` | the last event is `sent` |
-| `pending, bell failed <ts>: <reason>` | pending, and the recipient's seat has a later `bell-failed` |
+| `pending, bell tried <k> of <n>, last <result> (<reason>) <ts>` | pending, and the recipient's seat has a later `bell-try` |
+| `pending, bell made <n> of <n> tries, <k> rang, last <result> <ts>` | pending, and the recipient's seat has a later `bell-gave-up` |
+| `pending, bell failed <ts>: <reason>` | pending, and the seat has an old `bell-failed` line |
 | `lost: queue deleted <ts> (<reason>)` | pending, and the recipient's seat has a later `queue-deleted` |
 | `failed: <reason>` | the last event is `failed` |
 
 A seat event joins a message on two facts: the seat is the recipient, and the event is later than
-the send. Where both a failed bell and a deleted queue apply, the later one wins. A stamp on the
+the send. Where both a bell event and a deleted queue apply, the later one wins. A stamp on the
 day of the send prints as a time. A stamp on any other day prints whole, so a read after midnight
 is never read as a read before the send.
+
+A try that rang has no reason. Its line shows no `(<reason>)`.
+
+`bell-failed` is the old line. No build writes one since the flat bell rule below. Day files from
+before that rule still hold them, so this verb still reads one.
+
+`--seat` prints each bell event on its own line. The two shapes are
+`bell try <k> of <n>: <result> (<reason>)` and `bell made <n> of <n> tries, <k> rang, last <result>`.
 
 Flags:
 
@@ -450,7 +460,9 @@ including when the answer is nothing:**
 
 ```
 workshop.scribe: row ok, queue ok
-workshop.crier: row ok, queue ok, bell FAILED 2026-09-16T22:47:36Z: notifier exited 127
+workshop.crier: row ok, queue ok, mail unread, bell tried 2 of 3, last refused (pane busy) at 2026-09-16T22:47:36Z
+workshop.binder: row ok, queue ok, mail unread, bell made 3 of 3 tries, 2 rang, last rang at 2026-09-16T22:49:36Z; no more until new mail
+workshop.clerk2: row ok, queue ok, mail unread, bell made 3 of 3 tries, none rang, last refused (pane busy) at 2026-09-16T22:51:36Z; no more until new mail
 workshop.clerk: queue missing, next beat repairs it
 atelier.scribe: pid dead, next beat reaps it
 workshop.legacy: row unreadable: <reason>
@@ -473,13 +485,24 @@ The row gives three facts. Each fact has its own mechanism. No fact follows from
 `row ok` does not mean `can be told`. A seat can hold a row and a queue, and still take no more
 mail, because nothing rings for its operator. Two seats ran in that state for a day on 2026-09-11.
 
-`status` adds the `bell FAILED` field when the message log holds a `bell-failed` event for the seat.
-The event must not be before the second of the seat's registration (a registration is stamped in
-milliseconds, a bell failure in whole seconds, and a bell dead at startup fails in that same second);
-an older one belongs to a previous occupant of
-the endpoint. A `read` by that seat after the event removes the field again — the seat took its
-mail, so something reaches it. The log is `$LOC_HOME/run/log/<day>.jsonl`. A log that `status`
-cannot read adds no field, and it does not fail the report.
+`status` adds the bell field when the message log holds a `bell-try` for the seat, and no `read` by
+that seat came after it. That is what `mail unread` says: the bell rang for mail, and the record
+shows that nobody took it. A `read` by the seat removes the field again. The two shapes are
+`mail unread, bell tried <k> of <n>, last <result> (<reason>) at <ts>` while the streak runs, and
+`mail unread, bell made <n> of <n> tries, <k> rang, last <result> at <ts>; no more until new mail`
+once it is finished. `none rang` stands for 0.
+
+**A finished streak says how many tries rang.** A bell that rang and was not answered is a
+different fact from a bell that never rang. The first is a seat that is not looking. The second is
+a broken bell or a busy pane. They want different repairs.
+
+The event must not be before the second of the seat's registration. A registration is stamped in
+milliseconds and a bell line in whole seconds, and a bell that is dead at startup fails in that
+same second. An older event belongs to a previous occupant of the endpoint. The log is
+`$LOC_HOME/run/log/<day>.jsonl`. A log that `status` cannot read adds no field, and it does not
+fail the report.
+
+`status` ignores an old `bell-failed` line. That line carries no count, and no build writes one.
 
 The last line of that block names a queue whose name is not an endpoint. A deployment made it
 before an endpoint carried an instance name, so the name has no instance in it. The sweep does
@@ -773,34 +796,46 @@ and no body:
 ```
 
 and appends `wake <endpoint> count=3` to `run/<endpoint>.delivery.log`. A tripped breaker says so
-once. Nothing is lost to a suppressed wake: the queue keeps the truth. A suppressed ring is not
-dropped. The server retries it on the same schedule a busy pane uses, and rings once the breaker
-allows it. The breaker still caps rings per minute and per hour while a retry waits.
+once. Nothing is lost to a suppressed wake: the queue keeps the truth.
+
+**One flat rule: while the seat has unread mail, the bell tries.** A try is a try whatever it came
+to. The four outcomes are `rang`, `refused` by a busy pane, `suppressed` by the breaker, and
+`failed` in the notifier. None of them changes what happens next.
+
+The gap between one try and the next is fixed at `wake_retry_seconds`. A streak gets `wake_tries`
+tries. After the last try the bell gives up. It does nothing more until mail arrives again. A new
+arrival rings at once and starts a fresh count.
+
+A streak also ends when the unread count reaches 0. The mail is read, so the bell has nothing to
+announce. Nothing is written for that.
+
+Each try after the first asks the broker how much mail is waiting, so it carries the count the
+queue holds. A count the broker cannot give is a try with the result `failed`. The error's own text
+is not written down, because it can carry the broker's address.
 
 **A bell that could not ring says so.** If the notifier refuses or fails,
 `bell failed <endpoint>: <reason>` goes to `run/<endpoint>.delivery.log` *and* to stderr, which is
 the runtime's own log — stdout is the protocol's. No `wake` line is written for it: a failed bell is
-not a wake, and a log saying the pane was woken when it was not is worse than no log at all.
-
-**A busy pane is asked again.** The tmux notifier refuses a pane in copy mode and a pane that is not
-at an empty prompt. Both refusals say the seat is busy right now, and both end on their own. The
-server waits `wake_retry_seconds` and rings again. It asks the broker how much mail is waiting first,
-so the second bell carries the count the queue holds. A queue that reads empty ends the retry and
-logs `retry <endpoint> stopped: the queue is empty`. A count that cannot be read does not end the
-retry: the server logs `retry <endpoint> could not read the count; it asks again`, and it waits for
-the next turn. A ring that types logs its `wake` line and then
-`retry <endpoint> rang after <k> refusals`. Each wait is twice the one before it, up to 60 seconds.
-
-**A broken bell is not retried.** No pane address, a tmux that cannot be read, a courier that exited
-non-zero: asking again repairs none of these. The failure is recorded once and nothing is scheduled.
+not a wake, and a log saying the pane was woken when it was not is worse than no log at all. A ring
+that types logs its `wake` line, and a ring after the first also logs
+`bell <endpoint> rang on try <k> of <n>`. A queue that reads empty logs
+`bell <endpoint> stopped: the queue is empty`. A give-up logs
+`bell <endpoint> made <n> of <n> tries, <k> rang; no more until new mail`.
 
 **A busy refusal does not consume the breaker.** The caps limit how often the pane is typed into, and
 a refusal typed nothing. The minute and hour counters are given back for it. A ring that typed is
 charged, and a broken bell stays charged, because a notifier that failed will fail again.
 
-**The day's record holds one line per streak.** `bell-failed` is written for the first busy refusal
-and not for each retry. The delivery log keeps the per-attempt evidence: the notifier writes
-`nudge <endpoint> refused: <reason>` every time it refuses.
+**The day's record holds every try.** Each one is a `bell-try` line with its `try`, its `of` and its
+`result`. The give-up is a `bell-gave-up` line with its `after`, its `rang` and its `last`. `rang`
+is how many of the streak's tries reached the pane, and it is written even when it is 0. `last` is
+the final try's result. A give-up line with no `last` was written before those two fields existed,
+and a reader says so rather than reading the absent `rang` as a 0. A try that rang carries no
+`reason`; the other three carry the notifier's own text. The delivery log keeps its own evidence:
+the notifier writes `nudge <endpoint> refused: <reason>` every time it refuses.
+
+`bell-failed` was the old line, one per busy streak. No build writes one. `loc transcript` still
+reads one, and `loc status` ignores it.
 
 **Four tools, and each is the verb of the same name** — `send {to, body}`, `read {peek?}`,
 `status {endpoint?}`, `topics {}`. Each runs this binary's own function and returns exactly what the
@@ -873,7 +908,8 @@ the bell; something else must then run `subscribe` and `unsubscribe` around the 
 | `wake_window_seconds` | `5` | wakes are coalesced across this window (`loc mcp`) |
 | `wake_breaker_per_minute` | `6` | cap on wakes per minute (`loc mcp`) |
 | `wake_breaker_per_hour` | `60` | cap on wakes per hour (`loc mcp`) |
-| `wake_retry_seconds` | `15` | first wait before a busy pane is asked again; it doubles, up to 60s (`loc mcp`) |
+| `wake_retry_seconds` | `60` | the fixed gap between one try of a seat's bell and the next (`loc mcp`) |
+| `wake_tries` | `3` | how many times a bell tries while mail is unread, before it gives up (`loc mcp`) |
 
 **`idle_window` is the old name of `idle_timeout`.** `loc` never rewrites a config file that exists,
 so a deployment that set the old key keeps a line that does nothing. The new key takes its own value,
@@ -881,15 +917,16 @@ which is `10m` unless the file sets it. Each run prints one line on stderr that 
 the value in force.
 
 **The defaults live in one table**, `internal/config/keys.go`. `loc start` writes the file from it on
-first run, with each key's comment above it, so the file and the code cannot drift apart. The four
-wake keys are the deployment's and are not in that table.
+first run, with each key's comment above it, so the file and the code cannot drift apart.
+`wake_retry_seconds` and `wake_tries` are in that table. `wake_window_seconds`,
+`wake_breaker_per_minute` and `wake_breaker_per_hour` are the deployment's and are not.
 
 **A default is not a deployment.** Every key above has one, so a home with no `config` file reads a
 whole configuration that nobody chose, and its `nats_url` is another deployment's live broker. Any
 verb that opens the medium refuses such a home and names the path it looked at. A file that exists
 and is silent on a key still takes the default above: that is what a hand-edited file relies on.
 
-Every key above except `monitor_url` is read by this build. The four wake keys are read by the
+Every key above except `monitor_url` is read by this build. The five wake keys are read by the
 seat's own `mcp` server, which is the only listener there is. `registry` reads no key at all: it
 reads the ledger under this home and never opens the medium.
 

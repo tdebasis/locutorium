@@ -136,15 +136,79 @@ func LogRead(uid, by string, at time.Time) {
 	})
 }
 
-// LogBellFailed records a bell that the seat's notifier could not ring.
+// LogBellTry records ONE TRY of a seat's bell, with what came of it.
+//
+// EVERY TRY IS WRITTEN DOWN, and the result never changes the counting. `try`
+// and `of` say where this try sits in the streak; `result` is one of `rang`,
+// `refused`, `suppressed` and `failed`. A reader that wants to know whether a
+// bell was rung again after one that did not get through reads it here: before
+// this, a ring that worked left no line at all, so "it was tried again and
+// worked" and "nobody tried and the seat looked by itself" were the same
+// record (#144).
+//
+// `reason` is left out for `rang`, which has none. It is the notifier's own
+// text for the other three, because the repair differs by what it says.
 //
 // It carries no `uid`. The server learns that mail arrived, not which message
 // arrived: the watch hands it an arrival and the count comes from Unread, so
-// a per-message bell failure is not a thing this code is in a position to
+// a per-message bell event is not a thing this code is in a position to
 // report. Saying so here is cheaper than a reader inferring it from an absent
 // key.
-func LogBellFailed(seat, reason string, at time.Time) {
-	logSeat(seat, "bell-failed", reason, at)
+//
+// THE OLD LINE IS GONE. `bell-failed`, written once per busy streak, is what
+// this replaces. No build writes one any more. Old day files hold them, so
+// every reader still parses one.
+func LogBellTry(seat string, try, of int, result, reason string, at time.Time) {
+	LogEvent(at, struct {
+		Seat   string `json:"seat"`
+		Status string `json:"status"`
+		TS     string `json:"ts"`
+		Try    int    `json:"try"`
+		Of     int    `json:"of"`
+		Result string `json:"result"`
+		Reason string `json:"reason,omitempty"`
+	}{
+		Seat:   seat,
+		Status: "bell-try",
+		TS:     at.UTC().Format(tsLayout),
+		Try:    try,
+		Of:     of,
+		Result: result,
+		Reason: reason,
+	})
+}
+
+// LogBellGaveUp records the end of a streak that used all its tries.
+//
+// It is written after the last try's own line, so the record holds the tries
+// and then the stopping. `after` is how many tries there were, which is the
+// same number the last try's `of` carries; a reader that has only this line
+// still knows.
+//
+// IT SAYS WHETHER THE SEAT WAS EVER TOLD. `rang` is how many of the streak's
+// tries reached the pane, from 0 to `after`. `last` is the final try's result.
+// A bell that rang twice and was not answered is a different fact from a bell
+// that never rang, and this line said neither before: every stopped streak
+// read as a bell that never got through.
+//
+// `rang` is written even when it is 0. That 0 is the whole of the second fact,
+// and an absent key would read as a line from before these two existed.
+func LogBellGaveUp(seat string, after, rang int, last string, at time.Time) {
+	LogEvent(at, struct {
+		Seat   string `json:"seat"`
+		Status string `json:"status"`
+		TS     string `json:"ts"`
+		After  int    `json:"after"`
+		Rang   int    `json:"rang"`
+		Last   string `json:"last"`
+	}{
+		Seat:   seat,
+		Status: "bell-gave-up",
+		TS:     at.UTC().Format(tsLayout),
+		After:  after,
+		Rang:   rang,
+		Last:   last,
+	})
 }
 
 // LogQueueDeleted records a queue that some process destroyed, and why.
@@ -162,8 +226,8 @@ func LogQueueDeleted(seat, reason string, at time.Time) {
 	logSeat(seat, "queue-deleted", reason, at)
 }
 
-// logSeat writes the seat family's one shape. Both of its callers name a
-// fixed status, so a status is never a string a call site can misspell.
+// logSeat writes the seat family's plainest shape. Its caller names a fixed
+// status, so a status is never a string a call site can misspell.
 func logSeat(seat, status, reason string, at time.Time) {
 	LogEvent(at, struct {
 		Seat   string `json:"seat"`

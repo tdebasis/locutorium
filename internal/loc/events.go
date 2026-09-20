@@ -34,6 +34,24 @@ type Event struct {
 	Body   string `json:"body,omitempty"`
 	By     string `json:"by,omitempty"`
 	Reason string `json:"reason,omitempty"`
+
+	// The bell's fields. `try` and `of` place one try in its streak, `result`
+	// says what came of it, and `after` is on the give-up line alone.
+	//
+	// AN OLD `bell-failed` LINE STILL PARSES. No build writes one, and every
+	// field it carried — `seat`, `status`, `ts`, `reason` — is above, so a day
+	// file written before #144 reads the same as it always did.
+	Try    int    `json:"try,omitempty"`
+	Of     int    `json:"of,omitempty"`
+	Result string `json:"result,omitempty"`
+	After  int    `json:"after,omitempty"`
+
+	// `rang` and `last` are on the give-up line alone. They say whether the
+	// seat was ever told. A give-up line with an EMPTY `last` was written
+	// before these two existed: it does not know, and a reader says so rather
+	// than reading the absent `rang` as a 0.
+	Rang int    `json:"rang,omitempty"`
+	Last string `json:"last,omitempty"`
 }
 
 // At is the event's own stamp. The second return is false when the line
