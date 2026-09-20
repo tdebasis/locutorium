@@ -727,6 +727,55 @@ refuses any other value and names these three.
 | `claude` | runs a one-shot `claude -p` courier that delivers the bell with `SendMessage` | a tmux pane id the courier matches a session by |
 | `none` | rings nothing; the seat finds its mail on the next `read` | unused, and still required |
 
+**Finding the address.** Run this inside the pane:
+
+```
+tmux display-message -p '#{pane_id}'
+```
+
+To list every pane on the machine in both forms at once:
+
+```
+tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index}  #{pane_id}'
+```
+
+For a `tmux` listener, prefer the `session:window.pane` form (`work:1.2`) over the pane id (`%42`).
+The notifier passes `LOC_LISTENER_ADDRESS` straight through to `tmux … -t <address>`
+(`internal/mcpserve/notify.go`), and tmux accepts either form there, so both work. They do
+not survive the same events: a pane id is assigned by the running tmux server, and a `session:window.pane`
+target names a position in the layout instead. When the layout is recreated the same way, the
+position still means the same pane; the id does not.
+
+> **Warning — a tmux server restart reassigns pane ids.** Every seat configured with a pane id then
+> has a stale address, and the failure has no announcement of its own. The message still queues.
+> `loc registry` still lists the seat as registered, and its row still reads `ok` in `loc status`
+> (`docs/CLI.md` §status). If the stale id now names nothing, the bell's tries fail and that failure
+> is written to the seat's delivery log — but nothing marks it as caused by a restart. If the stale
+> id has been reassigned to a different live pane that also looks like an agent's input box, the bell
+> types into it and reports success: the intended seat gets nothing and no failure is recorded
+> anywhere.
+>
+> tmux hands out pane ids in creation order, starting again from `%0` after the restart. When the
+> panes come back in the same order, a stale id happens to name the right pane again, and the bell
+> keeps working. When the order differs, or a pane is added, a stale id names the wrong pane, or
+> none. The failure is therefore intermittent: a bell that works after one restart is not evidence
+> that a pane id is a safe address.
+>
+> Check with `loc registry`. It prints each agent's recorded address under `address:`. Compare that
+> value against the pane's actual id or position (above) for every seat after any tmux server
+> restart; nothing else prompts you to.
+>
+> The `claude` type has the same exposure, and cannot be given the `session:window.pane` form as a
+> workaround. The courier's own instructions ask it to find "the live session whose tmux pane id is
+> `<address>`" (`internal/mcpserve/notify.go`) — a literal pane id, matched against the runtime's live
+> sessions at delivery time. After a restart, if no live session holds that id, the courier does
+> nothing, by the same instructions ("If no session matches, do nothing. Then stop."). But if the
+> stale id has been reassigned to a pane that holds a DIFFERENT live session, the courier's
+> instructions match that session instead and it wakes that one: the intended seat gets nothing, the
+> wrong seat is told to read, and no failure is recorded anywhere. The address for a `claude` listener
+> must be re-read after every tmux restart, the same as for a `tmux` listener that was configured with
+> a pane id.
+
 The `tmux` notifier refuses to type when the pane is in copy mode, and refuses when the pane is not
 an agent's input box: typing into a pane that has dropped to a shell executes the text. A refusal is
 written to the delivery log and the message waits in the queue.
