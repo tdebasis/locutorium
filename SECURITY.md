@@ -31,8 +31,12 @@ is from"). Because this version authenticates nobody, nothing verifies which
 process set it.
 
 A local process on the same machine can set `LOC_IDENTITY` to any name it
-chooses, then send or publish under that name. This is a stated design
-position for v0. It is not a vulnerability to report.
+chooses, then send or publish under that name. The same process can also read
+under that name. A read consumes: it takes the messages out of that
+identity's queue, exactly once (`docs/CLI.md` §read), so they never reach the
+seat they were addressed to. Authentication is what would constrain both
+directions, and v0 has none. This is a stated design position for v0. It is
+not a vulnerability to report.
 
 ### In scope
 
@@ -49,3 +53,5 @@ Report a finding in any of these:
 Do not report this. It is the stated v0 design, not a defect:
 
 - An unauthenticated local process can publish as any identity.
+- An unauthenticated local process can read as any identity, and that read
+  consumes the mail.
