@@ -197,14 +197,13 @@ func subscribeVerb(args []string) error {
 	}
 
 	// THE ROW IS WRITTEN FIRST, AND THE ORDER IS THE WHOLE SAFETY ARGUMENT.
-	// Two writes make a subscribe, and a beat can land between them. Create
-	// the queue first and the gap is a queue with no row, which is precisely
-	// what the sweep's orphan pass destroys: a seat that subscribed during a
-	// beat would be registered and unreachable until the next beat rebuilt it.
-	// Write the row first and the gap is a row with no queue, which the
-	// sweep's third pass repairs. The rule is general — order the two writes
-	// so the gap falls where the reconciler's action matches the caller's
-	// intent — and here the row's presence is what "arrived" means.
+	// Two writes make a subscribe, and a beat can land between them. Write the
+	// row first and the gap is a row with no queue, which the sweep's repair
+	// pass FILLS. Create the queue first and the gap is a queue with no row,
+	// which the sweep only reports (#141) — survivable now, and repaired by
+	// nothing. The rule is general: order the two writes so the gap falls
+	// where the reconciler's action matches the caller's intent. Here the
+	// row's presence is what "arrived" means.
 	return withPresence(func(pr provider.Presence) error {
 		if err := model.Save(reg); err != nil {
 			return err
@@ -302,11 +301,10 @@ func unsubscribeVerb(args []string) error {
 		// the queue first and the gap is a row with no queue, which the sweep
 		// repairs — the daemon rebuilding a queue the caller just asked to be
 		// destroyed, and undoing its own work on the next beat. Remove the row
-		// first and the gap is a queue with no row, which the sweep's orphan
-		// pass finishes on the caller's behalf while another row still holds
-		// the instance. When this seat was the instance's last, no row is left
-		// to account for the instance, the orphan pass does not reach the
-		// queue, and running `loc unsubscribe` again is what removes it.
+		// first and the gap is a queue with no row, which no sweep finishes
+		// and no sweep undoes (#141). An unsubscribe abandoned in that gap
+		// leaves the queue standing: `loc unsubscribe <endpoint>` again
+		// removes it, and a later `subscribe` adopts it with the mail in it.
 		if err := model.Remove(endpoint); err != nil {
 			return err
 		}
@@ -348,21 +346,25 @@ var (
 // sweepVerb reconciles the three records a seat has: its ledger row, its queue
 // and its process.
 //
+// IT DELETES A QUEUE ONLY WITH ITS OWN DEAD ROW. The ledger holds a row, the
+// row names a process, and the process is gone: the row and the queue go
+// together. A queue no row claims is PRINTED and left alone, whatever instance
+// it is in. Deleting on the absence of a row destroys mail on evidence that
+// cannot tell a departed agent from a lost row (#141).
+//
 // IT TAKES NO ARGUMENT. A process id means something only on the machine that
-// holds it, so a sweep is a machine-wide act by nature. There is still no
-// instance argument, because the ledger's own rows say which instances this
-// sweep may touch. A queue in any other instance is not a finding, so it is
-// never listed here and never deleted. It returns the number of changes it
-// made so the daemon can write that number in its heartbeat log.
+// holds it, so a sweep is a machine-wide act by nature. It returns the number
+// of changes it made so the daemon can write that number in its heartbeat log.
+// A printed queue is not a change.
 //
 // IT PUBLISHES NOTHING. A departure event says an agent left; a reap says a
 // record was wrong. Emitting one for the other told every listener that an
 // agent had just gone at the moment a stale record was tidied, which is a
-// different fact and, for a queue that had been orphaned for a day, a false
-// one.
+// different fact and, for a record that had been stale for a day, a false one.
 //
-// It is silent when it changes nothing, which is what makes it safe to run
-// every five minutes.
+// It is silent when it has nothing to change and nothing to report, which is
+// what makes it safe to run every five minutes. A queue with no row is
+// reported on every beat until somebody removes it or an agent adopts it.
 func sweepVerb(w io.Writer, args []string) (changes int, err error) {
 	if len(args) > 0 {
 		return 0, errUsage
@@ -389,16 +391,6 @@ func sweep(w io.Writer, open presenceOpener) (changes int, err error) {
 			return err
 		}
 		findings := model.Findings(rows, unreadable, queues)
-		// THE ORPHAN PASS IS SKIPPED ENTIRELY, NOT ROW BY ROW. An unreadable
-		// row may be the one that claims a queue this pass would destroy, and
-		// there is no way to ask which. Skipping only the rows in question is
-		// impossible for exactly the same reason it is unsafe to proceed.
-		blocked := false
-		for _, f := range findings {
-			if f.Kind == model.UnreadableRow {
-				blocked = true
-			}
-		}
 		for _, f := range findings {
 			switch f.Kind {
 			case model.DeadPID:
@@ -418,21 +410,18 @@ func sweep(w io.Writer, open presenceOpener) (changes int, err error) {
 				if _, err := fmt.Fprintf(w, "%s: reaped, the process is gone\n", f.Endpoint); err != nil {
 					return err
 				}
-			case model.OrphanQueue:
-				if blocked {
-					continue
-				}
-				if err := pr.DeleteQueue(f.Endpoint); err != nil {
-					return err
-				}
-				// A queue no row claims, inside an instance this ledger
-				// holds. The line is written for exactly the question this
-				// pass is dangerous for: a queue that held mail is gone, and
-				// the record has to say a sweep took it rather than leaving
-				// it to be guessed at.
-				loc.LogQueueDeleted(f.Endpoint, "orphan", time.Now().UTC())
-				changes++
-				if _, err := fmt.Fprintf(w, "%s: queue deleted, no row holds it\n", f.Endpoint); err != nil {
+			case model.QueueNoRow:
+				// NOTHING HAPPENS HERE, AND THE LINE IS THE WHOLE PASS. The
+				// sweep deletes a queue on positive evidence only: a row that
+				// names it and a process that is gone. An absent row is not
+				// evidence. It cannot tell an agent that left without
+				// finishing from a row this deployment lost, and destroying
+				// the mail is right for one of those and wrong for the other.
+				// So the operator is told, in the words `status` uses, and
+				// the queue stays until a person removes it or a later
+				// subscribe adopts it. It is not a change, so it is not
+				// counted.
+				if _, err := fmt.Fprint(w, queueNoRowLine(f.Endpoint)); err != nil {
 					return err
 				}
 			case model.MissingQueue:
@@ -451,13 +440,18 @@ func sweep(w io.Writer, open presenceOpener) (changes int, err error) {
 				}
 			}
 		}
-		if blocked {
-			return fmt.Errorf("a ledger row could not be read, so no queue was deleted as an orphan; " +
-				"repair or remove the row named above and sweep again")
-		}
 		return nil
 	})
 	return changes, err
+}
+
+// queueNoRowLine is the one sentence both the sweep and `status` print for a
+// queue no row claims. There is ONE wording, because the sweep and the report
+// are saying the same thing about the same object, and a reader who saw two
+// sentences would look for a difference between them.
+func queueNoRowLine(endpoint string) string {
+	return fmt.Sprintf("%s: queue with no row; nothing removes it; "+
+		"remove it with loc unsubscribe %s\n", endpoint, endpoint)
 }
 
 // ----------------------------------------------------------------------- emit
@@ -745,10 +739,14 @@ func lastBeat() string {
 	return last
 }
 
-// seatLines prints one line per seat, and one per queue that no seat claims
-// inside an instance the ledger holds a row for, saying what the next beat
-// would do about it. A queue in any other instance is not reported, because
-// the next beat would not touch it.
+// seatLines prints one line per seat, then one per queue that no seat claims,
+// saying what the next beat would do about it — including, for a queue with no
+// row, that it would do nothing.
+//
+// EVERY MISMATCH BETWEEN THE LEDGER AND THE QUEUES IS NAMED, in every
+// instance. The report holds nothing back, because the next beat destroys
+// nothing it merely reports, and a queue the operator is not told about is one
+// they cannot remove.
 //
 // Last come the queues whose name is not an endpoint at all. The next beat
 // would not touch one of those either, and it CANNOT: it never sees them
@@ -773,7 +771,7 @@ func seatLines(w io.Writer, pr provider.Presence) error {
 	}
 	bells := bellStreaks(rows)
 	trouble := map[string]string{}
-	var orphans []string
+	var noRow []string
 	for _, f := range model.Findings(rows, unreadable, queues) {
 		switch f.Kind {
 		case model.DeadPID:
@@ -782,8 +780,8 @@ func seatLines(w io.Writer, pr provider.Presence) error {
 			trouble[f.Endpoint] = "queue missing, next beat repairs it"
 		case model.UnreadableRow:
 			trouble[f.Endpoint] = fmt.Sprintf("row unreadable: %v", f.Err)
-		case model.OrphanQueue:
-			orphans = append(orphans, f.Endpoint)
+		case model.QueueNoRow:
+			noRow = append(noRow, f.Endpoint)
 		}
 	}
 	// Every seat the ledger names, readable or not, in one order.
@@ -811,8 +809,8 @@ func seatLines(w io.Writer, pr provider.Presence) error {
 			return err
 		}
 	}
-	for _, q := range orphans {
-		if _, err := fmt.Fprintf(w, "%s: queue with no row, next beat removes it\n", q); err != nil {
+	for _, q := range noRow {
+		if _, err := fmt.Fprint(w, queueNoRowLine(q)); err != nil {
 			return err
 		}
 	}

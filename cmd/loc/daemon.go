@@ -200,8 +200,11 @@ func runDaemon(w io.Writer, beat time.Duration, sigs <-chan os.Signal, ready fun
 // THE ADDRESS IS THREADED, NOT READ AGAIN. The sweep opened the configured
 // provider on every beat, and that provider read nats_url each time. A config
 // file rewritten or restored under a running daemon therefore moved the sweep
-// onto another deployment's broker, where this ledger claims nothing and the
-// orphan pass deletes queues that are in use.
+// onto another deployment's broker, where this ledger claims nothing and this
+// daemon reconciles records it did not write. The sweep no longer deletes a
+// queue on the absence of a row (#141), so the damage that took is smaller;
+// the reaping of a dead row still acts on whatever broker the provider
+// reaches, which is why the pin stays.
 //
 // ONLY THE NATS PROVIDER EXISTS (internal/provider/nats/nats.go registers the
 // one name the key table offers), and this file already dials it directly for

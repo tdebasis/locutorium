@@ -14,7 +14,7 @@ import (
 // This is the incident in miniature. A daemon runs a broker of its own and
 // keeps reading nats_url, so a config file that points somewhere else moves
 // every later operation onto a stranger's broker. There the daemon's ledger
-// claims nothing, and the sweep's orphan pass destroys queues that are in use.
+// claims nothing, and its sweep reconciles records it did not write.
 // A provider from At must never look at the file for its address.
 //
 // A stands for the daemon's own broker and B for the other deployment's. The

@@ -433,6 +433,11 @@ this code is in a position to make.
 
 ## 15. A sweep touches only what its own deployment holds
 
+**Change 1 below is superseded by entry 16 (2026-09-19).** The orphan pass it bounded no longer
+exists: the sweep deletes a queue only together with its own dead row. Changes 2 and 3 stand, and
+they are the two fixes entry 16 rests on. The rest of this entry is the record of what was decided
+on 2026-09-18 and why.
+
 **Decision (2026-09-18):** Three changes, each stopping a different step of one failure.
 
 1. **The orphan pass is bounded by the instances the ledger holds.** A queue in any other instance is
@@ -492,7 +497,69 @@ can trip. A new way to lose a broker is a poor trade for a case the other change
 
 ---
 
-## 16. One flat rule for the bell
+## 16. A sweep deletes a queue only together with its dead row
+
+**Decision (2026-09-19):** The sweep deletes a queue on positive evidence only. The evidence is a
+ledger row that names the queue and a process that is gone; the row and the queue go together, as
+before. The sweep NEVER deletes a queue because no row claims it.
+
+1. **A queue with no row is reported and nothing removes it.** `loc status` prints it and `loc
+   sweep` prints the same sentence. The line names the remedy: `loc unsubscribe <endpoint>`.
+2. **Entry 15's instance boundary is removed, not reshaped.** An instance is a name. The sweep has
+   no rule about instances, and `loc status` reports every mismatch between the ledger and the
+   queues in every instance.
+3. **There is no special case.** No rule for an empty ledger, no rule for instances, no config key.
+   The sweep either deletes queues on an absent row or it does not, and it does not.
+4. **A later `subscribe` adopts the queue and the mail in it.** That is what `CreateQueue` already
+   does and it is unchanged. Mail is held until it is read, and the address is the agent: the queue
+   belongs to the endpoint, not to the process that was last in the seat.
+5. **The repair stays.** A live row with no queue still gets its queue back.
+
+**Context.** The 2026-09-18 incident was a daemon reconciling a ledger that was not its own: its
+home directory had been removed, its ledger was empty, and it reached a broker serving another
+deployment. Both causes are now fixed at their source. A process with no config file refuses instead
+of taking the default address, and the daemon sweeps only the broker it started (entry 15, changes 2
+and 3). A sound teardown ends a deployment's daemon with its home.
+
+Entry 15's change 1 was a third fix, of a different kind: it tried to make a wrong-ledger process
+less harmful rather than stopping one from existing. Its cost fell on healthy deployments. When the
+last seat of an instance left uncleanly, no row was left to hold the instance, so nothing cleaned up
+its queue — and there was no way to tell an operator about it either, because the report inherited
+the same boundary and said nothing about the queue at all.
+
+**The deeper reason the pass is gone.** An ABSENT row cannot tell "the agent left without finishing"
+from "the row was lost". The first wants the queue destroyed. The second wants it kept, because the
+mail in it is somebody's. A pass that cannot distinguish two cases with opposite remedies must not
+act on either, and the cost of guessing wrong is asymmetric: a queue kept too long wastes a little
+memory and shows up in every report, while a queue destroyed by mistake destroys mail that was
+already accepted.
+
+**Rejected: a special case for an empty ledger.** It would have kept the old deletion for the
+ordinary run and blocked it for the incident's shape. It fails the same test as the boundary: it
+guards a specific accident rather than the property. Either an absent row is grounds for deleting a
+queue or it is not.
+
+**Consequences:**
+
+- **Nothing removes a queue with no row.** `loc unsubscribe <endpoint>` destroys it and the mail in
+  it; `loc subscribe <endpoint> …` adopts it with the mail. Both are a person's decision.
+- **A queue can accumulate mail for nobody.** `loc status` names it on every run, which is the
+  pressure that used to be a silent deletion.
+- **An unreadable row no longer blocks anything.** Its only job was to stop the deletion pass, so
+  the sweep now prints it and carries on, and exits 0. The queue beside it is printed too, as a
+  queue with no row, because an unreadable row claims nothing.
+- **The hand-run `loc sweep` uses the config's broker, not the daemon's pinned one.** That was a
+  route to deleting another deployment's queues by hand; with this change it cannot delete a queue
+  on an absent row either.
+- **Two deployments sharing one instance name on one broker are no longer a deletion risk.** Entry
+  15 named them as unprotected. Neither ledger holds the other's rows, and an absent row now removes
+  nothing.
+- **`queue-deleted` with reason `orphan` has no writer.** The format keeps the word and the readers
+  still parse it, because records written before this change are still in the log.
+
+---
+
+## 17. One flat rule for the bell
 
 **Decision (2026-09-19):** While a seat has unread mail, its bell tries. A try is a try whether it
 rang, whether a busy pane refused it, whether the breaker suppressed it, or whether the notifier

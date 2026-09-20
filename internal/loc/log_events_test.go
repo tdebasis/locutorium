@@ -215,6 +215,9 @@ func TestSeatEventsCarryNoUID(t *testing.T) {
 			// `rang` is written even when it is 0. That 0 is the fact a reader
 			// needs, and an absent key would read as a line that does not know.
 			[]string{"seat", "status", "ts", "after", "rang", "last"}},
+		// `orphan` is a reason NO BUILD WRITES any more (#141). The format
+		// still carries it, because the log holds records written before that
+		// change and the readers still have to parse them.
 		{"queue-deleted", func() { LogQueueDeleted("workshop.clerk", "orphan", at) },
 			"queue-deleted", "orphan",
 			[]string{"seat", "status", "ts", "reason"}},

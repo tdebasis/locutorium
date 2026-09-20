@@ -420,9 +420,9 @@ func TestPresenceVerbsReportAnUnreadableRegistration(t *testing.T) {
 
 // A queue the medium refuses to create LEAVES THE ROW, and the verb still
 // fails. The row is written first on purpose: the gap between the two writes
-// is then a row with no queue, which is the sweep's third pass and a repair,
-// rather than a queue with no row, which is its second pass and a destruction.
-// The caller is told the subscribe failed; the next beat makes the queue.
+// is then a row with no queue, which the sweep REPAIRS, rather than a queue
+// with no row, which the sweep only reports (#141) and nothing repairs. The
+// caller is told the subscribe failed; the next beat makes the queue.
 func TestSubscribeKeepsTheRowWhenTheQueueCannotBeMade(t *testing.T) {
 	d := newPresenceDeployment(t)
 	d.spy.createErr = fmt.Errorf("cannot reach the medium")
@@ -513,12 +513,11 @@ func TestUnsubscribeRemovesTheRowBeforeTheQueue(t *testing.T) {
 	code, out, errOut := exec("unsubscribe", "workshop.scribe")
 	assertResult(t, code, out, errOut, 1, "", "loc: cannot reach the medium\n")
 	// THE ROW IS GONE AND THE QUEUE IS NOT, which is the gap this order
-	// chooses. The sweep's orphan pass finishes what the caller started, so
-	// long as another row still holds the instance. When the seat was the
-	// instance's last, no row holds the instance, the orphan pass does not
-	// reach the queue, and `loc unsubscribe` has to be run again. Deleting the
-	// queue first would leave a row with no queue, and the next beat would
-	// rebuild the queue the caller asked to be destroyed.
+	// chooses. No sweep finishes the removal: since #141 a queue with no row
+	// is reported and never deleted, so `loc unsubscribe` has to be run again
+	// whether or not another row holds the instance. Deleting the queue first
+	// would leave a row with no queue, and the next beat would rebuild the
+	// queue the caller asked to be destroyed.
 	if _, err := os.Stat(d.ledger("workshop.scribe.json")); !os.IsNotExist(err) {
 		t.Error("the row outlived the queue it was removed before")
 	}
@@ -599,9 +598,9 @@ func TestSweepReportsALedgerItCannotList(t *testing.T) {
 	}
 }
 
-// A queue enumeration that cannot complete stops the sweep. A short list is
-// wrong in the destructive direction on the orphan pass and the duplicating
-// direction on the repair pass, so it is never acted on.
+// A queue enumeration that cannot complete stops the sweep. A short list
+// reports queues with no row that have one, and duplicates work on the repair
+// pass, so it is never acted on.
 func TestSweepStopsWhenTheQueuesCannotBeListed(t *testing.T) {
 	d := newPresenceDeployment(t)
 	if code, _, errOut := exec("subscribe", "workshop.clerk", "--pid", alivePid(), "--type", "tmux", "--version", "3.2.0"); code != 0 {

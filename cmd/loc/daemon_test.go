@@ -405,9 +405,12 @@ func TestABeatRecordsASweepThatFailed(t *testing.T) {
 	// THE SWEEP MUST FAIL, AND IT MUST FAIL AGAINST NOTHING. This case wrote
 	// no config at all, so the sweep took the table's default nats_url. On
 	// 2026-09-16 that address was the live broker on this machine. The sweep
-	// ran against it holding this scratch registry, which is empty, and its
-	// orphan pass deleted all six live queues. The port below is one the
-	// kernel handed out and then closed, so there is no broker to reach.
+	// ran against it holding this scratch registry, which is empty, and the
+	// pass that deleted a queue on the absence of a row destroyed all six live
+	// queues. That pass is gone (#141), and this case still points at a dead
+	// address: the sweep must FAIL here, which is what the arm reads. The port
+	// below is one the kernel handed out and then closed, so there is no
+	// broker to reach.
 	writeFile(t, filepath.Join(home, "config"), "nats_url = "+loctest.ClosedPort(t)+"\n")
 	beatDir := filepath.Join(home, "run", "heartbeat")
 	beatOnce(&strings.Builder{}, beatDir, withPresence)
