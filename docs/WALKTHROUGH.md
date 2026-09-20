@@ -43,8 +43,8 @@ Run this inside a pane. It prints that pane's address:
 tmux display-message -p '#{session_name}:#{window_index}.#{pane_index}'
 ```
 
-This walkthrough calls the two answers `work:1.1` and `work:1.2`. Yours will differ: the numbers
-follow your `base-index` and `pane-base-index` settings.
+This walkthrough calls the two answers `work:0.0` and `work:0.1`, which is what tmux's default
+`base-index` and `pane-base-index` give. Yours differ if you changed either setting.
 
 tmux accepts more than one form of address, and the forms do not survive a tmux server restart
 equally well. [`CLI.md` §mcp](CLI.md#mcp) says which form to prefer and what breaks after a
@@ -57,8 +57,8 @@ server reads three environment variables. One is the same for both seats. Two di
 
 | seat | `LOC_IDENTITY` | `LOC_LISTENER_TYPE` | `LOC_LISTENER_ADDRESS` |
 |---|---|---|---|
-| ada | `house.ada` | `tmux` | `work:1.1` |
-| bob | `house.bob` | `tmux` | `work:1.2` |
+| ada | `house.ada` | `tmux` | `work:0.0` |
+| bob | `house.bob` | `tmux` | `work:0.1` |
 
 The configuration block itself is in [`CLI.md` §mcp](CLI.md#mcp), under **Configuring a runtime**.
 It gives a JSON form and a TOML form. Copy the one your runtime reads, then fill in the two values
@@ -100,7 +100,7 @@ thing that rings bob's bell.
 
 Now look at the other pane. Bob's `loc mcp` server holds a subscription on bob's queue. It sees the
 arrival, coalesces anything else that lands inside `wake_window_seconds`, and hands its notifier one
-line. The `tmux` notifier asks tmux whether the pane accepts input, types the line into `work:1.2`,
+line. The `tmux` notifier asks tmux whether the pane accepts input, types the line into `work:0.1`,
 and presses Enter. The line is:
 
 ```
@@ -145,7 +145,14 @@ loc status
 
 The first line reports the daemon. Then comes one line per seat. `house.bob: row ok, queue ok` says
 the seat is registered and its queue exists. That line gains `mail unread, bell tried <k> of <n>,
-last <result>` once a bell has rung for mail that nobody took (`CLI.md` §status).
+last <result> at <time>` once a bell has rung for mail that nobody took.
+
+Check again a few minutes later and that suffix changes form. Once the streak has spent its last
+try, it reads `mail unread, bell made <n> of <n> tries, <k> rang, last <result> at <time>; no more
+until new mail`. This is the form a pane that never woke settles into, and `<k> rang` is the part to
+read: it separates a bell that reached the pane from one that never did. The bell then stays quiet
+until new mail arrives. [`CLI.md` §status](CLI.md#status) gives both shapes, and
+[`OPERATORS.md` §The bell](OPERATORS.md) states the rule behind the second one.
 
 **Second, compare the recorded address with the pane.**
 
@@ -173,7 +180,7 @@ notifier each write a line per attempt:
 | `nudge house.bob refused: no pane address` | the seat registered with an empty address |
 | `nudge house.bob refused: pane_in_mode` | the pane is in copy mode, so somebody may be reading it |
 | `nudge house.bob refused: not a prompt` | the pane is not an agent's input box, and typing into a shell would execute the text |
-| `nudge house.bob refused: cannot read pane work:1.2: <error>` | tmux could not answer about that address |
+| `nudge house.bob refused: cannot read pane work:0.1: <error>` | tmux could not answer about that address |
 | `nudge house.bob BELL FAILED: <reason>` | the notifier broke |
 
 A refusal and a failure both leave the message in the queue. [`OPERATORS.md`](OPERATORS.md) §The
