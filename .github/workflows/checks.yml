@@ -400,6 +400,13 @@ jobs:
         # so the reason for a failure is where the log is already being read,
         # and the step fails if anything it named is still standing — a
         # poisoned job never runs.
+        #
+        # This condition is spelled `== 'self-hosted'` on purpose. The
+        # refusal step above is spelled `!= 'github-hosted'` on purpose too.
+        # Each spelling fails safe for its own step if `runner.environment`
+        # ever takes a value other than these two known ones: an unknown
+        # environment is refused there and is not reaped here. Do not unify
+        # the two spellings.
         if: runner.environment == 'self-hosted'
         run: bash conformance/leftovers.sh reap
 
