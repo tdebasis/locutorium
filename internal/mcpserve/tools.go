@@ -71,7 +71,7 @@ func (s *server) addTools(srv *mcp.Server) {
 	})
 
 	mcp.AddTool(srv, &mcp.Tool{
-		Name:        "status",
+		Name: "status",
 		Description: "With an endpoint, that agent's four facts: registered, attending " +
 			"(whether its queue exists, so a send to it can be delivered), process, activity. " +
 			"The attending fact is asked of the broker, so with an endpoint this call reaches " +
