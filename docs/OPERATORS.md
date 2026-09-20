@@ -277,6 +277,10 @@ listener did and when) · `run/log/YYYY-MM-DD.jsonl` (what happened to each mess
 seat) · `loc read --peek` (look without taking) · `loc watch` (every envelope,
 read-only).
 
+**A seat that has gone quiet with a `tmux` or `claude` listener may be ringing a stale address.**
+`docs/CLI.md` §mcp has the warning and the check: a tmux server restart reassigns pane ids, and
+nothing here announces it on its own.
+
 A queue made before endpoints carried an instance name has a bare name, such as `QUEUE_scribe`.
 The sweep cannot see such a queue, and it never removes one: the name does not say which
 deployment made it. `loc status` prints one line for each of them. Remove them with the broker's
