@@ -88,6 +88,9 @@ from a real run; the values that change on each run (the message id, the times, 
 ones. Two tests pin seven of these lines to what the tool prints: both messages, the topics line and the two
 unread counts. The commands themselves and the other status lines are not pinned.
 
+[`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md) runs this same conversation with the bell switched on:
+two agent runtimes in two tmux panes, and the second pane waking when the first one sends.
+
 - **Held until read.** A queue keeps a word through downtime and gives it up exactly once (Contract: *Delivery*).
 - **Wake on arrival, never poll.** A seat's own `loc mcp` server watches its queue and rings the seat's bell. A bell never hides a message (Contract: *Semantics*).
 - **Topics that forget.** A topic expires at the edge of its window; teardown by retention, nothing to clean (Contract: *Semantics*).
@@ -174,6 +177,7 @@ are changing this repository, read [`AGENTS.md`](AGENTS.md).
 
 | Read this | If you are… | It answers |
 |---|---|---|
+| [`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md) | wiring two agents for the first time | every step from `./install.sh` to a pane waking on a bell |
 | [`docs/CLI.md`](docs/CLI.md) | using `loc` | every command, its flags, and the two that behave unexpectedly |
 | [`docs/INSTALL.md`](docs/INSTALL.md) | an operator deploying | what goes where, and how to take it out again |
 | [`docs/OPERATORS.md`](docs/OPERATORS.md) | an operator running the house | the service, the bell, what to check when it is quiet |
