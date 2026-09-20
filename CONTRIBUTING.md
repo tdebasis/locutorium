@@ -32,25 +32,32 @@ Each rule below lives in one document. Read the source; this file does not resta
 Build with `make build`. It writes a stamped binary to `build/bin/loc`. `Makefile` states what each
 target does and why.
 
-Run `make test` for the Go unit tests and the suite's own machinery tests.
+Run `make test` for the Go unit tests and the suite's own machinery tests. These tests start their
+own scratch servers. A guard in `internal/provider/nats/guard.go` refuses the default broker address
+under `go test`, so a test run cannot reach a daemon running on the same machine. A change that
+removes or weakens that guard removes that protection.
 
 `conformance/run.sh` is the suite. `docs/INSTALL.md` §Dependencies lists what it needs: the `nats`
-CLI, `jq`, and BSD `sed`. The suite needs no live deployment. It starts its own scratch server on a
-random port and tears it down when it finishes.
+CLI, `jq`, and BSD `sed`; that section also states that the suite is macOS-only for now. The suite
+needs no live deployment. It starts its own scratch server on a random port and tears it down when
+it finishes.
 
 CI runs four jobs on every pull request (`.github/workflows/checks.yml`):
 
-- `scope` — decides whether the change touches product code, so a docs-only change skips the next
-  job.
+- `scope` — decides whether the change touches product code, so a docs-only change skips
+  `conformance`.
 - `hygiene` — runs `conformance/check-clean.sh` and `conformance/check-scratch-only.sh`.
 - `go` — builds, vets, and tests the Go tree, and checks the stamped binary.
 - `conformance` — runs the suite, only when `scope` says the change touches product code.
 
+`hygiene` and `go` run on every pull request; only `conformance` depends on `scope`.
+
 ## Pull request titles
 
 A pull request title is typed: `feat:`, `fix:`, `docs:`, and so on. `RELEASE.md` §PR titles states
-the exact form. The release tool reads the title from the merge commit. A plain-sentence title
-releases nothing.
+the exact form. This repository squash-merges every pull request, and the squash commit takes the
+pull request title; that is how the title reaches the release tool. `RELEASE.md` §Merges states this.
+A plain-sentence title releases nothing.
 
 ## What a version number promises
 
