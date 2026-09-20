@@ -136,8 +136,9 @@ type Unreadable struct {
 // which is right for a reaper that must not stop at the first bad record and
 // wrong for a reconciler: a row that cannot be read is not a row that is not
 // there, and a listing that cannot tell those apart will report a live seat's
-// queue as an orphan and destroy it. Reporting the row is what lets the caller
-// refuse to act on the part of the picture the row could have changed.
+// queue as unclaimed. Nothing deletes a queue on that report (#141), so the
+// cost is now a wrong line rather than lost mail — and the operator still has
+// to be told which file to fix.
 func ListAll() (rows []*Registration, unreadable []Unreadable, err error) {
 	entries, err := os.ReadDir(Dir())
 	if err != nil {

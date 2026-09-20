@@ -46,9 +46,9 @@ func TestStatusReportsAQueueWithAnUnqualifiedName(t *testing.T) {
 	}
 }
 
-// The strays come last, after the orphan lines, in name order. The report
-// reads top to bottom as what the next beat repairs, then what it removes,
-// then what it cannot touch at all.
+// The strays come last, after the queues with no row, in name order. The
+// report reads top to bottom as what the next beat repairs, then what it
+// leaves standing, then what it cannot see at all.
 func TestStatusPutsTheUnqualifiedQueuesLast(t *testing.T) {
 	d := newPresenceDeployment(t)
 	wholeSeat(t, d, "workshop.scribe")
@@ -62,7 +62,7 @@ func TestStatusPutsTheUnqualifiedQueuesLast(t *testing.T) {
 	report := out.String()
 	order := []string{
 		"workshop.scribe: row ok, queue ok\n",
-		"workshop.stray: queue with no row, next beat removes it\n",
+		"workshop.stray: queue with no row; nothing removes it; remove it with loc unsubscribe workshop.stray\n",
 		"QUEUE_one: queue with an unqualified name;",
 		"QUEUE_two: queue with an unqualified name;",
 	}

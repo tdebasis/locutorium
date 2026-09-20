@@ -195,10 +195,10 @@ More than one host may run on a machine, sharing a broker. Namespacing by instan
 called `scribe` without either being able to receive the other's mail. Relying on everyone choosing
 distinct names does not survive somebody copying a configuration.
 
-The same boundary holds for cleanup. A sweep touches only the instances its own ledger holds a row
-for, so one host's reconciliation cannot destroy another host's queues (CLI.md §sweep). The
-guarantee is for **distinct instance names**. Two deployments that use the same instance name on one
-broker are not protected by any of this, because to the broker they are one namespace.
+Cleanup does not rest on that boundary. A sweep deletes a queue only together with its own dead
+ledger row, so one host's reconciliation cannot destroy another host's queues whatever they are
+named — there is no rule about instances to get right (CLI.md §sweep). A queue this ledger holds no
+row for is REPORTED and left alone, in every instance.
 
 Each segment — the instance and the agent — is `[a-z0-9-]+`, with exactly one dot between them and the
 underscore barred. That makes the dots-to-underscores substitution used for backing-object names
@@ -534,7 +534,7 @@ this document's scope and are not listed.
 |---|---|
 | `subscribe <endpoint> --pid <n> --type <t> --version <v> [--display …] [--cwd …]` | Registers an agent instance, creates its queue, publishes `agent.subscribe`. **Refused (non-zero) if the endpoint already holds a registration** — free it with `unsubscribe` first. |
 | `unsubscribe <endpoint> [--reason clean\|expiry] [--force]` | Removes the registration, destroys the queue, publishes `agent.unsubscribe`. Defaults to `clean`. Succeeds on an empty endpoint (no-op) or a **dead** incumbent, and **refuses a live incumbent** (non-zero, naming its process) unless **`--force`** is given. An unconditional `unsubscribe`-then-`subscribe` restart is therefore always safe. |
-| `sweep` | Takes no argument; the verb refuses one. Reconciles every row in the ledger against its queue and its process, inside the instances the ledger holds a row for. **Must run on the machine holding the processes.** Idempotent; safe to run on a timer. See CLI.md §sweep for the three passes and their order. |
+| `sweep` | Takes no argument; the verb refuses one. Reconciles every row in the ledger against its queue and its process, in every instance. **Deletes a queue only together with its own dead row**; a queue no row claims is printed and never removed. **Must run on the machine holding the processes.** Idempotent; safe to run on a timer. See CLI.md §sweep for the three passes and their order. |
 
 **The window between a death and the next heartbeat, and what it costs.** Unsubscribing destroys the
 queue. A message sent to a seat after its process died and before the next heartbeat reaches it is

@@ -49,9 +49,9 @@ func liveRow(t *testing.T, d *presenceDeployment, endpoint string) {
 // ------------------------------------------------------------- sweep failures
 
 // A queue the medium refuses to destroy stops the reap where it stands. The
-// row is NOT removed, because a row removed beside a queue that survived is
-// the orphan the next pass would have to clean up anyway — and the operator
-// has not been told the medium is refusing.
+// row is NOT removed, because a row removed beside a queue that survived
+// leaves a queue with no row, which NOTHING now cleans up (#141) — and the
+// operator has not been told the medium is refusing.
 func TestSweepStopsWhenTheQueueCannotBeDestroyed(t *testing.T) {
 	d := newPresenceDeployment(t)
 	deadRow(t, d, "workshop.scribe")
@@ -116,9 +116,9 @@ func TestSweepReportsAReaderThatGoesAway(t *testing.T) {
 	}
 }
 
-// Each of the three passes reports its own line, and an orphan queue is one of
-// them. The change count is what the daemon logs. `atelier.stray` is the fire
-// control: no row names that instance, so the sweep must not see it at all.
+// Each pass reports its own line, and the change count is what the daemon
+// logs. A QUEUE WITH NO ROW IS REPORTED AND NOT COUNTED: nothing was changed
+// about it, in either instance, so the count stays at the reap and the repair.
 func TestSweepCountsAndNamesEveryChange(t *testing.T) {
 	d := newPresenceDeployment(t)
 	deadRow(t, d, "workshop.scribe")
@@ -132,29 +132,27 @@ func TestSweepCountsAndNamesEveryChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sweepVerb: %v", err)
 	}
-	if changes != 3 {
-		t.Errorf("changes = %d, want 3 (one reap, one orphan, one repair)", changes)
+	if changes != 2 {
+		t.Errorf("changes = %d, want 2 (one reap, one repair; a report is not a change)", changes)
 	}
 	want := "workshop.scribe: reaped, the process is gone\n" +
-		"workshop.stray: queue deleted, no row holds it\n" +
+		"atelier.stray: queue with no row; nothing removes it; remove it with loc unsubscribe atelier.stray\n" +
+		"workshop.stray: queue with no row; nothing removes it; remove it with loc unsubscribe workshop.stray\n" +
 		"workshop.clerk: queue recreated\n"
 	if out.String() != want {
 		t.Errorf("got:\n%q\nwant:\n%q", out.String(), want)
 	}
-	for _, e := range d.spy.deleted {
-		if e == "atelier.stray" {
-			t.Errorf("the sweep destroyed a queue in an instance it holds no row for: %v", d.spy.deleted)
-		}
-	}
-	if strings.Contains(out.String(), "atelier") {
-		t.Errorf("the sweep named an instance it holds no row for:\n%q", out.String())
+	// THE ONE DELETION IS THE DEAD SEAT'S OWN QUEUE. Neither queue with no
+	// row was touched, whatever instance it sat in.
+	if len(d.spy.deleted) != 1 || d.spy.deleted[0] != "workshop.scribe" {
+		t.Errorf("the sweep deleted %v, want only the dead row's own queue", d.spy.deleted)
 	}
 }
 
-// A report says nothing about an instance the ledger holds no row for. The
-// next beat would not touch that queue, so naming it would invite an operator
-// to delete another deployment's mail by hand.
-func TestStatusSaysNothingAboutAnInstanceItDoesNotHold(t *testing.T) {
+// A report NAMES a queue in an instance the ledger holds no row for. The next
+// beat will not touch it, and the operator cannot remove a queue the report
+// keeps from them.
+func TestStatusNamesAQueueInAnInstanceItDoesNotHold(t *testing.T) {
 	d := newPresenceDeployment(t)
 	liveRow(t, d, "workshop.scribe")
 	d.spy.exists["workshop.scribe"] = true
@@ -164,8 +162,9 @@ func TestStatusSaysNothingAboutAnInstanceItDoesNotHold(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errOut)
 	}
-	if strings.Contains(out, "atelier") {
-		t.Errorf("status named an instance the ledger holds no row for:\n%s", out)
+	want := "atelier.stray: queue with no row; nothing removes it; remove it with loc unsubscribe atelier.stray\n"
+	if !strings.Contains(out, want) {
+		t.Errorf("status omits %q; whole report:\n%s", want, out)
 	}
 }
 
@@ -200,7 +199,7 @@ func TestStatusReportsAReaderThatGoesAway(t *testing.T) {
 	}
 	d.spy.exists["workshop.stray"] = true
 	if err := seatLines(&refusingWriter{after: 1}, d.spy); err == nil {
-		t.Error("seatLines swallowed a write failure on the orphan line")
+		t.Error("seatLines swallowed a write failure on the queue-with-no-row line")
 	}
 }
 
@@ -224,18 +223,19 @@ func TestStatusNamesEveryKindOfDisagreement(t *testing.T) {
 		"workshop.clerk: row ok, queue ok\n",
 		"workshop.legacy: row unreadable: ",
 		"workshop.scribe: queue missing, next beat repairs it\n",
-		"atelier.stray: queue with no row, next beat removes it\n",
+		"atelier.stray: queue with no row; nothing removes it; remove it with loc unsubscribe atelier.stray\n",
 	} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("the report omits %q; whole report:\n%s", want, out.String())
 		}
 	}
-	// The seats are in endpoint order, and the orphan queues come after them.
+	// The seats are in endpoint order, and the queues with no row come after
+	// them.
 	if i, j := strings.Index(out.String(), "atelier.scribe:"), strings.Index(out.String(), "workshop.clerk:"); i > j {
 		t.Error("the seats are not in endpoint order")
 	}
 	if i, j := strings.Index(out.String(), "workshop.scribe:"), strings.Index(out.String(), "atelier.stray:"); i > j {
-		t.Error("an orphan queue was printed among the seats")
+		t.Error("a queue with no row was printed among the seats")
 	}
 }
 

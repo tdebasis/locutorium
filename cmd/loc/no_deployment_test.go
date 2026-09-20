@@ -16,6 +16,7 @@ package main
 // this package; see AGENTS.md on what `go test ./cmd/loc/...` can reach.
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -159,11 +160,13 @@ func TestStopRefusesAHomeWithNoConfigFileAndSignalsNothing(t *testing.T) {
 // what a restored backup or a second deployment's installer does. Every later
 // beat must still sweep the broker this daemon runs.
 //
-// PR #140 ALONE DOES NOT SAVE THIS. That rule limits the orphan pass to
-// instances the ledger holds a row for. The queue planted on the second broker
-// is in instance `house`, and the ledger holds a live `house` row for the
-// whole case, so the rule permits its deletion. Only the pinned address keeps
-// the sweep away from it.
+// NEITHER #140 NOR #141 SAVES THIS. #140's rule limited deletion to instances
+// the ledger holds a row for, and the planted queue is in instance `house`,
+// which the ledger holds for the whole case. #141 removed deletion on an
+// absent row altogether, so that queue is now safe from deletion on either
+// broker. The daemon's writes still have to land on the right one: the sweep
+// REAPS a dead row's queue and CREATES a live row's missing queue, and both of
+// those act on whatever broker the provider reaches.
 //
 // The dead row is there so the sweep has work to do on its own broker, and the
 // live row's recreated queue is how this case knows the sweep ran at all. A
@@ -172,8 +175,26 @@ func TestStopRefusesAHomeWithNoConfigFileAndSignalsNothing(t *testing.T) {
 //
 // THE PLANT THAT TURNS THIS RED: make nats.brokerURL return
 // config.Value(config.NATSURL) unconditionally, so the pin is ignored. The
-// second broker's queue is then deleted as an orphan on the first beat after
-// the rewrite.
+// repair pass then creates the live row's queue on the SECOND broker, and the
+// assertion that the second broker never gains that stream fails.
+//
+// THE FALSIFIER IS THE REPAIR PASS, AND THE ASSERTION HAD TO MOVE TO IT. Two
+// earlier assertions caught the plant and neither catches it now:
+//
+//   - The planted queue being deleted on the second broker. #141 removed the
+//     pass that deleted a queue no row claims, so a mis-aimed sweep no longer
+//     destroys it.
+//   - The live row's queue being ABSENT from this daemon's own broker. The
+//     first beat runs BEFORE the rewrite, on the pinned address either way, and
+//     it creates that queue. After the rewrite there is nothing left on the own
+//     broker for a mis-aimed sweep to fail to do, so that assertion passes under
+//     the plant.
+//
+// What a mis-aimed sweep still does, every beat after the rewrite, is look for
+// the live row's queue on the second broker, fail to find it — that broker
+// never had it — and make it. So the second broker gaining a stream named for
+// this deployment's live seat is the one effect the plant cannot avoid, and it
+// is what this case now asserts.
 func TestTheDaemonSweepsItsOwnBrokerAfterTheConfigIsRewritten(t *testing.T) {
 	home, port := scratchHouse(t)
 
@@ -247,8 +268,25 @@ func TestTheDaemonSweepsItsOwnBrokerAfterTheConfigIsRewritten(t *testing.T) {
 		t.Errorf("%s is gone from the other broker: %v; the sweep followed the rewritten config", orphanStream, err)
 	}
 
-	// THE INSTRUMENT GRIPPED. The sweep really ran, on this daemon's own
-	// broker: the live row's queue was missing there and the sweep made it.
+	// THE SECOND BROKER NEVER GAINS THIS DEPLOYMENT'S QUEUE. A sweep that
+	// followed the rewritten config would find the live row with no queue
+	// there and create one, on every beat. A pinned sweep never writes to
+	// that broker at all.
+	//
+	// THE INSTRUMENT GRIPPED: the StreamInfo call above reached this same
+	// connection and answered, so a failure here is the stream's absence and
+	// not a connection that went away. ErrStreamNotFound is required for the
+	// same reason — any other error means the question was not asked.
+	if _, err := otherJS.StreamInfo(model.StreamName(live)); !errors.Is(err, natsgo.ErrStreamNotFound) {
+		t.Errorf("asking the other broker for %s gave %v, want ErrStreamNotFound; "+
+			"the sweep wrote to the broker the rewritten config names",
+			model.StreamName(live), err)
+	}
+
+	// THE SWEEP RAN AT ALL. On this daemon's own broker the live row's queue
+	// was missing and the sweep made it. This fires on a daemon whose every
+	// beat failed; it does NOT fire on the plant above, because the first beat
+	// makes this queue before the rewrite lands.
 	ownNC, ownJS := adminAt(t, fmt.Sprintf("nats://127.0.0.1:%d", port))
 	defer ownNC.Close()
 	if _, err := ownJS.StreamInfo(model.StreamName(live)); err != nil {
