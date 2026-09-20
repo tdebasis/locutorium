@@ -145,7 +145,8 @@ loc status
 
 The first line reports the daemon. Then comes one line per seat. `house.bob: row ok, queue ok` says
 the seat is registered and its queue exists. That line gains `mail unread, bell tried <k> of <n>,
-last <result> at <time>` once a bell has rung for mail that nobody took.
+last <result> (<reason>) at <time>` once a bell has rung for mail that nobody took. The `(<reason>)`
+part appears only when the try carried one, as a refusal does.
 
 Check again a few minutes later and that suffix changes form. Once the streak has spent its last
 try, it reads `mail unread, bell made <n> of <n> tries, <k> rang, last <result> at <time>; no more
