@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.11](https://github.com/tdebasis/locutorium/compare/v0.0.10...v0.0.11) (2026-09-20)
+
+
+### Bug Fixes
+
+* **check-clean:** scan the commits a pull request adds ([#182](https://github.com/tdebasis/locutorium/issues/182)) ([1c761ed](https://github.com/tdebasis/locutorium/commit/1c761edf01e5e9876b81eb4748529ca1c364f65a))
+
 ## [0.0.10](https://github.com/tdebasis/locutorium/compare/v0.0.9...v0.0.10) (2026-09-20)
 
 
