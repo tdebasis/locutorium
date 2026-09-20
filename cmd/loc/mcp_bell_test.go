@@ -130,11 +130,10 @@ func TestMCPBell_ABacklogRingsBeforeAnythingNewArrives(t *testing.T) {
 	// seat whose runtime was restarted comes up into.
 	p.seedQueue(t, q1, "queue."+e1)
 	for _, id := range []string{"m1", "m2"} {
-		if err := p.admin.Publish("queue."+e1, []byte(canned(id, e2, e1, "waiting: "+id))); err != nil {
+		if _, err := p.adminJS.Publish("queue."+e1, []byte(canned(id, e2, e1, "waiting: "+id))); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 	}
-	_ = p.admin.Flush()
 
 	spool := serveBell(t, p)
 

@@ -114,10 +114,9 @@ func TestMCPTools_EachToolIsTheVerbItIsNamedFor(t *testing.T) {
 	})
 
 	t.Run("read: the reminder first, then what loc read prints", func(t *testing.T) {
-		if err := p.admin.Publish("queue."+e1, []byte(canned("m1", e2, e1, "first"))); err != nil {
+		if _, err := p.adminJS.Publish("queue."+e1, []byte(canned("m1", e2, e1, "first"))); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
-		_ = p.admin.Flush()
 		got := s.text(t, "read", nil)
 
 		if !strings.HasPrefix(got, mcpserve.ReadReminder+"\n\n") {
@@ -128,10 +127,9 @@ func TestMCPTools_EachToolIsTheVerbItIsNamedFor(t *testing.T) {
 		// The same message again, for the command line to print. A queue read
 		// consumes, so the two runs cannot share one message; the envelope is
 		// canned so the two renders are identical anyway.
-		if err := p.admin.Publish("queue."+e1, []byte(canned("m1", e2, e1, "first"))); err != nil {
+		if _, err := p.adminJS.Publish("queue."+e1, []byte(canned("m1", e2, e1, "first"))); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
-		_ = p.admin.Flush()
 		if want := cli(t, "read"); body != want {
 			t.Errorf("the read tool's block was %q; loc read prints %q", body, want)
 		}

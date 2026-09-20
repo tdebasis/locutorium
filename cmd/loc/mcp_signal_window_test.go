@@ -65,11 +65,8 @@ exit 0
 	// One message already waiting, which is what makes the first ring happen
 	// at all: the backlog is rung for at once, without the coalescing window.
 	p.seedQueue(t, q1, "queue."+e1)
-	if err := p.admin.Publish("queue."+e1, []byte(canned("m1", e2, e1, "waiting"))); err != nil {
+	if _, err := p.adminJS.Publish("queue."+e1, []byte(canned("m1", e2, e1, "waiting"))); err != nil {
 		t.Fatalf("seed the seat's queue: %v", err)
-	}
-	if err := p.admin.Flush(); err != nil {
-		t.Fatalf("flush the seed: %v", err)
 	}
 
 	p.as(t, e1)

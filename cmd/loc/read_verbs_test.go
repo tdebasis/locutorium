@@ -41,15 +41,22 @@ func (p *presence) seedTopics(t *testing.T) {
 
 // post puts one envelope on a subject as the admin observer, so nothing under
 // test is used to set up what is under test.
+//
+// THE PUBLISH GOES THROUGH THE STREAM, so that the store is done before this
+// call returns. A core publish and a flush prove only that the server read the
+// PUB: the stream stores on its own goroutine, so a count read after this call
+// would be asserted against an order nothing established. The subject is the
+// same one, so a core subscriber still sees the arrival.
+//
+// The same change was made in internal/provider/nats/listen_test.go for the
+// same reason. This helper was missed by it, and a count assertion behind it
+// failed in CI on a pull request that changed two documentation files.
 func (p *presence) post(t *testing.T, subject, from, to, body string) {
 	t.Helper()
 	env := `{"id":"` + body + `","ts":"2026-01-14T09:00:00.000Z","from":"` + from +
 		`","to":"` + to + `","kind":"msg","body":"` + body + `"}`
-	if err := p.admin.Publish(subject, []byte(env)); err != nil {
+	if _, err := p.adminJS.Publish(subject, []byte(env)); err != nil {
 		t.Fatalf("publish %s: %v", subject, err)
-	}
-	if err := p.admin.Flush(); err != nil {
-		t.Fatalf("flush: %v", err)
 	}
 }
 
@@ -247,10 +254,9 @@ func TestReadShowsALineItCannotParse(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, e1)
 	p.seedQueue(t, q1, "queue."+e1)
-	if err := p.admin.Publish("queue."+e1, []byte("this is not an envelope")); err != nil {
+	if _, err := p.adminJS.Publish("queue."+e1, []byte("this is not an envelope")); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
-	_ = p.admin.Flush()
 
 	code, out, errOut := exec("read")
 	if code != 0 || errOut != "" {

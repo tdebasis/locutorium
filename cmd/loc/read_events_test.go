@@ -51,11 +51,8 @@ func TestReadPassesOverAPresenceEventAndStillShowsTheRoom(t *testing.T) {
 	if len(events) == 0 {
 		t.Fatalf("no join event was emitted, so there is nothing to age into a room")
 	}
-	if err := p.admin.Publish("topic.workshop", []byte(events[0])); err != nil {
+	if _, err := p.adminJS.Publish("topic.workshop", []byte(events[0])); err != nil {
 		t.Fatalf("publish the event into the old room: %v", err)
-	}
-	if err := p.admin.Flush(); err != nil {
-		t.Fatalf("flush: %v", err)
 	}
 	// And someone says something in a room.
 	p.post(t, "topic.standup", "host", "#standup", "room-canary")
@@ -106,11 +103,8 @@ func TestReadStillShowsAnUnparseableTopicMessage(t *testing.T) {
 	p := newPresence(t)
 	p.seedTopics(t)
 	p.as(t, "host")
-	if err := p.admin.Publish("topic.standup", []byte("this is not an envelope")); err != nil {
+	if _, err := p.adminJS.Publish("topic.standup", []byte("this is not an envelope")); err != nil {
 		t.Fatalf("publish: %v", err)
-	}
-	if err := p.admin.Flush(); err != nil {
-		t.Fatalf("flush: %v", err)
 	}
 
 	var out safeBuffer

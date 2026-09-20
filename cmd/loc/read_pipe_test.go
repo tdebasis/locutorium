@@ -44,12 +44,11 @@ func TestMessagePlane_ReadUnderAClosedPipeHandsTheMessageBack(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, e1) // an agent reads its own queue
 	p.seedQueue(t, q1, "queue."+e1)
-	if err := p.admin.Publish("queue."+e1, []byte(fmt.Sprintf(
+	if _, err := p.adminJS.Publish("queue."+e1, []byte(fmt.Sprintf(
 		`{"id":"m1","ts":"2026-01-14T09:00:00.000Z","from":"host","to":%q,"kind":"msg","body":%q}`,
 		e1, pipeCanary))); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
-	_ = p.admin.Flush()
 
 	// The binary, not run(): the process boundary IS the subject here.
 	bin := filepath.Join(t.TempDir(), "loc")
