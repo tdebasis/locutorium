@@ -11,9 +11,8 @@ architecture grounds, and an issue catches that before the work exists.
 
 ## What the project wants
 
-The `good first issue` and `help wanted` labels mark work the maintainer wants done. The open issue
-list is the current list of wanted work. If your idea is not there, open an issue and discuss it
-before you write code.
+The open issue list is the current list of wanted work. If your idea is not there, open an issue and
+discuss it before you write code.
 
 ## The rules a change must keep
 
