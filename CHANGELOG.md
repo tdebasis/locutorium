@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.0.10](https://github.com/tdebasis/locutorium/compare/v0.0.9...v0.0.10) (2026-09-20)
+
+
+### Features
+
+* **bell:** try three times while mail is unread, then give up ([#171](https://github.com/tdebasis/locutorium/issues/171)) ([8e0513b](https://github.com/tdebasis/locutorium/commit/8e0513bd7dda9dfa3339f44fa31513c10e640716))
+* **registry:** list every registered agent from the ledger ([#167](https://github.com/tdebasis/locutorium/issues/167)) ([0db91f5](https://github.com/tdebasis/locutorium/commit/0db91f5f2b36efaec832b284b6a3db5ab5f84ad7))
+* **status:** report a queue whose name the sweep cannot read ([#168](https://github.com/tdebasis/locutorium/issues/168)) ([7a897f3](https://github.com/tdebasis/locutorium/commit/7a897f313cf95903877a603ad6e5262b0791ff07))
+
+
+### Bug Fixes
+
+* **sweep:** report a queue with no row and never delete it ([#170](https://github.com/tdebasis/locutorium/issues/170)) ([2f6faef](https://github.com/tdebasis/locutorium/commit/2f6faef25e338223fcbd4db01bed12bc8ad104a4))
+
 ## [0.0.9](https://github.com/tdebasis/locutorium/compare/v0.0.8...v0.0.9) (2026-09-19)
 
 
