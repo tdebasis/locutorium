@@ -755,6 +755,12 @@ position still means the same pane; the id does not.
 > types into it and reports success: the intended seat gets nothing and no failure is recorded
 > anywhere.
 >
+> tmux hands out pane ids in creation order, starting again from `%0` after the restart. When the
+> panes come back in the same order, a stale id happens to name the right pane again, and the bell
+> keeps working. When the order differs, or a pane is added, a stale id names the wrong pane, or
+> none. The failure is therefore intermittent: a bell that works after one restart is not evidence
+> that a pane id is a safe address.
+>
 > Check with `loc registry`. It prints each agent's recorded address under `address:`. Compare that
 > value against the pane's actual id or position (above) for every seat after any tmux server
 > restart; nothing else prompts you to.
