@@ -833,22 +833,61 @@ type bellState struct {
 	result  string
 	reason  string
 	ts      string
-	gaveUp  bool
+
+	// The end of the streak. stopped says the bell made all its tries. rang
+	// is how many of them reached the pane and last is the final try's
+	// result, both from the give-up line. A give-up line from before those
+	// two fields existed leaves last empty, and the row says what it can.
+	stopped bool
+	rang    int
+	last    string
 }
 
 // words is the field as the row prints it.
 //
 // IT LEADS WITH THE MAIL AND NOT WITH THE BELL. What the operator has to act
 // on is mail nobody has read; how far a bell got is the detail under it.
+//
+// A FINISHED STREAK SAYS HOW MANY TRIES RANG. "Gave up" read as "the seat was
+// never told", which is one of the two states a finished streak can be in. A
+// bell that rang and was not answered is a different fact from a bell that
+// never rang, and they want different repairs: the first is a seat that is not
+// looking, the second is a bell that is broken or a pane that is busy.
 func (s bellState) words() string {
-	if s.gaveUp {
+	if !s.stopped {
+		return fmt.Sprintf("mail unread, bell tried %d of %d, last %s at %s",
+			s.try, s.of, s.lastWords(), s.ts)
+	}
+	if s.last == "" {
+		// A give-up line that does not carry the two fields. It knows only
+		// that the streak ended, which is the old wording exactly.
 		return fmt.Sprintf("mail unread, bell gave up at %s after %d tries", s.ts, s.of)
 	}
-	last := s.result
-	if s.reason != "" {
-		last += fmt.Sprintf(" (%s)", s.reason)
+	rang := fmt.Sprintf("%d rang", s.rang)
+	if s.rang == 0 {
+		rang = "none rang"
 	}
-	return fmt.Sprintf("mail unread, bell tried %d of %d, last %s at %s", s.try, s.of, last, s.ts)
+	return fmt.Sprintf("mail unread, bell made %d of %d tries, %s, last %s at %s; no more until new mail",
+		s.of, s.of, rang, s.lastWords(), s.ts)
+}
+
+// lastWords is the final try's result, with the notifier's own reason under it
+// where there is one. A try that rang has no reason.
+//
+// THE GIVE-UP LINE CARRIES THE WORD AND NOT THE REASON, so the reason comes
+// from the try line before it, and only when the two words agree.
+func (s bellState) lastWords() string {
+	word, reason := s.result, s.reason
+	if s.last != "" {
+		word = s.last
+		if s.last != s.result {
+			reason = ""
+		}
+	}
+	if reason != "" {
+		return fmt.Sprintf("%s (%s)", word, reason)
+	}
+	return word
 }
 
 // bellStreaks is the THIRD FACT of the report: for each registered seat, the
@@ -905,7 +944,8 @@ func bellStreaks(rows []*model.Registration) map[string]bellState {
 			}
 		case ev.Seat != "" && ev.Status == "bell-gave-up":
 			s := streak[ev.Seat]
-			s.gaveUp, s.of, s.ts = true, ev.After, ev.TS
+			s.stopped, s.of, s.ts = true, ev.After, ev.TS
+			s.rang, s.last = ev.Rang, ev.Last
 			streak[ev.Seat] = s
 		case ev.UID != "" && ev.Status == "read" && ev.By != "":
 			if at.After(lastRead[ev.By]) {

@@ -99,8 +99,11 @@ func tryArmed(b *bell) bool {
 }
 
 // results is what each `bell-try` line in the day's record says, in order, as
-// `<try>/<of> <result>`. A `bell-gave-up` line reads as `gave-up/<after>`, so
-// one slice shows the whole streak.
+// `<try>/<of> <result>`. A `bell-gave-up` line reads as
+// `gave-up/<after> rang=<rang> last=<last>`, so one slice shows the whole
+// streak AND how it ended. The two end fields are in every expectation below
+// on purpose: a streak that rang twice and a streak that never rang are two
+// states, and a case that printed only `gave-up/3` could not tell them apart.
 func results(t *testing.T, dir string) []string {
 	t.Helper()
 	var out []string
@@ -109,7 +112,8 @@ func results(t *testing.T, dir string) []string {
 		case "bell-try":
 			out = append(out, fmt.Sprintf("%v/%v %v", line["try"], line["of"], line["result"]))
 		case "bell-gave-up":
-			out = append(out, fmt.Sprintf("gave-up/%v", line["after"]))
+			out = append(out, fmt.Sprintf("gave-up/%v rang=%v last=%v",
+				line["after"], line["rang"], line["last"]))
 		default:
 			out = append(out, fmt.Sprintf("%v", line["status"]))
 		}
@@ -145,13 +149,13 @@ func TestBell_ThreeTriesThenTheBellGivesUp(t *testing.T) {
 		bells int
 	}{
 		{"every try rang", []error{nil, nil, nil},
-			[]string{"1/3 rang", "2/3 rang", "3/3 rang", "gave-up/3"}, 3},
+			[]string{"1/3 rang", "2/3 rang", "3/3 rang", "gave-up/3 rang=3 last=rang"}, 3},
 		{"every try was refused", []error{busy("pane_in_mode"), busy("pane_in_mode"), busy("pane_in_mode")},
-			[]string{"1/3 refused", "2/3 refused", "3/3 refused", "gave-up/3"}, 3},
+			[]string{"1/3 refused", "2/3 refused", "3/3 refused", "gave-up/3 rang=0 last=refused"}, 3},
 		{"every try broke", []error{errors.New("exit status 3"), errors.New("exit status 3"), errors.New("exit status 3")},
-			[]string{"1/3 failed", "2/3 failed", "3/3 failed", "gave-up/3"}, 3},
+			[]string{"1/3 failed", "2/3 failed", "3/3 failed", "gave-up/3 rang=0 last=failed"}, 3},
 		{"a mix of results", []error{busy("not a prompt"), nil, errors.New("exit status 3")},
-			[]string{"1/3 refused", "2/3 rang", "3/3 failed", "gave-up/3"}, 3},
+			[]string{"1/3 refused", "2/3 rang", "3/3 failed", "gave-up/3 rang=1 last=failed"}, 3},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			dir := home(t, "provider = none\n")
@@ -239,7 +243,7 @@ func TestBell_ANewArrivalRingsAtOnceAndRestartsTheCount(t *testing.T) {
 	// bell gives up, not one.
 	sch.run(t, 2)
 	sch.run(t, 3)
-	want = append(want, "2/3 refused", "3/3 refused", "gave-up/3")
+	want = append(want, "2/3 refused", "3/3 refused", "gave-up/3 rang=0 last=refused")
 	if got := results(t, dir); !sameStrings(got, want) {
 		t.Errorf("the record holds %v\nwant              %v", got, want)
 	}
@@ -293,7 +297,7 @@ func TestBell_OneTryIsOneTry(t *testing.T) {
 	if got := sch.delays(); len(got) != 0 {
 		t.Errorf("a one-try streak scheduled %v; the last try schedules nothing", got)
 	}
-	if got := results(t, dir); !sameStrings(got, []string{"1/1 refused", "gave-up/1"}) {
+	if got := results(t, dir); !sameStrings(got, []string{"1/1 refused", "gave-up/1 rang=0 last=refused"}) {
 		t.Errorf("the record holds %v; want one try and the give-up", got)
 	}
 	if tryArmed(b) {
@@ -506,6 +510,12 @@ func TestBell_EveryTryIsALineInTheDaysRecord(t *testing.T) {
 	if n := strings.Count(stderr.String(), "bell failed "+seat); n != 3 {
 		t.Errorf("the runtime's log holds %d lines; one per try. It said: %q", n, stderr.String())
 	}
+	// The seat's own plain-text log says the same thing in its own words, and
+	// it says how many tries rang.
+	want := "bell " + seat + " made 3 of 3 tries, 0 rang; no more until new mail"
+	if log := delivery(t, dir); !strings.Contains(log, want) {
+		t.Errorf("the delivery log does not carry %q: %q", want, log)
+	}
 }
 
 // NO TIMER FIRES AFTER STOP. The server is departing, the seat is given up,
@@ -615,7 +625,7 @@ func TestBell_ATryUnderATrippedBreakerCountsAndDoesNotRing(t *testing.T) {
 	if got := f.bells(); len(got) != 1 {
 		t.Errorf("a try under a still-tripped breaker rang: %v", got)
 	}
-	want := []string{"1/3 rang", "1/3 suppressed", "2/3 suppressed", "3/3 suppressed", "gave-up/3"}
+	want := []string{"1/3 rang", "1/3 suppressed", "2/3 suppressed", "3/3 suppressed", "gave-up/3 rang=0 last=suppressed"}
 	if got := results(t, dir); !sameStrings(got, want) {
 		t.Errorf("the record holds %v\nwant              %v", got, want)
 	}
@@ -652,5 +662,94 @@ func TestBell_StopCancelsATryScheduledForASuppression(t *testing.T) {
 	sch.run(t, 1)
 	if got := f.bells(); len(got) != 1 {
 		t.Errorf("the notifier saw %v after stop; the seat was already given up", got)
+	}
+}
+
+// THE END OF A STREAK SAYS WHETHER THE SEAT WAS EVER TOLD. `gave up after 3
+// tries` read as "the bell never got through", which is one of the two states
+// a finished streak can be in. A bell that rang and was not answered is a
+// different fact from a bell that never rang, and the two want different
+// repairs.
+//
+// This case asserts the give-up LINE, key by key, because that line is what
+// `loc status` and `loc transcript` both read.
+//
+// PLANT: in counted, pass 0 for rangs to LogBellGaveUp.
+// PLANT: in counted, pass resultRefused for last to LogBellGaveUp.
+func TestBell_TheGiveUpSaysHowManyTriesRang(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		errs []error
+		rang float64
+		last string
+	}{
+		{"every try rang", []error{nil, nil, nil}, 3, "rang"},
+		{"a mix counts only the rings", []error{busy("pane_in_mode"), nil, errors.New("exit status 3")}, 1, "failed"},
+		{"no try rang", []error{busy("pane_in_mode"), busy("pane_in_mode"), busy("pane_in_mode")}, 0, "refused"},
+		{"the last try rang", []error{busy("pane_in_mode"), busy("pane_in_mode"), nil}, 1, "rang"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := home(t, "provider = none\n")
+			f := &fake{unread: 2, nudgeErrs: c.errs}
+			b, sch, _ := retryBell(t, f, func() time.Time { return bellRecordClock })
+
+			b.arrived("")
+			b.fire()
+			sch.run(t, 0)
+			sch.run(t, 1)
+
+			lines := recordLines(t, dir)
+			got := lines[len(lines)-1]
+			if got["status"] != "bell-gave-up" {
+				t.Fatalf("the last line is %v; want the give-up", got)
+			}
+			if got["after"] != float64(testTries) {
+				t.Errorf("after = %v, want %d", got["after"], testTries)
+			}
+			if got["rang"] != c.rang {
+				t.Errorf("rang = %v, want %v. The whole streak was %v", got["rang"], c.rang, results(t, dir))
+			}
+			if got["last"] != c.last {
+				t.Errorf("last = %v, want %q", got["last"], c.last)
+			}
+			// `rang` IS WRITTEN EVEN WHEN IT IS 0. That 0 is the fact a reader
+			// needs, and an absent key reads as a line that does not know.
+			if _, ok := got["rang"]; !ok {
+				t.Error("the give-up line carries no rang key")
+			}
+		})
+	}
+}
+
+// THE RING COUNT RESETS WITH THE STREAK. A new arrival starts a fresh count of
+// tries, and the count of rings has to go with it: a ring that announced the
+// EARLIER mail says nothing about the mail that just landed.
+//
+// PLANT: in clearStreak, delete the `b.rangs = 0` line.
+func TestBell_ANewArrivalResetsTheRingCount(t *testing.T) {
+	dir := home(t, "provider = none\n")
+	f := &fake{unread: 2, nudgeErrs: []error{
+		nil,                  // the first streak's one try rings
+		busy("pane_in_mode"), // then mail arrives and the pane is busy
+		busy("pane_in_mode"),
+		busy("pane_in_mode"),
+	}}
+	b, sch, _ := retryBell(t, f, func() time.Time { return bellRecordClock })
+
+	b.arrived("")
+	b.fire() // streak 1, try 1, rang
+	b.arrived("workshop.binder")
+	b.fire() // streak 2, try 1, refused
+	sch.run(t, 1)
+	sch.run(t, 2)
+
+	lines := recordLines(t, dir)
+	got := lines[len(lines)-1]
+	if got["status"] != "bell-gave-up" {
+		t.Fatalf("the last line is %v; want the give-up", got)
+	}
+	if got["rang"] != float64(0) {
+		t.Errorf("rang = %v, want 0. The earlier streak's ring was carried into this one. The record: %v",
+			got["rang"], results(t, dir))
 	}
 }

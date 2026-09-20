@@ -197,13 +197,18 @@ A `sent` line with no `read` line under the same `uid` is a message nobody has c
 ```json
 {"seat":"workshop.scribe","status":"bell-try","ts":"2026-09-16T17:02:12Z","try":1,"of":3,"result":"rang"}
 {"seat":"workshop.scribe","status":"bell-try","ts":"2026-09-16T17:03:12Z","try":2,"of":3,"result":"failed","reason":"exit status 3"}
-{"seat":"workshop.scribe","status":"bell-gave-up","ts":"2026-09-16T17:04:12Z","after":3}
+{"seat":"workshop.scribe","status":"bell-gave-up","ts":"2026-09-16T17:04:12Z","after":3,"rang":1,"last":"failed"}
 {"seat":"workshop.scribe","status":"queue-deleted","ts":"2026-09-16T18:40:00Z","reason":"orphan"}
 ```
 
 `bell-try` is ONE TRY of the seat's bell. `try` and `of` place it in its streak, and `result` is one
 of `rang`, `refused`, `suppressed` and `failed`. A try that rang carries no `reason`. The result is
-written down and it changes no count. `bell-gave-up` closes a streak that used all its tries.
+written down and it changes no count.
+
+`bell-gave-up` closes a streak that used all its tries. `rang` is how many of them reached the
+pane, and it is written even when it is 0. `last` is the final try's result. A bell that rang and
+was not answered is a different fact from a bell that never rang, and the two want different
+repairs. A give-up line with no `last` was written before those two fields existed.
 
 A bell line names no message: the server is told that mail arrived and never which message arrived.
 Mail that no bell announced is still in the queue, and the seat finds it on its next `read`. The

@@ -103,11 +103,17 @@ type bell struct {
 	timer   *time.Timer
 	stopped bool
 
-	// The streak. tryTimer is armed while the next try waits, and tries
-	// counts the tries made since the streak opened. Both are cleared
-	// together, by clearStreak.
+	// The streak. tryTimer is armed while the next try waits, tries counts
+	// the tries made since the streak opened, and rangs counts how many of
+	// them reached the pane. All three are cleared together, by clearStreak.
+	//
+	// rangs CHANGES NO SCHEDULE. It is carried so that the end of a streak
+	// can say whether the seat was ever told. A bell that rang and was not
+	// answered is a different fact from a bell that never rang, and a reader
+	// who cannot tell them apart reads the first as the second.
 	tryTimer *time.Timer
 	tries    int
+	rangs    int
 
 	// The senders seen in the open window, in arrival order and each one
 	// once. They name the courier and nothing else: they never reach the bell
@@ -342,9 +348,12 @@ func (b *bell) counted(n int, result, reason string) {
 		return
 	}
 	b.tries++
-	try, of := b.tries, b.maxTries
-	last := try >= of
-	if !last {
+	if result == resultRang {
+		b.rangs++
+	}
+	try, of, rangs := b.tries, b.maxTries, b.rangs
+	final := try >= of
+	if !final {
 		b.tryTimer = b.afterFunc(b.gap, b.again)
 	}
 	b.mu.Unlock()
@@ -363,9 +372,13 @@ func (b *bell) counted(n int, result, reason string) {
 		b.s.warn(fmt.Sprintf("bell failed %s: %s", b.s.d.Endpoint, reason))
 	}
 
-	if last {
-		loc.LogBellGaveUp(b.s.d.Endpoint, of, b.s.d.Now())
-		b.s.log(fmt.Sprintf("bell %s gave up after %d tries", b.s.d.Endpoint, of))
+	if final {
+		// THE END OF A STREAK SAYS WHETHER THE SEAT WAS EVER TOLD. The count
+		// of rings and the last try's result are carried here; neither of them
+		// changed the counting that got us here.
+		loc.LogBellGaveUp(b.s.d.Endpoint, of, rangs, result, b.s.d.Now())
+		b.s.log(fmt.Sprintf("bell %s made %d of %d tries, %d rang; no more until new mail",
+			b.s.d.Endpoint, of, of, rangs))
 		b.mu.Lock()
 		b.clearStreak()
 		b.mu.Unlock()
@@ -448,6 +461,7 @@ func (b *bell) clearStreak() {
 		b.tryTimer = nil
 	}
 	b.tries = 0
+	b.rangs = 0
 }
 
 // giveBack returns the minute and hour charges for a ring that TYPED NOTHING.

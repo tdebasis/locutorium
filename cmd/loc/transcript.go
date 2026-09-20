@@ -66,6 +66,13 @@ type logEvent struct {
 	Of     int    `json:"of"`
 	Result string `json:"result"`
 	After  int    `json:"after"`
+
+	// `rang` and `last` are on the give-up line alone: how many of the
+	// streak's tries reached the pane, and the final try's result. An EMPTY
+	// `last` is a give-up line written before those two existed. It does not
+	// know, and this verb says so rather than reading the absent `rang` as 0.
+	Rang int    `json:"rang"`
+	Last string `json:"last"`
 }
 
 // message is every event that shares one uid, in the order they were written.
@@ -335,10 +342,28 @@ func bellWords(e *logEvent, ts string) string {
 		}
 		return fmt.Sprintf("bell tried %d of %d, last %s %s", e.Try, e.Of, last, ts)
 	case "bell-gave-up":
-		return fmt.Sprintf("bell gave up %s after %d tries", ts, e.After)
+		// A FINISHED STREAK SAYS HOW MANY TRIES RANG. A bell that rang and was
+		// not answered is a different fact from a bell that never rang, and
+		// "gave up" said only the second.
+		if e.Last == "" {
+			// A give-up line from before it carried the two fields.
+			return fmt.Sprintf("bell gave up %s after %d tries", ts, e.After)
+		}
+		return fmt.Sprintf("bell made %d of %d tries, %s, last %s %s",
+			e.After, e.After, rangWords(e.Rang), e.Last, ts)
 	default:
 		return fmt.Sprintf("bell failed %s: %s", ts, e.Reason)
 	}
+}
+
+// rangWords is how many of a streak's tries reached the pane, said in words. A
+// streak with none is the one a reader has to tell from the others, so 0 gets
+// a word rather than a digit.
+func rangWords(n int) string {
+	if n == 0 {
+		return "none rang"
+	}
+	return fmt.Sprintf("%d rang", n)
 }
 
 // bellStatus reports whether a status word is one of the bell's.
@@ -455,7 +480,11 @@ func seatWords(e *logEvent) string {
 		}
 		return fmt.Sprintf("bell try %d of %d: %s", e.Try, e.Of, last)
 	case "bell-gave-up":
-		return fmt.Sprintf("bell gave up after %d tries", e.After)
+		if e.Last == "" {
+			return fmt.Sprintf("bell gave up after %d tries", e.After)
+		}
+		return fmt.Sprintf("bell made %d of %d tries, %s, last %s",
+			e.After, e.After, rangWords(e.Rang), e.Last)
 	case "bell-failed":
 		return fmt.Sprintf("bell failed: %s", e.Reason)
 	case "queue-deleted":

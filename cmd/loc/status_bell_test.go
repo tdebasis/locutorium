@@ -45,8 +45,16 @@ func bellTryLine(seat, ts string, try, of int, result, reason string) string {
 	return line + "}"
 }
 
-// bellGaveUpLine closes a streak that used all its tries.
-func bellGaveUpLine(seat, ts string, after int) string {
+// bellGaveUpLine closes a streak that used all its tries. `rang` says how
+// many of them reached the pane and `last` is the final try's result.
+func bellGaveUpLine(seat, ts string, after, rang int, last string) string {
+	return `{"seat":"` + seat + `","status":"bell-gave-up","ts":"` + ts +
+		`","after":` + strconv.Itoa(after) + `,"rang":` + strconv.Itoa(rang) +
+		`,"last":"` + last + `"}`
+}
+
+// oldGiveUpLine is a give-up line from before it carried `rang` and `last`.
+func oldGiveUpLine(seat, ts string, after int) string {
 	return `{"seat":"` + seat + `","status":"bell-gave-up","ts":"` + ts + `","after":` + strconv.Itoa(after) + `}`
 }
 
@@ -124,19 +132,75 @@ func TestStatusShowsATryThatRangWithNoReason(t *testing.T) {
 	}
 }
 
-// A STREAK THAT GAVE UP SAYS SO. This is the state the rule's known cost
-// produces: a seat busy for longer than its three tries gets no further ring
-// until more mail arrives or it looks, and this row is where that shows.
-func TestStatusShowsABellThatGaveUp(t *testing.T) {
+// A FINISHED STREAK SAYS HOW MANY TRIES RANG. "Gave up after 3 tries" read as
+// "the bell never got through", which is one of the two states a finished
+// streak can be in. A bell that rang and was not answered is a seat that is
+// not looking; a bell that never rang is a broken bell or a busy pane. They
+// want different repairs, so the row has to tell them apart.
+func TestStatusShowsHowManyTriesRangWhenTheBellStops(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		last []string
+		want string
+	}{
+		{
+			"some tries rang",
+			[]string{
+				bellTryLine("workshop.scribe", "2026-01-15T22:47:36Z", 3, 3, "rang", ""),
+				bellGaveUpLine("workshop.scribe", "2026-01-15T22:47:36Z", 3, 2, "rang"),
+			},
+			"workshop.scribe: row ok, queue ok, mail unread, bell made 3 of 3 tries, 2 rang, " +
+				"last rang at 2026-01-15T22:47:36Z; no more until new mail",
+		},
+		{
+			// `none rang` and not `0 rang`. This is the row an operator has to
+			// pick out, so it gets a word.
+			"no try rang",
+			[]string{
+				bellTryLine("workshop.scribe", "2026-01-15T22:47:36Z", 3, 3, "refused", "pane busy"),
+				bellGaveUpLine("workshop.scribe", "2026-01-15T22:47:36Z", 3, 0, "refused"),
+			},
+			"workshop.scribe: row ok, queue ok, mail unread, bell made 3 of 3 tries, none rang, " +
+				"last refused (pane busy) at 2026-01-15T22:47:36Z; no more until new mail",
+		},
+		{
+			// A give-up line from before the two fields existed. It knows only
+			// that the streak ended, and the row says exactly that.
+			"an old give-up line that does not know",
+			[]string{
+				bellTryLine("workshop.scribe", "2026-01-15T22:47:36Z", 3, 3, "refused", "pane busy"),
+				oldGiveUpLine("workshop.scribe", "2026-01-15T22:47:36Z", 3),
+			},
+			"workshop.scribe: row ok, queue ok, mail unread, bell gave up at 2026-01-15T22:47:36Z after 3 tries",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := newPresenceDeployment(t)
+			wholeSeat(t, d, "workshop.scribe")
+			seedDayLog(t, d, "2026-01-15", c.last...)
+
+			if got := seatRow(t, d, "workshop.scribe"); got != c.want {
+				t.Errorf("row = %q\nwant  %q", got, c.want)
+			}
+		})
+	}
+}
+
+// THE WORDS "GAVE UP" LEAVE THE ROW once the line knows. They are what read as
+// "the bell never got through".
+func TestStatusDoesNotSayGaveUpWhenTriesRang(t *testing.T) {
 	d := newPresenceDeployment(t)
 	wholeSeat(t, d, "workshop.scribe")
 	seedDayLog(t, d, "2026-01-15",
-		bellTryLine("workshop.scribe", "2026-01-15T22:47:36Z", 3, 3, "refused", "pane busy"),
-		bellGaveUpLine("workshop.scribe", "2026-01-15T22:47:36Z", 3))
+		bellTryLine("workshop.scribe", "2026-01-15T22:47:36Z", 3, 3, "rang", ""),
+		bellGaveUpLine("workshop.scribe", "2026-01-15T22:47:36Z", 3, 3, "rang"))
 
-	want := "workshop.scribe: row ok, queue ok, mail unread, bell gave up at 2026-01-15T22:47:36Z after 3 tries"
-	if got := seatRow(t, d, "workshop.scribe"); got != want {
-		t.Errorf("row = %q\nwant  %q", got, want)
+	got := seatRow(t, d, "workshop.scribe")
+	if strings.Contains(got, "gave up") {
+		t.Errorf("row = %q; three tries rang, so the bell got through every time", got)
+	}
+	if !strings.Contains(got, "3 rang") {
+		t.Errorf("row = %q; want the count of tries that rang", got)
 	}
 }
 
@@ -147,7 +211,7 @@ func TestStatusShowsANewStreakAfterAGiveUp(t *testing.T) {
 	wholeSeat(t, d, "workshop.scribe")
 	seedDayLog(t, d, "2026-01-15",
 		bellTryLine("workshop.scribe", "2026-01-15T22:47:36Z", 3, 3, "refused", "pane busy"),
-		bellGaveUpLine("workshop.scribe", "2026-01-15T22:47:36Z", 3),
+		bellGaveUpLine("workshop.scribe", "2026-01-15T22:47:36Z", 3, 0, "refused"),
 		bellTryLine("workshop.scribe", "2026-01-15T22:55:00Z", 1, 3, "rang", ""))
 
 	want := "workshop.scribe: row ok, queue ok, mail unread, bell tried 1 of 3, " +
@@ -156,8 +220,8 @@ func TestStatusShowsANewStreakAfterAGiveUp(t *testing.T) {
 	if got != want {
 		t.Errorf("row = %q\nwant  %q", got, want)
 	}
-	if strings.Contains(got, "gave up") {
-		t.Error("the row still says the bell gave up; a later try is a new streak")
+	if strings.Contains(got, "made 3 of 3 tries") {
+		t.Error("the row still reports the finished streak; a later try is a new streak")
 	}
 }
 

@@ -207,9 +207,14 @@ func TestSeatEventsCarryNoUID(t *testing.T) {
 		{"bell-try that rang", func() { LogBellTry("workshop.scribe", 1, 3, "rang", "", at) },
 			"bell-try", nil,
 			[]string{"seat", "status", "ts", "try", "of", "result"}},
-		{"bell-gave-up", func() { LogBellGaveUp("workshop.scribe", 3, at) },
+		{"bell-gave-up", func() { LogBellGaveUp("workshop.scribe", 3, 2, "rang", at) },
 			"bell-gave-up", nil,
-			[]string{"seat", "status", "ts", "after"}},
+			[]string{"seat", "status", "ts", "after", "rang", "last"}},
+		{"bell-gave-up with no ring at all", func() { LogBellGaveUp("workshop.scribe", 3, 0, "refused", at) },
+			"bell-gave-up", nil,
+			// `rang` is written even when it is 0. That 0 is the fact a reader
+			// needs, and an absent key would read as a line that does not know.
+			[]string{"seat", "status", "ts", "after", "rang", "last"}},
 		{"queue-deleted", func() { LogQueueDeleted("workshop.clerk", "orphan", at) },
 			"queue-deleted", "orphan",
 			[]string{"seat", "status", "ts", "reason"}},
@@ -247,7 +252,7 @@ func TestEveryShapeSharesTheDayFile(t *testing.T) {
 	LogFailed(NewEnvelope("ada", "mallory", "msg", "hi"), "bus unreachable")
 	LogRead(e.ID, "bob", time.Now().UTC())
 	LogBellTry("bob", 3, 3, "failed", "no such pane", time.Now().UTC())
-	LogBellGaveUp("bob", 3, time.Now().UTC())
+	LogBellGaveUp("bob", 3, 0, "failed", time.Now().UTC())
 	LogQueueDeleted("bob", "left", time.Now().UTC())
 
 	lines := dayLines(t, time.Now())

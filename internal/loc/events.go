@@ -45,6 +45,13 @@ type Event struct {
 	Of     int    `json:"of,omitempty"`
 	Result string `json:"result,omitempty"`
 	After  int    `json:"after,omitempty"`
+
+	// `rang` and `last` are on the give-up line alone. They say whether the
+	// seat was ever told. A give-up line with an EMPTY `last` was written
+	// before these two existed: it does not know, and a reader says so rather
+	// than reading the absent `rang` as a 0.
+	Rang int    `json:"rang,omitempty"`
+	Last string `json:"last,omitempty"`
 }
 
 // At is the event's own stamp. The second return is false when the line

@@ -181,20 +181,33 @@ func LogBellTry(seat string, try, of int, result, reason string, at time.Time) {
 // LogBellGaveUp records the end of a streak that used all its tries.
 //
 // It is written after the last try's own line, so the record holds the tries
-// and then the giving up. `after` is how many tries there were, which is the
+// and then the stopping. `after` is how many tries there were, which is the
 // same number the last try's `of` carries; a reader that has only this line
 // still knows.
-func LogBellGaveUp(seat string, after int, at time.Time) {
+//
+// IT SAYS WHETHER THE SEAT WAS EVER TOLD. `rang` is how many of the streak's
+// tries reached the pane, from 0 to `after`. `last` is the final try's result.
+// A bell that rang twice and was not answered is a different fact from a bell
+// that never rang, and this line said neither before: every stopped streak
+// read as a bell that never got through.
+//
+// `rang` is written even when it is 0. That 0 is the whole of the second fact,
+// and an absent key would read as a line from before these two existed.
+func LogBellGaveUp(seat string, after, rang int, last string, at time.Time) {
 	LogEvent(at, struct {
 		Seat   string `json:"seat"`
 		Status string `json:"status"`
 		TS     string `json:"ts"`
 		After  int    `json:"after"`
+		Rang   int    `json:"rang"`
+		Last   string `json:"last"`
 	}{
 		Seat:   seat,
 		Status: "bell-gave-up",
 		TS:     at.UTC().Format(tsLayout),
 		After:  after,
+		Rang:   rang,
+		Last:   last,
 	})
 }
 

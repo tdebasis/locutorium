@@ -248,7 +248,7 @@ outcome comes from the last event under that `uid`, in file order and then line 
 | `read <ts> by <seat>` | the last event is `read` |
 | `pending` | the last event is `sent` |
 | `pending, bell tried <k> of <n>, last <result> (<reason>) <ts>` | pending, and the recipient's seat has a later `bell-try` |
-| `pending, bell gave up <ts> after <n> tries` | pending, and the recipient's seat has a later `bell-gave-up` |
+| `pending, bell made <n> of <n> tries, <k> rang, last <result> <ts>` | pending, and the recipient's seat has a later `bell-gave-up` |
 | `pending, bell failed <ts>: <reason>` | pending, and the seat has an old `bell-failed` line |
 | `lost: queue deleted <ts> (<reason>)` | pending, and the recipient's seat has a later `queue-deleted` |
 | `failed: <reason>` | the last event is `failed` |
@@ -264,7 +264,7 @@ A try that rang has no reason. Its line shows no `(<reason>)`.
 before that rule still hold them, so this verb still reads one.
 
 `--seat` prints each bell event on its own line. The two shapes are
-`bell try <k> of <n>: <result> (<reason>)` and `bell gave up after <n> tries`.
+`bell try <k> of <n>: <result> (<reason>)` and `bell made <n> of <n> tries, <k> rang, last <result>`.
 
 Flags:
 
@@ -441,7 +441,8 @@ beat and the two can never disagree about what is wrong:
 ```
 workshop.scribe: row ok, queue ok
 workshop.crier: row ok, queue ok, mail unread, bell tried 2 of 3, last refused (pane busy) at 2026-09-16T22:47:36Z
-workshop.binder: row ok, queue ok, mail unread, bell gave up at 2026-09-16T22:49:36Z after 3 tries
+workshop.binder: row ok, queue ok, mail unread, bell made 3 of 3 tries, 2 rang, last rang at 2026-09-16T22:49:36Z; no more until new mail
+workshop.clerk2: row ok, queue ok, mail unread, bell made 3 of 3 tries, none rang, last refused (pane busy) at 2026-09-16T22:51:36Z; no more until new mail
 workshop.clerk: queue missing, next beat repairs it
 atelier.scribe: pid dead, next beat reaps it
 workshop.legacy: row unreadable: <reason>
@@ -464,8 +465,13 @@ mail, because nothing rings for its operator. Two seats ran in that state for a 
 `status` adds the bell field when the message log holds a `bell-try` for the seat, and no `read` by
 that seat came after it. That is what `mail unread` says: the bell rang for mail, and the record
 shows that nobody took it. A `read` by the seat removes the field again. The two shapes are
-`mail unread, bell tried <k> of <n>, last <result> (<reason>) at <ts>` and
-`mail unread, bell gave up at <ts> after <n> tries`.
+`mail unread, bell tried <k> of <n>, last <result> (<reason>) at <ts>` while the streak runs, and
+`mail unread, bell made <n> of <n> tries, <k> rang, last <result> at <ts>; no more until new mail`
+once it is finished. `none rang` stands for 0.
+
+**A finished streak says how many tries rang.** A bell that rang and was not answered is a
+different fact from a bell that never rang. The first is a seat that is not looking. The second is
+a broken bell or a busy pane. They want different repairs.
 
 The event must not be before the second of the seat's registration. A registration is stamped in
 milliseconds and a bell line in whole seconds, and a bell that is dead at startup fails in that
@@ -791,14 +797,17 @@ not a wake, and a log saying the pane was woken when it was not is worse than no
 that types logs its `wake` line, and a ring after the first also logs
 `bell <endpoint> rang on try <k> of <n>`. A queue that reads empty logs
 `bell <endpoint> stopped: the queue is empty`. A give-up logs
-`bell <endpoint> gave up after <n> tries`.
+`bell <endpoint> made <n> of <n> tries, <k> rang; no more until new mail`.
 
 **A busy refusal does not consume the breaker.** The caps limit how often the pane is typed into, and
 a refusal typed nothing. The minute and hour counters are given back for it. A ring that typed is
 charged, and a broken bell stays charged, because a notifier that failed will fail again.
 
 **The day's record holds every try.** Each one is a `bell-try` line with its `try`, its `of` and its
-`result`. The give-up is a `bell-gave-up` line with its `after`. A try that rang carries no
+`result`. The give-up is a `bell-gave-up` line with its `after`, its `rang` and its `last`. `rang`
+is how many of the streak's tries reached the pane, and it is written even when it is 0. `last` is
+the final try's result. A give-up line with no `last` was written before those two fields existed,
+and a reader says so rather than reading the absent `rang` as a 0. A try that rang carries no
 `reason`; the other three carry the notifier's own text. The delivery log keeps its own evidence:
 the notifier writes `nudge <endpoint> refused: <reason>` every time it refuses.
 

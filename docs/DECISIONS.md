@@ -501,9 +501,16 @@ streak gets `wake_tries` tries, which defaults to 3. After the last try the bell
 nothing more for that streak. A new arrival rings at once and starts a fresh count. A streak also
 ends, silently, when the unread count reaches 0.
 
-Every try is written to the day's record with its result, and the give-up is written too. The
-result is one of `rang`, `refused`, `suppressed` and `failed`. The result never changes the
+Every try is written to the day's record with its result, and the end of the streak is written too.
+The result is one of `rang`, `refused`, `suppressed` and `failed`. The result never changes the
 counting.
+
+**The end of a streak records how many of its tries rang, and what the last one came to.** A bell
+that rang and was not answered is a different fact from a bell that never rang: the first is a seat
+that is not looking, the second is a broken bell or a busy pane, and they want different repairs.
+The line carries `rang` and `last` beside `after`, and `rang` is written even when it is 0.
+`loc status` and `loc transcript` say `made <n> of <n> tries, <k> rang, last <result>` rather than
+`gave up`, which read as the second state whichever one had happened.
 
 **This supersedes two rulings of 2026-09-18.** Under #145 a bell a busy pane refused rang again
 until the mail was read, on a wait that doubled to a cap of 60 seconds. Under #151 a ring the
@@ -535,6 +542,9 @@ price of a bound. `loc status` shows the state on the seat's row while the mail 
   state it reported is not a state the new field has.
 - **`loc status` changed what its bell field means.** It was the last failure that still stood. It
   is now the streak that is running while the seat has unread mail.
+- A `bell-gave-up` line with no `last` was written before `rang` and `last` existed. It does not
+  know whether the seat was ever told, and a reader prints the older wording rather than reading
+  the absent `rang` as a 0.
 - There is no warning at send time. The bell for this message has not rung when `send` returns, so
   a send-time warning could report only the seat's previous streak.
 - The hourly breaker is unchanged. A ring it suppresses is a try with the result `suppressed`.

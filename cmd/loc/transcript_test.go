@@ -661,8 +661,27 @@ func TestTranscript_APendingMessageShowsTheBellsTries(t *testing.T) {
 				bellTryLine(to, "2026-09-16T14:12:30Z", 1, 3, "refused", "pane busy"),
 				bellTryLine(to, "2026-09-16T14:13:30Z", 2, 3, "refused", "pane busy"),
 				bellTryLine(to, "2026-09-16T14:14:30Z", 3, 3, "failed", "exit status 3"),
-				bellGaveUpLine(to, "2026-09-16T14:14:30Z", 3),
+				bellGaveUpLine(to, "2026-09-16T14:14:30Z", 3, 0, "failed"),
 			},
+			"pending, bell made 3 of 3 tries, none rang, last failed 14:14:30Z",
+		},
+		{
+			// A FINISHED STREAK THAT RANG IS A DIFFERENT FACT. The seat was
+			// told and has not looked; the words must not read as a bell that
+			// never got through.
+			"a streak whose tries rang",
+			[]string{
+				bellTryLine(to, "2026-09-16T14:12:30Z", 1, 3, "rang", ""),
+				bellTryLine(to, "2026-09-16T14:13:30Z", 2, 3, "refused", "pane busy"),
+				bellTryLine(to, "2026-09-16T14:14:30Z", 3, 3, "rang", ""),
+				bellGaveUpLine(to, "2026-09-16T14:14:30Z", 3, 2, "rang"),
+			},
+			"pending, bell made 3 of 3 tries, 2 rang, last rang 14:14:30Z",
+		},
+		{
+			// A give-up line from before it carried the two fields.
+			"an old give-up line that does not know",
+			[]string{oldGiveUpLine(to, "2026-09-16T14:14:30Z", 3)},
 			"pending, bell gave up 14:14:30Z after 3 tries",
 		},
 		{
@@ -699,13 +718,13 @@ func TestTranscript_SeatShowsEveryBellTryAsItsOwnLine(t *testing.T) {
 	seedDay(t, home, "2026-09-16",
 		bellTryLine("workshop.clerk", "2026-09-16T15:00:00Z", 1, 3, "refused", "pane busy"),
 		bellTryLine("workshop.clerk", "2026-09-16T15:01:00Z", 2, 3, "rang", ""),
-		bellGaveUpLine("workshop.clerk", "2026-09-16T15:02:00Z", 3))
+		bellGaveUpLine("workshop.clerk", "2026-09-16T15:02:00Z", 3, 1, "rang"))
 
 	out, _ := transcribe(t, "--seat", "workshop.clerk", "2026-09-16")
 	for _, want := range []string{
 		"2026-09-16T15:00:00Z workshop.clerk  bell try 1 of 3: refused (pane busy)\n",
 		"2026-09-16T15:01:00Z workshop.clerk  bell try 2 of 3: rang\n",
-		"2026-09-16T15:02:00Z workshop.clerk  bell gave up after 3 tries\n",
+		"2026-09-16T15:02:00Z workshop.clerk  bell made 3 of 3 tries, 1 rang, last rang\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("transcript:\n%s\nwant the line:\n%s", out, want)
