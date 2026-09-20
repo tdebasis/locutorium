@@ -32,10 +32,12 @@ Each rule below lives in one document. Read the source; this file does not resta
 Build with `make build`. It writes a stamped binary to `build/bin/loc`. `Makefile` states what each
 target does and why.
 
-Run `make test` for the Go unit tests and the suite's own machinery tests. These tests start their
-own scratch servers. A guard in `internal/provider/nats/guard.go` refuses the default broker address
-under `go test`, so a test run cannot reach a daemon running on the same machine. A change that
-removes or weakens that guard removes that protection.
+Run `make test` for the Go unit tests and the suite's own machinery tests. A test that needs a
+broker starts its own scratch server on a port the kernel picks. A guard in
+`internal/provider/nats/guard.go` refuses the default broker address under `go test`, so a test run
+cannot reach a deployment at the default broker address. A deployment that listens on another
+address has no such protection. A change that removes or weakens that guard removes that
+protection.
 
 `conformance/run.sh` is the suite. `docs/INSTALL.md` §Dependencies lists what it needs: the `nats`
 CLI, `jq`, and BSD `sed`; that section also states that the suite is macOS-only for now. The suite
