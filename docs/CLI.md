@@ -741,7 +741,7 @@ tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index}  #{pane_id}
 
 For a `tmux` listener, prefer the `session:window.pane` form (`work:1.2`) over the pane id (`%42`).
 The notifier passes `LOC_LISTENER_ADDRESS` straight through to `tmux … -t <address>`
-(`internal/mcpserve/notify.go:154-172`), and tmux accepts either form there, so both work. They do
+(`internal/mcpserve/notify.go`), and tmux accepts either form there, so both work. They do
 not survive the same events: a pane id is assigned by the running tmux server, and a `session:window.pane`
 target names a position in the layout instead. When the layout is recreated the same way, the
 position still means the same pane; the id does not.
@@ -761,11 +761,14 @@ position still means the same pane; the id does not.
 >
 > The `claude` type has the same exposure, and cannot be given the `session:window.pane` form as a
 > workaround. The courier's own instructions ask it to find "the live session whose tmux pane id is
-> `<address>`" (`internal/mcpserve/notify.go:233-234`) — a literal pane id, matched against the
-> runtime's live sessions at delivery time. After a restart the courier finds no session at the stale
-> id and, by its own instructions, does nothing (`internal/mcpserve/notify.go:236`: "If no session
-> matches, do nothing. Then stop."). The address for a `claude` listener must be re-read after every
-> tmux restart, the same as for `tmux`.
+> `<address>`" (`internal/mcpserve/notify.go`) — a literal pane id, matched against the runtime's live
+> sessions at delivery time. After a restart, if no live session holds that id, the courier does
+> nothing, by the same instructions ("If no session matches, do nothing. Then stop."). But if the
+> stale id has been reassigned to a pane that holds a DIFFERENT live session, the courier's
+> instructions match that session instead and it wakes that one: the intended seat gets nothing, the
+> wrong seat is told to read, and no failure is recorded anywhere. The address for a `claude` listener
+> must be re-read after every tmux restart, the same as for a `tmux` listener that was configured with
+> a pane id.
 
 The `tmux` notifier refuses to type when the pane is in copy mode, and refuses when the pane is not
 an agent's input box: typing into a pane that has dropped to a shell executes the text. A refusal is
