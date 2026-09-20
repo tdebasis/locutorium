@@ -18,15 +18,17 @@ This project is at version 0.x. Only the latest release gets a fix.
 ## Threat model for v0
 
 The broker listens on loopback only. `loc start` refuses any other listen
-address and says why (`docs/CLI.md:62-63`). The broker binds loopback, and
+address and says why (`docs/CLI.md` §start). The broker binds loopback, and
 nothing on the bus leaves the machine, as a design position for this version
-(`README.md:94`).
+(`README.md`, the "Nothing leaves the machine" point).
 
-The broker authenticates nobody in this version (`docs/CLI.md:63`,
-`README.md:94`). An identity comes from the `LOC_IDENTITY` environment
-variable and from nothing else (`docs/OPERATORS.md:135`). The system stamps
-the `from` field from that value. It never checks who set the variable
-(`docs/PROTOCOL.md:10-11`).
+The broker authenticates nobody in this version (`docs/CLI.md` §start,
+`README.md`, the "Nothing leaves the machine" point). An identity comes from
+the `LOC_IDENTITY` environment variable and from nothing else
+(`docs/OPERATORS.md` §"The bell — how a seat is told"). The system stamps the
+`from` field from that value (`docs/PROTOCOL.md` §"1. Identity — who a message
+is from"). Because this version authenticates nobody, nothing verifies which
+process set it.
 
 A local process on the same machine can set `LOC_IDENTITY` to any name it
 chooses, then send or publish under that name. This is a stated design
@@ -40,7 +42,7 @@ Report a finding in any of these:
 - A path that crosses the loopback boundary.
 - A write outside `$LOC_HOME`. The tool's own state lives under this
   directory: `config`, `run/`, `store/`, and `forbidden`
-  (`docs/OPERATORS.md:7-15`).
+  (`docs/OPERATORS.md` §"What lives under `$LOC_HOME`").
 
 ### Out of scope
 
