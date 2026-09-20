@@ -851,7 +851,7 @@ it has destroyed the delivery silently. The line is followed by a blank line and
 Nothing below has been shown to anyone yet; the bell only rang. Print it on screen verbatim, then act on it.
 
 ── queue.workshop.scribe ──
-workshop.clerk -> workshop.scribe   09:00
+workshop.clerk -> workshop.scribe   2026-08-26T03:54:39Z
 + a question about the ledger
 
 ── topics ──

@@ -121,11 +121,14 @@ blank line, and then exactly what `loc read` prints:
 Nothing below has been shown to anyone yet; the bell only rang. Print it on screen verbatim, then act on it.
 
 ── queue.house.bob ──
-house.ada -> house.bob   09:00
+house.ada -> house.bob   2026-08-26T03:54:39Z
 + the build is green; the tag is yours
 
 ── topics ──
 ```
+
+The stamp is the UTC time the message was sent. The one above is a fixed value, so that the page and
+the tests agree; yours differs.
 
 That read takes the message. The queue hands it over exactly once (`CLI.md` §read).
 
@@ -150,9 +153,10 @@ part appears only when the try carried one, as a refusal does.
 
 Check again a few minutes later and that suffix changes form. Once the streak has spent its last
 try, it reads `mail unread, bell made <n> of <n> tries, <k> rang, last <result> at <time>; no more
-until new mail`. This is the form a pane that never woke settles into, and `<k> rang` is the part to
-read: it separates a bell that reached the pane from one that never did. The bell then stays quiet
-until new mail arrives. [`CLI.md` §status](CLI.md#status) gives both shapes, and
+until new mail`. This is the form a pane that never woke settles into, and the count of tries that
+rang is the part to read: it separates a bell that reached the pane from one that never did. That
+field reads `<k> rang`, or `none rang` when no try reached the pane — so the case that matters most
+carries no digit at all. The bell then stays quiet until new mail arrives. [`CLI.md` §status](CLI.md#status) gives both shapes, and
 [`OPERATORS.md` §The bell](OPERATORS.md) states the rule behind the second one.
 
 **Second, compare the recorded address with the pane.**
