@@ -69,6 +69,30 @@ else
   echo "check-clean: no deployment list at $FORBIDDEN_FILE; generic list only" >&2
 fi
 
+# The pattern is now whole, and it is validated once, here, before either lane
+# runs. grep exits 2 on an extended regular expression it cannot parse. A lane
+# that reads that 2 as "no hits" reports every tree clean while the forbidden
+# word sits in it, so ONE malformed line in a deployment list disarms the whole
+# gate. The empty list a few lines above is refused for the same reason: the run
+# looks healthy and nothing is being checked.
+#
+# The probe uses the grep and the flags the lanes use, against empty input.
+# Exit 0 or 1 means grep parsed the pattern. Exit 2 or more means it did not.
+#
+# A rejected pattern exits 2, and 2 means CANNOT MEASURE. This script never
+# conflates that with a finding (exit 1) or with a pass (exit 0). A caller that
+# treats every non-zero status alike still stops, which is the safe reading.
+probe_rc=0
+printf '' | grep -iE -- "$pattern" >/dev/null 2>&1 || probe_rc=$?
+if [[ "$probe_rc" -ge 2 ]]; then
+  echo "check-clean: grep rejects the pattern (grep exit $probe_rc); nothing was measured" >&2
+  echo "check-clean: the pattern is the $source_note" >&2
+  if [[ -r "$FORBIDDEN_FILE" ]]; then
+    echo "check-clean: a line in $FORBIDDEN_FILE is not a valid extended regular expression" >&2
+  fi
+  exit 2
+fi
+
 # .idea and .vscode are excluded BY NAME. This is not honouring .gitignore, which
 # the check must never do: it names two folders that hold IDE state and nothing
 # else, so a maintainer's hand run is not red every day for a harmless reason.
@@ -77,10 +101,20 @@ fi
 # A worktree's .git is a FILE, not a directory: it holds one line, an absolute
 # path to the real .git. --exclude-dir=.git does not match a file, so that line
 # was read and flagged. The file is never tracked, so excluding it loses nothing.
+#
+# grep's exit code is read, not discarded. 0 is a hit, 1 is a clean scan, and
+# anything else is a scan that did not happen — an unreadable file, or a pattern
+# this grep parses differently from the probe above. The old `|| true` here
+# turned all three into "no hits".
+tree_rc=0
 hits="$(grep -rniIE "$pattern" --exclude-dir=.git --exclude=.git --exclude-dir=.idea --exclude-dir=.vscode \
-  --exclude=check-clean.sh . || true)"
+  --exclude=check-clean.sh .)" || tree_rc=$?
 
-if [[ -n "$hits" ]]; then
+if [[ "$tree_rc" -ge 2 ]]; then
+  echo "check-clean: the tree scan did not complete (grep exit $tree_rc); nothing was measured" >&2
+  exit 2
+fi
+if [[ "$tree_rc" -eq 0 ]]; then
   echo "check-clean: forbidden vocabulary found ($source_note):" >&2
   echo "$hits" >&2
   exit 1
@@ -157,11 +191,23 @@ commit_count=0
 while IFS= read -r sha; do
   [[ -n "$sha" ]] || continue
   commit_count=$((commit_count + 1))
-  hits="$(git show --format='' --unified=0 --no-color "$sha" \
+  # The diff is collected first and matched second, so that the exit code read
+  # below belongs to grep and not to whichever stage of a pipeline failed last.
+  show_rc=0
+  added="$(git show --format='' --unified=0 --no-color "$sha" \
       -- . ':(exclude,glob)**/check-clean.sh' \
-    | awk "$added_lines" \
-    | grep -iE "$pattern" || true)"
-  if [[ -n "$hits" ]]; then
+    | awk "$added_lines")" || show_rc=$?
+  if [[ "$show_rc" -ne 0 ]]; then
+    echo "check-clean: commit $sha could not be read (exit $show_rc); nothing was measured" >&2
+    exit 2
+  fi
+  grep_rc=0
+  hits="$(grep -iE -- "$pattern" <<<"$added")" || grep_rc=$?
+  if [[ "$grep_rc" -ge 2 ]]; then
+    echo "check-clean: the commit scan did not complete (grep exit $grep_rc); nothing was measured" >&2
+    exit 2
+  fi
+  if [[ "$grep_rc" -eq 0 ]]; then
     commit_hits="${commit_hits}$(git log -1 --format='%h %s' "$sha")
 $(echo "$hits" | sed 's/^/    /')
 "
