@@ -29,8 +29,11 @@ package loctest
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,6 +41,7 @@ import (
 	natsgo "github.com/nats-io/nats.go"
 
 	"github.com/tdebasis/locutorium/internal/broker"
+	"github.com/tdebasis/locutorium/internal/config"
 )
 
 // Server is one scratch broker: a running nats-server and the URLs a client
@@ -122,6 +126,7 @@ func Boot(t *testing.T, opts ...Option) *Server {
 // closes it.
 func (s *Server) Admin(t *testing.T, user, password string) (*natsgo.Conn, natsgo.JetStreamContext) {
 	t.Helper()
+	refuseDefaultBroker(t, s.URL)
 	nc, err := natsgo.Connect(s.URL, natsgo.UserInfo(user, password), natsgo.Timeout(5*time.Second))
 	if err != nil {
 		t.Fatalf("admin connect as %q: %v", user, err)
@@ -132,6 +137,66 @@ func (s *Server) Admin(t *testing.T, user, password string) (*natsgo.Conn, natsg
 		t.Fatalf("admin jetstream: %v", err)
 	}
 	return nc, js
+}
+
+// refuseDefaultBroker stops this file's dial from reaching a real deployment.
+//
+// THE SAFETY IS LOCAL BECAUSE THE DIAL IS. Admin does not go through the
+// provider's Dial, which refuses this address under `go test`, and it cannot:
+// Dial requires a deployment config file and this harness boots homes that
+// deliberately have none. The exemption is recorded in that package's seam
+// test. What makes it safe today lives in Boot, two functions up, which asks
+// the kernel for a port — and nothing connects the two facts. One helper
+// pinning the port to the default, the kind somebody writes to reproduce a
+// bug, would send every Admin dial in the suite at a live broker with no
+// guard in the path, and the seam test would still pass because this file is
+// named there as an exception.
+//
+// On 2026-09-16 a test run that reached a live broker deleted every queue on
+// it and lost the mail in them.
+//
+// The port is what is compared, not the text. A kernel-picked port is never
+// the default, so this costs a correct run nothing.
+func refuseDefaultBroker(t *testing.T, raw string) {
+	t.Helper()
+	if namesDefaultPort(raw) {
+		t.Fatalf("loctest.Admin refuses to dial %s: it names the default broker port, "+
+			"and on a machine that runs the Locutorium that is the live deployment. "+
+			"A harness server takes a kernel-picked port; something has pinned this one. "+
+			"On 2026-09-16 a test run against that address deleted every queue on it", raw)
+	}
+}
+
+// namesDefaultPort is the comparison, split out so it can be failed. A guard
+// whose decision cannot be exercised is a guard nobody has tested.
+func namesDefaultPort(raw string) bool {
+	p := brokerPort(raw)
+	return p > 0 && p == brokerPort(config.Default(config.NATSURL))
+}
+
+// brokerPort reads the port a nats address names, or -1 if it names none that
+// can be read. An address with no scheme gets the product's, so a hand-written
+// "127.0.0.1:4222" cannot walk past the comparison.
+func brokerPort(raw string) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return -1
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "nats://" + raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return -1
+	}
+	if u.Port() == "" {
+		return 4222 // the client's default when an address names none
+	}
+	n, err := strconv.Atoi(u.Port())
+	if err != nil {
+		return -1
+	}
+	return n
 }
 
 // ClosedPort returns a loopback nats URL nothing is listening on, for the
