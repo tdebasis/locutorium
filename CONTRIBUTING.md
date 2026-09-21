@@ -39,6 +39,11 @@ cannot reach a deployment at the default broker address. A deployment that liste
 address has no such protection. A change that removes or weakens that guard removes that
 protection.
 
+That guard works because every dial goes through one function. Do not call `nats.Connect` directly.
+Use `Dial` in that package. `TestEveryDialGoesThroughTheSeam` walks the module and fails on a direct
+dial outside it. Three helpers are named as exceptions in `internal/provider/nats/seam_test.go`,
+each with its reason. Add to that list only when a dial must not read the deployment's config.
+
 `conformance/run.sh` is the suite. `docs/INSTALL.md` §Dependencies lists what it needs: the `nats`
 CLI, `jq`, and BSD `sed`; that section also states that the suite is macOS-only for now. The suite
 needs no live deployment. It starts its own scratch server on a random port and tears it down when
