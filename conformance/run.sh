@@ -529,9 +529,18 @@ skip "README transcript equals a fresh run (timestamps masked)" "the captured tr
 
 say "— repo cleanliness (future-public discipline) —"
 say "  (cleanliness list read from: $REAL_LOC_HOME/forbidden)"
-if LOC_FORBIDDEN_FILE="$REAL_LOC_HOME/forbidden" "$ROOT/conformance/check-clean.sh" >/dev/null 2>&1; then
-  ok "repo carries no deployment/internal vocabulary"
-else bad "repo carries no deployment/internal vocabulary (run conformance/check-clean.sh)"; fi
+# THE EXIT CODE IS READ, NOT THE TRUTHINESS OF THE COMMAND. The gate answers
+# three ways — 0 clean, 1 found, 2 cannot measure — and a bare `if` folds 2 into
+# the failure branch and reports a cannot-measure as a finding. The script's own
+# header says the two are never conflated; its caller conflated them one file
+# away. It failed closed, so this was a wrong message rather than a hole.
+clean_rc=0
+LOC_FORBIDDEN_FILE="$REAL_LOC_HOME/forbidden" "$ROOT/conformance/check-clean.sh" >/dev/null 2>&1 || clean_rc=$?
+case "$clean_rc" in
+  0) ok "repo carries no deployment/internal vocabulary" ;;
+  1) bad "repo carries no deployment/internal vocabulary (run conformance/check-clean.sh)" ;;
+  *) bad "cleanliness check CANNOT MEASURE (exit $clean_rc) — nothing was checked; run conformance/check-clean.sh to see why" ;;
+esac
 # With no list on the machine at all the check must still run and still pass on
 # a clean tree — a missing list is a weaker check, never a hard failure.
 check "cleanliness check runs on its generic list when no list is installed" \
@@ -549,6 +558,50 @@ printf '# scratch list\n%s\n' "$CLEAN_NONCE" > "$CLEAN_T/list"
 check_not "cleanliness check fails on a tree that carries a listed word" \
   env LOC_FORBIDDEN_FILE="$CLEAN_T/list" "$CLEAN_T/conformance/check-clean.sh"
 rm -rf "$CLEAN_T"
+# THE COMMIT LANE HAD NO ARM AT ALL UNTIL HERE (#197). Every case above
+# exercises the TREE lane. The scratch trees are not git repositories, so the
+# commit lane skips them and exits 0 — a pass that says nothing about it. Both
+# halves of that lane shipped with a fire control that ran once and never again,
+# and a detector whose control does not run at every revision is the class this
+# suite exists to catch.
+#
+# This arm gives the lane a repository, with a CLEAN tree and the nonce only in
+# a commit MESSAGE. If this case goes green the commit lane is what found it,
+# and that rests on one line: check-clean.sh passes --exclude-dir=.git, so the
+# tree lane never reads the object store the message is kept in. `measured:` a
+# repository whose only nonce is under .git, run with an EMPTY commit range so
+# the tree lane answers alone, exits 0. Were that exclusion removed this arm
+# would still go red, for the wrong reason.
+#
+# Two traps, both measured while building the throwaway by hand. The script
+# walks up one level from itself, so the copy sits at <tree>/conformance/. And
+# the list lives OUTSIDE the scanned tree, or the tree lane finds the nonce in
+# the list file and the case passes for the wrong reason.
+CLEAN_T="$(mktemp -d)"; CLEAN_L="$(mktemp -d)"; mkdir -p "$CLEAN_T/conformance"
+cp "$ROOT/conformance/check-clean.sh" "$CLEAN_T/conformance/check-clean.sh"
+CLEAN_NONCE="zzq$(( RANDOM ))msg"
+printf '# scratch list\n%s\n' "$CLEAN_NONCE" > "$CLEAN_L/list"
+(
+  cd "$CLEAN_T" || exit 1
+  git init -q -b main . && git config user.email c@example.com && git config user.name C
+  printf 'nothing to see here\n' > file.md
+  git add -A && git commit -q -m "initial commit"
+  git update-ref refs/remotes/origin/main "$(git rev-parse HEAD)"
+  printf 'still nothing to see here\n' > file.md
+  git add file.md
+  git commit -q -m "chore: touch the file
+
+the body of this message carries $CLEAN_NONCE and the tree does not"
+) >/dev/null 2>&1
+check_not "cleanliness check fails on a clean tree with a listed word in a commit message" \
+  env LOC_FORBIDDEN_FILE="$CLEAN_L/list" "$CLEAN_T/conformance/check-clean.sh"
+# AND THE SAME REPOSITORY PASSES ONCE THE MESSAGE IS CLEAN. Without this the arm
+# above is satisfied by a checker that refuses every git repository, and
+# "refuses everything" and "refuses correctly" are the same green.
+( cd "$CLEAN_T" && git commit -q --amend -m "chore: touch the file" ) >/dev/null 2>&1
+check "cleanliness check passes that same repository once the message is clean" \
+  env LOC_FORBIDDEN_FILE="$CLEAN_L/list" "$CLEAN_T/conformance/check-clean.sh"
+rm -rf "$CLEAN_T" "$CLEAN_L"
 # An installed list must not switch the generic list off (#137). A maintainer's
 # own list can omit one home-path form, and then that form passed on their machine
 # and failed on a machine with no list. The installed list here names a nonce the
