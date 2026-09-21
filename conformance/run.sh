@@ -602,6 +602,106 @@ check_not "cleanliness check fails on a clean tree with a listed word in a commi
 check "cleanliness check passes that same repository once the message is clean" \
   env LOC_FORBIDDEN_FILE="$CLEAN_L/list" "$CLEAN_T/conformance/check-clean.sh"
 rm -rf "$CLEAN_T" "$CLEAN_L"
+
+# ── the PATH lanes, and the premise the message arm rests on ───────────────
+#
+# Three arms, and none of them duplicates another. The first two give the path
+# lanes a fire control at every revision instead of one that ran once in a
+# scratchpad (#185 item 2). The third asserts what the message arm above only
+# describes.
+#
+# EACH OF THE FIRST TWO MUST ISOLATE ONE LANE OR IT PROVES NOTHING. A word in an
+# ADDED file's path is caught already, by accident: the added-lines scan prints
+# path:line:content, so the path rides along beside the line. An arm built the
+# obvious way goes red before and after and measures nothing. So the commit
+# range is emptied for the tree lane, and for the commit lane the rename goes
+# out AND BACK, leaving the tip clean.
+CLEAN_T="$(mktemp -d)"; CLEAN_L="$(mktemp -d)"; mkdir -p "$CLEAN_T/conformance"
+cp "$ROOT/conformance/check-clean.sh" "$CLEAN_T/conformance/check-clean.sh"
+CLEAN_NONCE="zzq$(( RANDOM ))path"
+printf '# scratch list\n%s\n' "$CLEAN_NONCE" > "$CLEAN_L/list"
+(
+  cd "$CLEAN_T" || exit 1
+  git init -q -b main . && git config user.email c@example.com && git config user.name C
+  printf 'clean content\n' > plain.md
+  git add -A && git commit -q -m "initial commit"
+  git mv plain.md "$CLEAN_NONCE-file.md"
+  git commit -q -m "chore: rename"
+  git update-ref refs/remotes/origin/main "$(git rev-parse HEAD)"
+) >/dev/null 2>&1
+check_not "cleanliness check fails on a listed word in a file PATH (tree lane alone)" \
+  env LOC_FORBIDDEN_FILE="$CLEAN_L/list" "$CLEAN_T/conformance/check-clean.sh"
+rm -rf "$CLEAN_T" "$CLEAN_L"
+
+CLEAN_T="$(mktemp -d)"; CLEAN_L="$(mktemp -d)"; mkdir -p "$CLEAN_T/conformance"
+cp "$ROOT/conformance/check-clean.sh" "$CLEAN_T/conformance/check-clean.sh"
+CLEAN_NONCE="zzq$(( RANDOM ))rename"
+printf '# scratch list\n%s\n' "$CLEAN_NONCE" > "$CLEAN_L/list"
+(
+  cd "$CLEAN_T" || exit 1
+  git init -q -b main . && git config user.email c@example.com && git config user.name C
+  printf 'clean content\n' > plain.md
+  git add -A && git commit -q -m "initial commit"
+  git update-ref refs/remotes/origin/main "$(git rev-parse HEAD)"
+  git mv plain.md "$CLEAN_NONCE-tmp.md" && git commit -q -m "chore: rename out"
+  git mv "$CLEAN_NONCE-tmp.md" plain.md && git commit -q -m "chore: rename back"
+) >/dev/null 2>&1
+check_not "cleanliness check fails on a PURE RENAME through a listed path (tip clean)" \
+  env LOC_FORBIDDEN_FILE="$CLEAN_L/list" "$CLEAN_T/conformance/check-clean.sh"
+rm -rf "$CLEAN_T" "$CLEAN_L"
+
+# THE MESSAGE ARM ABOVE RESTS ON --exclude-dir=.git AND NOTHING ASSERTED IT.
+# Measured during review: remove that exclusion and BOTH message arms still
+# pass, so neither notices. The word is plain text in exactly one place,
+# .git/COMMIT_EDITMSG, and `git commit --amend` rewrites that file — even an
+# amend that FAILS does — while the commit object itself is compressed and no
+# text grep reads it. So the arm that guards this needs its OWN repository, and
+# must never amend.
+#
+# The tree lane answers alone here, by an emptied commit range, and must exit 0.
+# Were the exclusion removed it would find the word in COMMIT_EDITMSG and this
+# arm would go red.
+CLEAN_T="$(mktemp -d)"; CLEAN_L="$(mktemp -d)"; mkdir -p "$CLEAN_T/conformance"
+cp "$ROOT/conformance/check-clean.sh" "$CLEAN_T/conformance/check-clean.sh"
+CLEAN_NONCE="zzq$(( RANDOM ))dotgit"
+printf '# scratch list\n%s\n' "$CLEAN_NONCE" > "$CLEAN_L/list"
+(
+  cd "$CLEAN_T" || exit 1
+  git init -q -b main . && git config user.email c@example.com && git config user.name C
+  printf 'clean content\n' > plain.md
+  git add -A && git commit -q -m "initial commit"
+  git commit -q --allow-empty -m "chore: a commit whose body carries $CLEAN_NONCE"
+  git update-ref refs/remotes/origin/main "$(git rev-parse HEAD)"
+) >/dev/null 2>&1
+# THE FIXTURE IS ASSERTED FIRST. If the word is not actually under .git in plain
+# text, the arm below passes for free and guards nothing.
+check "the .git fixture holds the word in plain text, so the arm below is not vacuous" \
+  grep -rqI "$CLEAN_NONCE" "$CLEAN_T/.git"
+check "cleanliness check does NOT read .git, so a message cannot reach the tree lane" \
+  env LOC_FORBIDDEN_FILE="$CLEAN_L/list" "$CLEAN_T/conformance/check-clean.sh"
+rm -rf "$CLEAN_T" "$CLEAN_L"
+
+# THE TWO SCANS KEEP TWO EXCLUSION LISTS AND NOTHING ASSERTED THEY AGREE. The
+# content scan excludes with grep's --exclude flags; the path scan excludes with
+# find's -not -path. They are written to match and they can drift apart
+# silently, which is the defect class this suite exists for.
+#
+# A word planted in an excluded directory, in BOTH the path and the content,
+# must be invisible to both scans. The control beneath it proves the fixture
+# can be seen at all.
+CLEAN_T="$(mktemp -d)"; CLEAN_L="$(mktemp -d)"
+mkdir -p "$CLEAN_T/conformance" "$CLEAN_T/.idea" "$CLEAN_T/.vscode"
+cp "$ROOT/conformance/check-clean.sh" "$CLEAN_T/conformance/check-clean.sh"
+CLEAN_NONCE="zzq$(( RANDOM ))excl"
+printf '# scratch list\n%s\n' "$CLEAN_NONCE" > "$CLEAN_L/list"
+printf 'ide state holding %s\n' "$CLEAN_NONCE" > "$CLEAN_T/.idea/$CLEAN_NONCE.md"
+printf 'ide state holding %s\n' "$CLEAN_NONCE" > "$CLEAN_T/.vscode/$CLEAN_NONCE.md"
+check "both scans exclude the same IDE directories, by path and by content" \
+  env LOC_FORBIDDEN_FILE="$CLEAN_L/list" "$CLEAN_T/conformance/check-clean.sh"
+printf 'a tracked file holding %s\n' "$CLEAN_NONCE" > "$CLEAN_T/seen.md"
+check_not "CONTROL: the same word outside those directories IS found" \
+  env LOC_FORBIDDEN_FILE="$CLEAN_L/list" "$CLEAN_T/conformance/check-clean.sh"
+rm -rf "$CLEAN_T" "$CLEAN_L"
 # An installed list must not switch the generic list off (#137). A maintainer's
 # own list can omit one home-path form, and then that form passed on their machine
 # and failed on a machine with no list. The installed list here names a nonce the
