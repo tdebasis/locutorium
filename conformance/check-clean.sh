@@ -32,6 +32,15 @@
 # silent pass and never a hard failure: the suite and the release path both gate
 # on the exit status.
 #
+# WHAT THIS SCRIPT CANNOT SEE, stated here because a gate that does not name its
+# blind spot is trusted past it. It reads TEXT. Both lanes skip binary files —
+# the tree lane through grep's -I, the commit lane because git prints no patch
+# text for one — so a forbidden word inside an image, a font or a compiled
+# artifact passes. A text gate cannot read a picture of a word. What IS checked
+# for a binary is its PATH, which is text whatever the bytes are. Closing the
+# content half would need a different instrument, and none is proposed here
+# (#185 item 3).
+#
 # The script has two lanes and one pattern. The first lane reads the working
 # tree. The second lane reads the commits in origin/main..HEAD: both the lines
 # they add, because a word removed before the tip stays in the history, and
@@ -118,6 +127,37 @@ fi
 if [[ "$tree_rc" -eq 0 ]]; then
   echo "check-clean: forbidden vocabulary found ($source_note):" >&2
   echo "$hits" >&2
+  exit 1
+fi
+# PATHS, NOT ONLY CONTENT. The scan above reads what is INSIDE a file. A
+# forbidden word can sit in a file's NAME, and a PURE RENAME adds no line
+# anywhere, so neither lane saw one (#185 item 2).
+#
+# The exclusions match the content scan above, with one deliberate difference:
+# a BINARY's path is checked here although -I skips its content. A name is text
+# whatever the bytes are, so this is the one thing about a binary this script
+# can read.
+#
+# find's exit code is read for the same reason grep's is: a listing that did not
+# complete is a scan that did not happen, and it must not read as "no hits".
+path_rc=0
+paths="$(find . -type f \
+  -not -path './.git/*' -not -name '.git' \
+  -not -path './.idea/*' -not -path './.vscode/*' \
+  -not -name 'check-clean.sh')" || path_rc=$?
+if [[ "$path_rc" -ne 0 ]]; then
+  echo "check-clean: the path listing did not complete (find exit $path_rc); nothing was measured" >&2
+  exit 2
+fi
+path_grep_rc=0
+path_hits="$(grep -iE -- "$pattern" <<<"$paths")" || path_grep_rc=$?
+if [[ "$path_grep_rc" -ge 2 ]]; then
+  echo "check-clean: the path scan did not complete (grep exit $path_grep_rc); nothing was measured" >&2
+  exit 2
+fi
+if [[ "$path_grep_rc" -eq 0 ]]; then
+  echo "check-clean: forbidden vocabulary in a FILE PATH ($source_note):" >&2
+  echo "$path_hits" >&2
   exit 1
 fi
 echo "check-clean: tree is clean ($source_note)"
@@ -238,6 +278,28 @@ $(echo "$hits" | sed 's/^/    /')
   if [[ "$msg_grep_rc" -eq 0 ]]; then
     commit_hits="${commit_hits}$(git log -1 --format='%h %s' "$sha") [COMMIT MESSAGE]
 $(echo "$msg_hits" | sed 's/^/    line /')
+"
+  fi
+
+  # THE PATHS THE COMMIT TOUCHES. A pure rename adds no line, so the added-lines
+  # scan above prints nothing for it and the new path is never matched (#185
+  # item 2). --name-only names both sides of a rename, which is what is wanted:
+  # a word arriving in a path is a hit however it arrived.
+  names_rc=0
+  names="$(git diff-tree --no-commit-id --name-only -r "$sha")" || names_rc=$?
+  if [[ "$names_rc" -ne 0 ]]; then
+    echo "check-clean: the paths of commit $sha could not be listed (exit $names_rc); nothing was measured" >&2
+    exit 2
+  fi
+  name_grep_rc=0
+  name_hits="$(grep -iE -- "$pattern" <<<"$names")" || name_grep_rc=$?
+  if [[ "$name_grep_rc" -ge 2 ]]; then
+    echo "check-clean: the path scan did not complete (grep exit $name_grep_rc); nothing was measured" >&2
+    exit 2
+  fi
+  if [[ "$name_grep_rc" -eq 0 ]]; then
+    commit_hits="${commit_hits}$(git log -1 --format='%h %s' "$sha") [FILE PATH]
+$(echo "$name_hits" | sed 's/^/    /')
 "
   fi
 done <<EOF
