@@ -34,15 +34,28 @@ test:
 clean:
 	rm -rf build
 
-# THE PRIVATE-VOCABULARY CHECK RUNS WHERE THE LIST LIVES, AND NOWHERE ELSE.
-# The forbidden list is deployment data: a maintainer's names, paths and
-# deployment words, kept under $LOC_HOME and never in the tree. If it is
-# present on this machine, a build runs the check and a hit fails the build. If
-# it is absent (CI, a contributor's clone), this is one line and the build goes
-# on. The check's exit code is passed through on purpose: an `|| true` here
-# would swallow a real hit along with the absent-file case, and a guard that
-# cannot fail is decoration.
+# THE PRIVATE-VOCABULARY CHECK ALWAYS RUNS, AND THE SCRIPT DECIDES WHAT IT CAN
+# MEASURE. The forbidden list is deployment data: a maintainer's names, paths
+# and deployment words, kept under $LOC_HOME and never in the tree. The script
+# already handles an absent list correctly — it falls back to a generic list
+# that holds a maintainer's absolute home path, which is wrong for everybody,
+# and it says on stderr that it is doing so.
+#
+# THIS TARGET USED TO SKIP THE CHECK WHEN NO LIST WAS READABLE. A contributor
+# has no list, so `make build` on their machine ran no cleanliness check at all,
+# not even the generic one the script promises for exactly that case. The
+# script's promise was true of the script and false at the entry point most
+# people use, and the normal case for everyone but the maintainer was the
+# skipped one.
+#
+# The FAILURE is passed through on purpose: an `|| true` here would swallow a
+# real hit, and a guard that cannot fail is decoration.
+#
+# The exit CODE is not, and that is make's doing rather than a choice here.
+# `measured:` with a control — a recipe that merely runs `exit 1` also makes
+# make exit 2 — so make collapses any recipe failure into its own 2, and the
+# script's 1 (a word was found) cannot be told from its 2 (nothing could be
+# measured) at this entry point. Read the script's own output, or run it
+# directly, to tell them apart.
 clean-check:
-	@f="$${LOC_FORBIDDEN_FILE:-$${LOC_HOME:-$$HOME/.locutorium}/forbidden}"; \
-	if [ -r "$$f" ]; then bash conformance/check-clean.sh; \
-	else echo "check-clean: no private list on this machine; skipped"; fi
+	@bash conformance/check-clean.sh
