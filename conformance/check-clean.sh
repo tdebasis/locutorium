@@ -33,9 +33,10 @@
 # on the exit status.
 #
 # The script has two lanes and one pattern. The first lane reads the working
-# tree. The second lane reads the lines that the commits in origin/main..HEAD
-# add, because a word removed before the tip stays in the history. The comment
-# above that lane says why the range stops where it does.
+# tree. The second lane reads the commits in origin/main..HEAD: both the lines
+# they add, because a word removed before the tip stays in the history, and
+# their MESSAGES. The comment above that lane says why the range stops where it
+# does, and why the message half exists at all.
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -212,6 +213,33 @@ while IFS= read -r sha; do
 $(echo "$hits" | sed 's/^/    /')
 "
   fi
+
+  # THE MESSAGE, AND IT REACHES main MORE SURELY THAN THE CONTENT DOES.
+  # This repository squash-merges and sets squash_merge_commit_message to
+  # COMMIT_MESSAGES, so the squash commit's body is composed from the messages
+  # of the pull request's commits. An intermediate commit's CONTENT never
+  # reaches main under a squash. Its MESSAGE always does, and it cannot be
+  # edited afterwards on a protected branch.
+  #
+  # Collected first and matched second, for the same reason the diff is: the
+  # exit code read below has to belong to grep.
+  msg_rc=0
+  msg="$(git log -1 --format='%B' "$sha")" || msg_rc=$?
+  if [[ "$msg_rc" -ne 0 ]]; then
+    echo "check-clean: the message of commit $sha could not be read (exit $msg_rc); nothing was measured" >&2
+    exit 2
+  fi
+  msg_grep_rc=0
+  msg_hits="$(grep -inE -- "$pattern" <<<"$msg")" || msg_grep_rc=$?
+  if [[ "$msg_grep_rc" -ge 2 ]]; then
+    echo "check-clean: the message scan did not complete (grep exit $msg_grep_rc); nothing was measured" >&2
+    exit 2
+  fi
+  if [[ "$msg_grep_rc" -eq 0 ]]; then
+    commit_hits="${commit_hits}$(git log -1 --format='%h %s' "$sha") [COMMIT MESSAGE]
+$(echo "$msg_hits" | sed 's/^/    line /')
+"
+  fi
 done <<EOF
 $(git rev-list origin/main..HEAD)
 EOF
@@ -219,7 +247,7 @@ EOF
 if [[ -n "$commit_hits" ]]; then
   echo "check-clean: forbidden vocabulary added by a commit in origin/main..HEAD ($source_note):" >&2
   printf '%s' "$commit_hits" >&2
-  echo "check-clean: the tree is clean, so this word is only in the history. Amend or rebase the commit above." >&2
+  echo "check-clean: the tree is clean, so this word is only in the history or in a commit message. Amend or rebase the commit above." >&2
   exit 1
 fi
 
