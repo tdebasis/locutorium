@@ -62,8 +62,16 @@ type dialSite struct {
 // nats.go package, except those inside this package's own directory.
 //
 // It reads each file's IMPORT SPEC rather than assuming the alias. Every file
-// in this module spells it natsgo today; a file that spells it differently
-// tomorrow is still seen, which is the point of a guard.
+// in this module spells it natsgo today. Four spellings are covered and each
+// has an arm below: the package's own name, an alias, a DOT import, and the
+// same path imported under two names with the dial through either.
+//
+// WHAT IT CANNOT SEE, stated because a guard that overclaims is trusted past
+// its reach: it matches a CALL EXPRESSION. A dial reached through a function
+// value — natsgo.Connect assigned to a variable or passed as an argument, the
+// shape dialBroker in guard.go itself has — is invisible to it. Nothing in
+// this module does that outside the seam today, and this walker is not what
+// would catch it if something did.
 func findDialsOutsideTheSeam(root string) ([]dialSite, error) {
 	var found []dialSite
 	seam := filepath.Join("internal", "provider", "nats")
@@ -95,19 +103,29 @@ func findDialsOutsideTheSeam(root string) ([]dialSite, error) {
 			return parseErr
 		}
 
-		alias := ""
+		// EVERY NAME THE FILE GIVES THE PACKAGE, not the last one. One import
+		// block may name the same path twice, and a loop that assigns instead
+		// of collecting keeps only the later name — so a dial through the
+		// earlier one is invisible. That was this walker's own defect.
+		names := map[string]bool{}
+		dotImported := false
 		for _, imp := range file.Imports {
 			p, uErr := strconv.Unquote(imp.Path.Value)
 			if uErr != nil || p != natsImportPath {
 				continue
 			}
-			if imp.Name != nil {
-				alias = imp.Name.Name
-			} else {
-				alias = "nats" // the package's own name when it is not aliased
+			switch {
+			case imp.Name == nil:
+				names["nats"] = true // the package's own name
+			case imp.Name.Name == ".":
+				dotImported = true
+			case imp.Name.Name == "_":
+				// imported for effect; it cannot be dialled through
+			default:
+				names[imp.Name.Name] = true
 			}
 		}
-		if alias == "" || alias == "_" {
+		if len(names) == 0 && !dotImported {
 			return nil
 		}
 
@@ -116,12 +134,25 @@ func findDialsOutsideTheSeam(root string) ([]dialSite, error) {
 			if !ok {
 				return true
 			}
-			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok || sel.Sel.Name != "Connect" {
-				return true
-			}
-			ident, ok := sel.X.(*ast.Ident)
-			if !ok || ident.Name != alias {
+			switch fun := call.Fun.(type) {
+			case *ast.SelectorExpr:
+				if fun.Sel.Name != "Connect" {
+					return true
+				}
+				ident, ok := fun.X.(*ast.Ident)
+				if !ok || !names[ident.Name] {
+					return true
+				}
+			case *ast.Ident:
+				// A DOT IMPORT PUTS Connect IN THE FILE'S OWN SCOPE, so the
+				// call carries no qualifier at all. A local function of that
+				// name would match too. That is the safe direction: the answer
+				// to a false positive is a rename or a named exception, and
+				// the answer to a false negative is an incident.
+				if !dotImported || fun.Name != "Connect" {
+					return true
+				}
+			default:
 				return true
 			}
 			found = append(found, dialSite{
@@ -211,6 +242,19 @@ func TestTheSeamWalkerFindsAPlantedDial(t *testing.T) {
 			name: "an UNALIASED import is found, which the fixed-alias form would miss",
 			body: "package plant\n\nimport \"" + natsImportPath + "\"\n\n" +
 				"func dial() { _, _ = nats.Connect(\"nats://127.0.0.1:4222\") }\n",
+			want: 1,
+		},
+		{
+			name: "a DOT import is found, where the call carries no qualifier",
+			body: "package plant\n\nimport . \"" + natsImportPath + "\"\n\n" +
+				"func dial() { _, _ = Connect(\"nats://127.0.0.1:4222\") }\n",
+			want: 1,
+		},
+		{
+			name: "TWO NAMES for the path, dialled through the FIRST, is found",
+			body: "package plant\n\nimport (\n\tnatsgo \"" + natsImportPath + "\"\n\t" +
+				"other \"" + natsImportPath + "\"\n)\n\n" +
+				"func dial() { _, _ = natsgo.Connect(\"x\"); _ = other.Timeout }\n",
 			want: 1,
 		},
 		{
