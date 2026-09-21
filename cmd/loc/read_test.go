@@ -17,11 +17,10 @@ func TestMessagePlane_ReadDoesNotConsumeOnFailedRender(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, e1) // an agent reads its own queue
 	p.seedQueue(t, q1, "queue."+e1)
-	if err := p.admin.Publish("queue."+e1,
+	if _, err := p.adminJS.Publish("queue."+e1,
 		[]byte(`{"id":"m1","ts":"2026-01-14T09:00:00.000Z","from":"host","to":"workshop.scribe","kind":"msg","body":"loss-canary"}`)); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
-	_ = p.admin.Flush()
 
 	// A read that dies after one write must not have consumed what it never
 	// showed: consumption is an ack, and an ack is a delete.

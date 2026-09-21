@@ -280,11 +280,10 @@ func TestNoRaceBetweenASignalAndTheReadPath(t *testing.T) {
 	for i := 0; i < 24; i++ {
 		env := fmt.Sprintf(`{"id":"race-%02d","ts":"2026-01-14T09:00:00.000Z","from":"workshop.host",`+
 			`"to":"%s","kind":"msg","body":"race probe %02d"}`, i, e1, i)
-		if err := p.admin.Publish("queue."+e1, []byte(env)); err != nil {
+		if _, err := p.adminJS.Publish("queue."+e1, []byte(env)); err != nil {
 			t.Fatalf("publish: %v", err)
 		}
 	}
-	_ = p.admin.Flush()
 
 	original := readSignalExit
 	readSignalExit = func(os.Signal) {}
