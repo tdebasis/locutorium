@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.0.12](https://github.com/tdebasis/locutorium/compare/v0.0.11...v0.0.12) (2026-09-21)
+
+
+### Bug Fixes
+
+* **check-clean:** scan commit messages for forbidden vocabulary ([#195](https://github.com/tdebasis/locutorium/issues/195)) ([23700ec](https://github.com/tdebasis/locutorium/commit/23700ec29455d38f7e6ddcd37ca4f0914128d9b1)), closes [#185](https://github.com/tdebasis/locutorium/issues/185)
+* **check-clean:** scan file paths, and state the binary limit ([#199](https://github.com/tdebasis/locutorium/issues/199)) ([9a80b18](https://github.com/tdebasis/locutorium/commit/9a80b187f0af379acedc0ea1317010c2c756923f)), closes [#185](https://github.com/tdebasis/locutorium/issues/185)
+* **conformance:** make the callers honour the cleanliness gate ([#198](https://github.com/tdebasis/locutorium/issues/198)) ([d2b8bb2](https://github.com/tdebasis/locutorium/commit/d2b8bb2c41ccc3a894dfc8d216063de2063a0582)), closes [#186](https://github.com/tdebasis/locutorium/issues/186) [#197](https://github.com/tdebasis/locutorium/issues/197)
+
 ## [0.0.11](https://github.com/tdebasis/locutorium/compare/v0.0.10...v0.0.11) (2026-09-20)
 
 
