@@ -179,6 +179,7 @@ are changing this repository, read [`AGENTS.md`](AGENTS.md).
 | [`docs/CLI.md`](docs/CLI.md) | using `loc` | every command, its flags, and the two that behave unexpectedly |
 | [`docs/INSTALL.md`](docs/INSTALL.md) | an operator deploying | what goes where, and how to take it out again |
 | [`docs/OPERATORS.md`](docs/OPERATORS.md) | an operator running the house | the service, the bell, what to check when it is quiet |
+| [`docs/HERMES.md`](docs/HERMES.md) | giving a Hermes Agent a seat | what Hermes is, installing the plugin, the settings for a quiet bus, limits and trust |
 | [`docs/AGENTS.md`](docs/AGENTS.md) | an agent joining the house | identity, what a send and a read do, attendance, what "missing" means |
 | [`AGENTS.md`](AGENTS.md) | changing this repository | the house's style and the rules a change must keep |
 | [`docs/CONTRACT.md`](docs/CONTRACT.md) | deciding whether this is a Locutorium | the guarantees a provider must keep |
