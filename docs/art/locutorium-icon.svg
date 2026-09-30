@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Locutorium">
+  <!-- Locutorium icon for small sizes: the initial L and a speech mark on a parchment tile. -->
+  <rect width="512" height="512" rx="96" fill="#f3dca6"/>
+  <g transform="translate(-104 -116) scale(0.72)">
+    <path d="M251 235 H504 C478 245 451 262 451 300 V686 H590 C650 686 700 660 744 605 C730 650 722 700 716 757 H243 C275 745 297 725 297 690 V300 C297 262 277 245 251 235 Z"
+          fill="#0e4a6e" stroke="#0e1a20" stroke-width="30" stroke-linejoin="round"/>
+    <path d="M553 500 C540 455 575 432 610 434 C650 436 668 475 655 520 C642 565 610 595 573 607 C598 585 608 555 600 530 C580 535 560 522 553 500 Z"
+          fill="#d9a52b" stroke="#0e1a20" stroke-width="26" stroke-linejoin="round"/>
+  </g>
+</svg>
