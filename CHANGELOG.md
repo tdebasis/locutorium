@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.13](https://github.com/tdebasis/locutorium/compare/v0.0.12...v0.0.13) (2026-09-30)
+
+
+### Features
+
+* **integrations:** add a Hermes Agent platform plugin ([#207](https://github.com/tdebasis/locutorium/issues/207)) ([d529a0a](https://github.com/tdebasis/locutorium/commit/d529a0a5888d820d3c84a5432318b576f37a8737))
+* **mcp:** add a webhook listener type ([#205](https://github.com/tdebasis/locutorium/issues/205)) ([027a3fc](https://github.com/tdebasis/locutorium/commit/027a3fce6102316473f155a50d170b06e61bf9f0))
+
 ## [0.0.12](https://github.com/tdebasis/locutorium/compare/v0.0.11...v0.0.12) (2026-09-21)
 
 
