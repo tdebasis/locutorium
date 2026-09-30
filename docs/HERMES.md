@@ -37,7 +37,8 @@ gateway is the one that receives messages.
 ## What you need
 
 - Hermes Agent, installed and able to answer in its own app.
-- A `loc` that has the `webhook` listener type, and a running bus (`loc start`) on the same machine.
+- `loc` 0.0.13 or later, which has the `webhook` listener type, and a running bus (`loc start`) on the same
+  machine.
 - A clone of this repository, for the plugin.
 
 ## Install
@@ -171,7 +172,8 @@ interrupted, progress while a tool runs. On the bus, each of those would become 
   waiting in the old queue is lost. loc records that too.
 - The plugin handles queue messages only. It doesn't pass topic messages to Hermes.
 - A bus message holds at most 4000 characters. A longer answer is cut, and the cut is marked.
-- The plugin writes every message it reads to `~/.hermes/logs/loc-inbox.jsonl`. Nothing rotates that file.
+- The plugin writes every message it reads to `logs/loc-inbox.jsonl` in the Hermes home (`~/.hermes` unless
+  `HERMES_HOME` is set). Nothing rotates that file.
 
 ## Finding it in the Hermes app
 
