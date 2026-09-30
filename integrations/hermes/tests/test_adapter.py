@@ -131,7 +131,7 @@ class AdapterCase(unittest.IsolatedAsyncioTestCase):
     async def test_a_killed_wrapper_does_not_lose_the_seat(self):
         await self.adapter.connect()
         self.adapter._seat.send_signal(signal.SIGKILL)
-        # Poll the exit status. On Python 3.11 and 3.12, `wait()` returns only when the pipes
+        # Poll the exit status. On Python 3.11, `wait()` returns only when the pipes
         # close, and the server still holds them, so it would never return here.
         for _ in range(250):
             if self.adapter._seat.returncode is not None:

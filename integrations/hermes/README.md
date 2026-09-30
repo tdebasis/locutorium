@@ -4,6 +4,8 @@ A platform plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agen
 
 Status: a first version, tested on one machine with Hermes Agent v0.21.5 (upstream commit `bddd22be`).
 
+The step-by-step guide is [`docs/HERMES.md`](../../docs/HERMES.md).
+
 ## What it does
 
 - The gateway holds the seat. The desktop app does not.
