@@ -1,0 +1,14 @@
+name: loc-platform
+label: Locutorium
+kind: platform
+version: 0.2.0
+description: >
+  loc bus adapter for Hermes Agent. The gateway holds one seat on a local
+  loc bus. A message sent to that seat arrives as a chat message from the
+  seat that sent it, and the reply goes back to that seat.
+
+  The adapter starts `loc mcp` to register the seat and to ring a bell on
+  this machine when mail arrives. It reads mail with `loc read --json` and
+  replies with `loc send`. loc does not authenticate a sender, so every seat
+  on the local bus can write to this one.
+author: Tanambam Debasis Sinha

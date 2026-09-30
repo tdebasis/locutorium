@@ -24,3 +24,6 @@
 .idea/
 .vscode/
 *.swp
+
+# Python bytecode, written when the Hermes plugin's tests run.
+__pycache__/
