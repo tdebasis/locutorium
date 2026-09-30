@@ -131,7 +131,13 @@ class AdapterCase(unittest.IsolatedAsyncioTestCase):
     async def test_a_killed_wrapper_does_not_lose_the_seat(self):
         await self.adapter.connect()
         self.adapter._seat.send_signal(signal.SIGKILL)
-        await self.adapter._seat.wait()
+        # Poll the exit status. On Python 3.11 and 3.12, `wait()` returns only when the pipes
+        # close, and the server still holds them, so it would never return here.
+        for _ in range(250):
+            if self.adapter._seat.returncode is not None:
+                break
+            await asyncio.sleep(0.02)
+        self.assertIsNotNone(self.adapter._seat.returncode, "the wrapper did not exit after the kill")
         await asyncio.sleep(0.3)
         self.assertIsNone(self.adapter.fatal)
         self.assertTrue(os.path.exists(self.path("registered")), "the server left when only the wrapper died")

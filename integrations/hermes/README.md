@@ -2,7 +2,7 @@
 
 A platform plugin for [Hermes Agent](https://github.com/NousResearch/hermes-agent). It gives the Hermes gateway one seat on a local `loc` bus.
 
-Status: a first version, tested on one machine with Hermes Agent 0.21.5.
+Status: a first version, tested on one machine with Hermes Agent v0.21.5 (upstream commit `bddd22be`).
 
 ## What it does
 
@@ -23,7 +23,8 @@ Status: a first version, tested on one machine with Hermes Agent 0.21.5.
 6. When the gateway stops the platform, the adapter closes the input of the child.
    The child then leaves the bus, and loc frees the seat.
 
-The plugin needs a `loc` that has the `webhook` listener type (#201).
+The plugin needs a `loc` that has the `webhook` listener type
+([#201](https://github.com/tdebasis/locutorium/issues/201)).
 
 ## Install
 
@@ -58,10 +59,14 @@ The gateway decides this, as it does for every platform.
 - `LOC_ALLOWED_USERS` in the profile's `.env` is a list of seat names that need no approval.
 - `LOC_ALLOW_ALL_USERS=true` accepts every sender. Use it only for a test.
 
-To limit who the bot can send to, set `allowed_recipients` in `platforms.loc.extra` to a list of seat names.
-The adapter then refuses a send to any other seat. With no list, the bot can send to every seat.
+To limit where the adapter sends, set `allowed_recipients` in `platforms.loc.extra` to a list of seat names.
+The adapter then refuses a send to any other seat. With no list, the adapter sends to every seat.
 
-loc does not authenticate a sender. Any process on the machine can send as any seat, so these controls filter by name only.
+These controls bind the adapter. They do not bind the agent.
+loc does not authenticate a sender, so any process on the machine can run `loc` under the name of any seat.
+That process can send as the seat, and it can read the queue of the seat.
+An agent that has a terminal tool or a code tool is such a process: it can run `loc` itself, and the adapter does not see it.
+If the agent must not do that, remove those tools from the agent. Rules in the prompt of the agent are guidance only.
 
 A bus message is never a gateway command. The adapter marks every message as conversation,
 so a body that starts with `/` goes to the model as text.
@@ -93,6 +98,7 @@ platforms:
 
 ## Limits
 
+- The sender and recipient controls bind the adapter and not the agent. See "Who can talk to the bot".
 - Topics are not handled. `loc read` takes the topic messages too, and the adapter logs each one and does not pass it on.
 - `loc read` takes a message from the queue before Hermes has it. The adapter writes every message it read to
   `logs/loc-inbox.jsonl` in the Hermes home first, and it logs the id of each message that it does not pass on.

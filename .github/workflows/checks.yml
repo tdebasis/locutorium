@@ -67,7 +67,9 @@ jobs:
         # since it needs no Go toolchain or coverage profile to check itself.
         run: python3 .github/scripts/new-lines-coverage.py --self-test
       - name: hermes plugin tests
-        # Stand-ins for Hermes and for loc; they need neither installed.
+        # Stand-ins for Hermes and for loc; they need neither installed. The limit
+        # turns a hung test into a red check in minutes; the suite takes seconds.
+        timeout-minutes: 5
         run: python3 -m unittest discover -s integrations/hermes/tests -v
 
   go:
