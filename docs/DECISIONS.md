@@ -639,7 +639,9 @@ another.
 
 - **The bell stays on the local machine.** The address must be an `http` URL on `localhost` or a
   loopback IP address, with no user information. `subscribe` and `loc mcp` refuse any other address
-  before the seat registers. The notifier follows no redirect and uses no proxy.
+  before the seat registers. The notifier follows no redirect and uses no proxy. It also refuses
+  to connect to an address that is not loopback, so the rule holds for the address that the name
+  `localhost` resolves to.
 - **The request is not signed and carries no token.** This is deliberate. The local machine is the
   boundary, as it is for the broker in entry 12. Any local process can send the same request, and
   any local process can already use the broker. The bell is not for use between computers or across

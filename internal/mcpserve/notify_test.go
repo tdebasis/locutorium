@@ -1,6 +1,7 @@
 package mcpserve
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -541,8 +542,50 @@ func TestWebhook_ARedirectIsNotFollowed(t *testing.T) {
 	}
 }
 
-// THE ADDRESS MUST BE A LOOPBACK http URL. The rule is asked twice, before the
-// seat registers and again at every ring, and both askers are here.
+// THE RING ASKS THE RULE ITSELF. The receiver is on this machine and answers
+// 200, so a ring that skipped the rule would reach it and would ring. The case
+// below cannot show that: a ring to an address off the machine fails whether
+// or not the rule was asked.
+func TestWebhook_TheRingRefusesAnAddressTheRuleRefuses(t *testing.T) {
+	r := newReceiver(t, http.StatusOK, "")
+	withUser := strings.Replace(r.URL, "http://", "http://alice:hunter2@", 1)
+	err := newWebhookNotifier(func(string) {}).Ring("workshop.scribe", withUser, webhookBellLine, "")
+	if err == nil {
+		t.Errorf("a ring to an address with user information rang")
+	}
+	if got := r.hits.Load(); got != 0 {
+		t.Errorf("the receiver got %d requests, want 0", got)
+	}
+}
+
+// THE DIAL ASKS ABOUT THE ADDRESS, NOT THE NAME. `localhost` is a name a
+// resolver answers, so the client refuses a peer that is not loopback after
+// the name was resolved.
+func TestWebhook_TheDialRefusesAPeerThatIsNotLoopback(t *testing.T) {
+	for _, peer := range []string{"127.0.0.1:8644", "127.255.255.254:1", "[::1]:8644"} {
+		if err := loopbackPeer("tcp", peer, nil); err != nil {
+			t.Errorf("the loopback peer %q was refused: %v", peer, err)
+		}
+	}
+	for _, peer := range []string{"192.168.1.10:8644", "93.184.216.34:80", "0.0.0.0:80", "[::]:80", "[fe80::1%lo0]:80", "example.com:80", "nonsense"} {
+		if err := loopbackPeer("tcp", peer, nil); err == nil {
+			t.Errorf("the peer %q was accepted", peer)
+		}
+	}
+	// The notifier's own client carries the check.
+	tr, ok := newWebhookNotifier(func(string) {}).client.Transport.(*http.Transport)
+	if !ok || tr.DialContext == nil {
+		t.Fatal("the webhook client has no dial of its own")
+	}
+	if _, err := tr.DialContext(context.Background(), "tcp", "192.0.2.1:9"); err == nil ||
+		!strings.Contains(err.Error(), "not a loopback address") {
+		t.Errorf("a dial off this machine: err = %v, want the loopback refusal", err)
+	}
+}
+
+// THE ADDRESS MUST BE A LOOPBACK http URL. This case asks the rule as
+// `subscribe` and `loc mcp` ask it, before the seat registers. The ring asks
+// it again, and the case above holds that.
 func TestWebhook_AnAddressOffThisMachineIsRefused(t *testing.T) {
 	const password = "hunter2"
 	refused := map[string]string{

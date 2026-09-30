@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -370,8 +371,29 @@ func newWebhookNotifier(log func(string)) *webhookNotifier {
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		// No proxy from the environment: a proxy is another hop, and the
 		// loopback rule is about where the request goes.
-		Transport: &http.Transport{Proxy: nil},
+		Transport: &http.Transport{
+			Proxy:       nil,
+			DialContext: (&net.Dialer{Timeout: webhookTimeout, Control: loopbackPeer}).DialContext,
+		},
 	}}
+}
+
+// loopbackPeer refuses a dial whose peer is not a loopback address.
+//
+// THE RULE IN webhookURL IS ON THE NAME, AND THIS ONE IS ON THE ADDRESS. For an
+// IP literal the two are the same thing. `localhost` is a name, and it reaches
+// this machine only while the resolver says so. This is asked after the name
+// was resolved, of the address the connection is about to be made to, so the
+// request stays on this machine whatever the resolver answered.
+func loopbackPeer(_, address string, _ syscall.RawConn) error {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return fmt.Errorf("refusing to dial '%s': %v", address, err)
+	}
+	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("refusing to dial '%s': it is not a loopback address", host)
+	}
+	return nil
 }
 
 // webhookURL parses a webhook address and applies the loopback rule. The

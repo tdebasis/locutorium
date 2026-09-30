@@ -800,7 +800,8 @@ receiver maps the request to its own action; `loc` does not know what program re
   any other address before the seat registers.
 - **The request is not signed and carries no token.** The local machine is the boundary, as it is
   for the broker (`DECISIONS.md` §12). This bell is not for use between computers.
-- **The notifier follows no redirect and uses no proxy.** A redirect is a failed bell.
+- **The notifier follows no redirect and uses no proxy.** A redirect is a failed bell. The notifier
+  also refuses to connect to an address that is not loopback, whatever the name resolved to.
 - **The result comes from the status code.** A `2xx` status is a bell that rang. `429` and `503`
   mean that the receiver is busy; the bell is recorded as refused, and it tries again on the usual
   schedule. Any other status, a receiver that cannot be reached, and no answer in 5 seconds are a
