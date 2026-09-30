@@ -28,10 +28,32 @@ func TestCourierNameRefusesAnythingThatIsNotASeatName(t *testing.T) {
 
 	// CONTROL: the ordinary case still names the seat, or this test passes by
 	// refusing everything.
-	if got := courierName([]string{"workshop.scribe"}); got != "scribe" {
-		t.Errorf("courierName(workshop.scribe) = %q, want scribe", got)
+	if got := courierName([]string{"workshop.scribe"}); got != "workshop.scribe" {
+		t.Errorf("courierName(workshop.scribe) = %q, want workshop.scribe", got)
 	}
-	if got := courierName([]string{"workshop.scribe", "workshop.binder"}); got != "scribe+1" {
-		t.Errorf("two senders = %q, want scribe+1", got)
+	if got := courierName([]string{"workshop.scribe", "workshop.binder"}); got != "workshop.scribe+1" {
+		t.Errorf("two senders = %q, want workshop.scribe+1", got)
+	}
+}
+
+// THE BELL NAMES THE HOUSE, ALWAYS. Two houses on one bus can each have a seat
+// called scribe, and a line that said "from scribe" read the same for both. The
+// house is named every time, never only when it differs from the reader's: a
+// rule with two cases asks the reader to know which one they are in.
+func TestBellFromNamesTheSeatAndItsHouse(t *testing.T) {
+	cases := map[string]string{
+		"workshop.scribe":   "scribe of house workshop",
+		"workshop.scribe+2": "scribe of house workshop and 2 more",
+		"ada":               "ada",
+		"ada+1":             "ada and 1 more",
+	}
+	for courier, want := range cases {
+		if got := bellFrom(courier); got != want {
+			t.Errorf("bellFrom(%q) = %q, want %q", courier, got, want)
+		}
+	}
+	// Two seats of one name in two houses must not read alike.
+	if bellFrom("workshop.scribe") == bellFrom("library.scribe") {
+		t.Errorf("two houses' scribes read alike: %q", bellFrom("workshop.scribe"))
 	}
 }

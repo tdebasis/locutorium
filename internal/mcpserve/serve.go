@@ -127,7 +127,8 @@ const (
 // message is from — the one thing a reader looks for on arrival, which the line
 // answered with nothing. A tmux endpoint needs it HERE: it has no courier
 // session to name, so without it those panes read an anonymous count while
-// every other pane reads a sender.
+// every other pane reads a sender. The name is the seat and its house, "scribe
+// of house workshop" (bellFrom), because two houses can share one bus.
 const (
 	bellLine     = "🔔 %d new → read"
 	bellLineFrom = "🔔 %d new from %s → read"

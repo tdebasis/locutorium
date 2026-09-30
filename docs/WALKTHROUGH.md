@@ -104,10 +104,10 @@ line. The `tmux` notifier asks tmux whether the pane accepts input, types the li
 and presses Enter. The line is:
 
 ```
-🔔 1 new from ada → read
+🔔 1 new from ada of house house → read
 ```
 
-The bell carries a count and the sender's short name. It carries no body. A later try in the same
+The bell carries a count and the sender's name: the seat, then its house. Two houses can share one bus, and each can have an `ada`, so the house is always named. It carries no body. A later try in the same
 streak asks the broker for the count and names no sender, so it reads:
 
 ```
@@ -181,7 +181,7 @@ notifier each write a line per attempt:
 | line | what happened |
 |---|---|
 | `wake house.bob count=1` | the server handed the notifier one bell |
-| `nudge house.bob rang '🔔 1 new from ada → read'` | the notifier typed that line into the pane |
+| `nudge house.bob rang '🔔 1 new from ada of house house → read'` | the notifier typed that line into the pane |
 | `nudge house.bob refused: no pane address` | the seat registered with an empty address |
 | `nudge house.bob refused: pane_in_mode` | the pane is in copy mode, so somebody may be reading it |
 | `nudge house.bob refused: not a prompt` | the pane is not an agent's input box, and typing into a shell would execute the text |

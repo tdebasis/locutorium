@@ -301,7 +301,7 @@ func (b *bell) ring(n int, courier string) error {
 	// clothes.
 	line := fmt.Sprintf(bellLine, n)
 	if courier != defaultCourierName {
-		line = fmt.Sprintf(bellLineFrom, n, courier)
+		line = fmt.Sprintf(bellLineFrom, n, bellFrom(courier))
 	}
 	err := b.s.d.Notify.Ring(b.s.d.Endpoint, b.s.address, line, courier)
 	if errors.Is(err, ErrBusy) {
@@ -483,14 +483,16 @@ func (b *bell) giveBack(minute, hour int64) {
 // place the receiving pane shows who the message is from, so it carries the
 // sender (#124).
 //
-// One sender gives that seat's short name. Several give the first and a count
-// of the rest, because the label has room for one name and a bell that named
-// only the first would hide the others. None gives defaultCourierName.
+// One sender gives that seat's full endpoint, house and all: two houses on one
+// bus can each have a scribe, and a label of "scribe" alone reads the same for
+// both. Several give the first and a count of the rest, because the label has
+// room for one name and a bell that named only the first would hide the
+// others. None gives defaultCourierName.
 func courierName(senders []string) string {
 	if len(senders) == 0 {
 		return defaultCourierName
 	}
-	first := shortSeat(senders[0])
+	first := senders[0]
 	// THE WIRE VALUE IS NOT TRUSTED. `from` is written by the sending seat and
 	// this house holds that a sender field is forgeable, so it reaches argv
 	// only if it looks like a seat name. Unfiltered, a `from` of `-p` or
@@ -498,13 +500,36 @@ func courierName(senders []string) string {
 	// newline becomes a label carrying a line break. There is no shell on this
 	// path — the spawn is exec.Command with an argv — so this is flag smuggling
 	// rather than injection, and the remedy is the same: refuse the shape.
-	if !seatNameShape(first) {
+	// Both the whole endpoint and the seat's own part must have the shape: the
+	// whole is what reaches argv, and the part is what a house could smuggle a
+	// flag into behind a harmless-looking instance.
+	if !seatNameShape(first) || !seatNameShape(shortSeat(first)) {
 		return defaultCourierName
 	}
 	if len(senders) == 1 {
 		return first
 	}
 	return fmt.Sprintf("%s+%d", first, len(senders)-1)
+}
+
+// bellFrom is how the bell line says who wrote: the seat and then its house,
+// so workshop.scribe reads as "scribe of house workshop". The house is always
+// named, because a reader cannot tell from a bare "scribe" which of two houses
+// on the bus it means, and a bell that named the house only when it differed
+// would ask the reader to know which case they were in. A courier label for
+// several senders, "workshop.scribe+2", reads as "scribe of house workshop and
+// 2 more". An endpoint with no dot has no house to name.
+func bellFrom(courier string) string {
+	label, more := courier, ""
+	if i := strings.LastIndex(label, "+"); i >= 0 {
+		more = " and " + label[i+1:] + " more"
+		label = label[:i]
+	}
+	seat := shortSeat(label)
+	if i := strings.LastIndex(label, "."); i >= 0 {
+		return seat + " of house " + label[:i] + more
+	}
+	return seat + more
 }
 
 // seatNameShape reports whether s is safe to hand to a command line as a
@@ -527,8 +552,9 @@ func seatNameShape(s string) bool {
 }
 
 // shortSeat is the seat's own name out of an endpoint: the part after the last
-// dot, so workshop.scribe reads as scribe. An endpoint with no dot is
-// already the short name.
+// dot, so workshop.scribe gives scribe. An endpoint with no dot is already the
+// short name. The bell line and the courier label no longer show this name on
+// its own; bellFrom puts the house beside it.
 func shortSeat(endpoint string) string {
 	if i := strings.LastIndex(endpoint, "."); i >= 0 {
 		return endpoint[i+1:]

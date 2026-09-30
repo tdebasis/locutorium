@@ -789,7 +789,7 @@ is dropped and logged `rate-limited`. Nothing is lost, because the queue holds t
 every bell:
 
 ```json
-{"event_type": "loc.bell", "endpoint": "workshop.scribe", "bell": "🔔 1 new from alice → read"}
+{"event_type": "loc.bell", "endpoint": "workshop.scribe", "bell": "🔔 1 new from alice of house workshop → read"}
 ```
 
 The bell does not contain the message. The seat reads its queue with `read`, as every seat does. The

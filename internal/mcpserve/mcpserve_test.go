@@ -716,16 +716,16 @@ func TestBell_NamesTheCourierAfterTheSenders(t *testing.T) {
 	if !waitFor(3*time.Second, func() bool { return len(f.bells()) == 1 }) {
 		t.Fatalf("one arrival rang %v", f.bells())
 	}
-	if got := f.couriersRung()[0]; got != "scribe" {
-		t.Errorf("one sender named the courier %q; want scribe", got)
+	if got := f.couriersRung()[0]; got != "workshop.scribe" {
+		t.Errorf("one sender named the courier %q; want workshop.scribe", got)
 	}
 	// THE LINE NAMES THE SENDER TOO, and this assertion used to say the
 	// opposite. A tmux endpoint has no courier session to name, so naming the
 	// courier alone left those panes reading an anonymous count while every
 	// other pane saw a sender. A name is not a body: the line still carries the
 	// count and where to go, and never the message.
-	if got := f.bells()[0]; got != "🔔 1 new from scribe → read" {
-		t.Errorf("the bell said %q; want the count and the sender", got)
+	if got := f.bells()[0]; got != "🔔 1 new from scribe of house workshop → read" {
+		t.Errorf("the bell said %q; want the count, the sender and its house", got)
 	}
 
 	// TWO SENDERS GIVE THE FIRST AND A COUNT OF THE REST. The label holds one
@@ -735,8 +735,8 @@ func TestBell_NamesTheCourierAfterTheSenders(t *testing.T) {
 	if !waitFor(3*time.Second, func() bool { return len(f.bells()) == 2 }) {
 		t.Fatalf("two arrivals rang %v", f.bells())
 	}
-	if got := f.couriersRung()[1]; got != "binder+1" {
-		t.Errorf("two senders named the courier %q; want binder+1", got)
+	if got := f.couriersRung()[1]; got != "workshop.binder+1" {
+		t.Errorf("two senders named the courier %q; want workshop.binder+1", got)
 	}
 
 	// AND NO SENDER GIVES THE FALLBACK. This is the unparsable payload; the

@@ -249,8 +249,8 @@ func TestNotify_ClaudeNamesTheCourierAfterTheSender(t *testing.T) {
 		senders []string
 		want    string
 	}{
-		{"one sender is that seat", []string{"workshop.scribe"}, "scribe"},
-		{"two senders are the first and a count", []string{"workshop.binder", "workshop.warden"}, "binder+1"},
+		{"one sender is that seat, house and all", []string{"workshop.scribe"}, "workshop.scribe"},
+		{"two senders are the first and a count", []string{"workshop.binder", "workshop.warden"}, "workshop.binder+1"},
 		{"no sender is the fallback", nil, "loc-bell"},
 	}
 	for _, c := range cases {
