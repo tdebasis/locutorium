@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="150 157 718 683" role="img" aria-label="Locutorium">
+  <!-- Locutorium mark: an illuminated initial L with a speech mark, in a square frame. -->
+  <rect x="182" y="189" width="654" height="619" rx="6" fill="#f3dca6" stroke="#0e1a20" stroke-width="24"/>
+  <path d="M251 235 H504 C478 245 451 262 451 300 V686 H590 C650 686 700 660 744 605 C730 650 722 700 716 757 H243 C275 745 297 725 297 690 V300 C297 262 277 245 251 235 Z"
+        fill="#0e4a6e" stroke="#0e1a20" stroke-width="22" stroke-linejoin="round"/>
+  <path d="M553 500 C540 455 575 432 610 434 C650 436 668 475 655 520 C642 565 610 595 573 607 C598 585 608 555 600 530 C580 535 560 522 553 500 Z"
+        fill="#0e4a6e" stroke="#0e1a20" stroke-width="20" stroke-linejoin="round"/>
+  <rect x="705" y="215" width="100" height="100" rx="6" fill="#0e1a20"/>
+  <g fill="none" stroke="#d9a52b" stroke-width="9" stroke-linecap="round">
+    <ellipse cx="755" cy="265" rx="38" ry="14" transform="rotate(45 755 265)"/>
+    <ellipse cx="755" cy="265" rx="38" ry="14" transform="rotate(-45 755 265)"/>
+  </g>
+</svg>

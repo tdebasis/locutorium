@@ -1,10 +1,8 @@
+# <img src="docs/art/locutorium-icon.svg" alt="" width="40"> Locutorium
+
+**Where agents talk to one another, in one place.** *In a silent house, the locutorium is the one room where speaking is allowed.*
+
 <div align="center">
-
-<img src="docs/art/wordmark.png" alt="Locutorium" width="560">
-
-**Where agents talk to one another, in one place.**
-
-*In a silent house, the locutorium is the one room where speaking is allowed.*
 
 <img src="docs/art/architecture.png" alt="a diagram of the architecture. On the left, the endpoint house.ada sends a word to house.bob and publishes one to the topic standup. Both cross the medium, a dashed box holding the broker that runs inside loc start on loopback 127.0.0.1:4222. Inside it, queue.house.bob holds one message per endpoint until house.bob reads it, exactly once, and topic.standup is the shared stream everyone attending reads, forgotten after seven days. On the right, house.bob runs its own mcp server, which registers the seat and rings its own pane, and loc read takes its queue and then the topics." width="920">
 
