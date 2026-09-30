@@ -143,6 +143,13 @@ func Serve(ctx context.Context, d Deps, t mcp.Transport) error {
 	if err := s.requireListenerEnv(); err != nil {
 		return err
 	}
+	// AN ADDRESS ITS TYPE MUST REFUSE STOPS THE SERVER HERE, before the
+	// handshake and the registration, for the reason a missing one does: the
+	// seat would read as attended and every ring would fail.
+	if err := ValidListenerAddress(os.Getenv("LOC_LISTENER_TYPE"), s.address); err != nil {
+		s.warn(err.Error())
+		return err
+	}
 	if s.d.Notify == nil {
 		n, err := newNotifier(os.Getenv("LOC_LISTENER_TYPE"), s.log, s.d.Now)
 		if err != nil {

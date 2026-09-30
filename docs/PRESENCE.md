@@ -125,6 +125,10 @@ must be launched with `-n <name>` or the name drifts mid-session — the address
 that no longer answers to it. Ensuring that precondition holds is the deployment's responsibility,
 not this bus's; the measured detail is in `docs/CLI.md` §mcp.
 
+For a `webhook` listener type, the address is a loopback `http` URL. The seat's server sends the bell
+to that URL as one HTTP request. The deployment must keep a receiver at that URL. If no receiver
+answers, the bell fails and the message waits in the queue.
+
 The type is what lets everything downstream stay uniform: register once with it, and later events
 need not repeat it. It is also where per-agent allowances belong — a consumer that knows an agent
 type reports activity sparsely can widen the idle window for that type, with no special case in the

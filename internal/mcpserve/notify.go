@@ -1,8 +1,14 @@
 package mcpserve
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"regexp"
@@ -34,16 +40,17 @@ type Notifier interface {
 	Ring(endpoint, address, bell, courier string) error
 }
 
-// The three listener types. A deployment sets one of these in
+// The four listener types. A deployment sets one of these in
 // LOC_LISTENER_TYPE, and `subscribe` refuses anything else.
 const (
-	ListenerTmux   = "tmux"
-	ListenerClaude = "claude"
-	ListenerNone   = "none"
+	ListenerTmux    = "tmux"
+	ListenerClaude  = "claude"
+	ListenerWebhook = "webhook"
+	ListenerNone    = "none"
 )
 
 // ListenerTypes is the closed set, in the order a refusal names them.
-var ListenerTypes = []string{ListenerTmux, ListenerClaude, ListenerNone}
+var ListenerTypes = []string{ListenerTmux, ListenerClaude, ListenerWebhook, ListenerNone}
 
 // ValidListenerType reports whether a registered type has a notifier behind
 // it. A type with no notifier is refused at `subscribe`, because a seat
@@ -58,15 +65,34 @@ func ValidListenerType(t string) error {
 		t, strings.Join(ListenerTypes, ", "))
 }
 
+// ValidListenerAddress reports whether a type can use an address. It is asked
+// before a seat registers, by `subscribe` and by `loc mcp`, because a seat
+// registered with an address its bell must refuse would read as reachable and
+// every ring would fail.
+//
+// ONLY THE WEBHOOK TYPE HAS A RULE. A pane target and a pane id are opaque to
+// this binary until tmux or the runtime reads them, so the other types accept
+// any address here and their notifiers refuse an empty one at the ring.
+func ValidListenerAddress(listenerType, address string) error {
+	if listenerType != ListenerWebhook {
+		return nil
+	}
+	_, err := webhookURL(address)
+	return err
+}
+
 // ErrBusy marks a refusal that a LATER RING CAN REPAIR. The pane was in copy
 // mode, or it was not at an empty prompt. Both states say the seat is busy
 // right now, and both end on their own, so the bell asks again rather than
 // leaving the mail with nothing to announce it. A message waited 3m57s that
 // way.
 //
-// NOTHING ELSE WRAPS IT. A missing pane address, a tmux that cannot be read
-// and a courier that exited non-zero are all broken rather than busy, and
-// asking again repairs none of them.
+// The webhook notifier marks two answers the same way: 429 and 503 are a
+// receiver saying it cannot take the request now.
+//
+// NOTHING ELSE WRAPS IT. A missing pane address, a tmux that cannot be read,
+// a courier that exited non-zero and a receiver that cannot be reached are all
+// broken rather than busy, and asking again repairs none of them.
 var ErrBusy = errors.New("the seat is busy")
 
 // busyRefusal carries ErrBusy under a refusal WHOSE TEXT DOES NOT CHANGE. The
@@ -111,6 +137,8 @@ func newNotifier(listenerType string, log func(string), now func() time.Time) (N
 		return &tmuxNotifier{log: log}, nil
 	case ListenerClaude:
 		return &courierNotifier{log: log, now: now, last: map[string]time.Time{}}, nil
+	case ListenerWebhook:
+		return newWebhookNotifier(log), nil
 	default:
 		return silentNotifier{}, nil
 	}
@@ -297,6 +325,145 @@ func (n *courierNotifier) take(endpoint string) bool {
 }
 
 func (n *courierNotifier) fail(endpoint, reason string) error {
+	n.log(fmt.Sprintf("nudge %s BELL FAILED: %s", endpoint, reason))
+	return errors.New(reason)
+}
+
+// ---------------------------------------------------------------- webhook
+
+// webhookTimeout is how long the receiver has to answer. The bell is one
+// small request to this machine, and the bell loop waits on it, so a receiver
+// that holds the connection must not hold the loop.
+const webhookTimeout = 5 * time.Second
+
+// webhookEvent is the event_type of every bell. A receiver that takes several
+// kinds of request on one URL selects on it.
+const webhookEvent = "loc.bell"
+
+// webhookBell is the body of the request. It carries the seat and the bell
+// line and NEVER THE MESSAGE: the seat takes its mail through `read`, as every
+// seat does, so the bell gives a receiver nothing to act on except the fact
+// that mail arrived.
+type webhookBell struct {
+	EventType string `json:"event_type"`
+	Endpoint  string `json:"endpoint"`
+	Bell      string `json:"bell"`
+}
+
+// webhookNotifier sends the bell as one HTTP POST to the seat's address.
+//
+// THE REQUEST STAYS ON THIS MACHINE. The address must be a loopback URL, the
+// client follows no redirect, and it uses no proxy. The request is not signed
+// and carries no token, which is the broker's own posture on the loopback
+// listener (R12): the machine is the boundary. Nothing here is meant to reach
+// another computer.
+type webhookNotifier struct {
+	log    func(string)
+	client *http.Client
+}
+
+func newWebhookNotifier(log func(string)) *webhookNotifier {
+	return &webhookNotifier{log: log, client: &http.Client{
+		Timeout: webhookTimeout,
+		// A redirect can name another machine. The 3xx answer is returned as
+		// it is, and Ring records it as a failed bell.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		// No proxy from the environment: a proxy is another hop, and the
+		// loopback rule is about where the request goes.
+		Transport: &http.Transport{Proxy: nil},
+	}}
+}
+
+// webhookURL parses a webhook address and applies the loopback rule. The
+// refusals name the rule and the host and never the whole address, because an
+// address with user information in it holds a password.
+func webhookURL(address string) (*url.URL, error) {
+	if address == "" {
+		return nil, errors.New("invalid webhook address: it is empty")
+	}
+	u, err := url.Parse(address)
+	if err != nil {
+		return nil, errors.New("invalid webhook address: it is not a URL")
+	}
+	if u.Scheme != "http" {
+		return nil, fmt.Errorf("invalid webhook address: the scheme is '%s' and must be http", u.Scheme)
+	}
+	if u.User != nil {
+		return nil, errors.New("invalid webhook address: it must not carry user information")
+	}
+	host := u.Hostname()
+	if host == "" {
+		return nil, errors.New("invalid webhook address: it names no host")
+	}
+	if !loopbackHost(host) {
+		return nil, fmt.Errorf("invalid webhook address: host '%s' is not loopback, "+
+			"and the webhook bell stays on this machine", host)
+	}
+	return u, nil
+}
+
+// loopbackHost reports whether a host name reaches this machine and no other.
+// It is the rule `loc start` applies to the broker's own listener.
+func loopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// Ring posts the bell and reads the status, and nothing else, of the answer.
+//
+// 2xx rang. 429 and 503 are a receiver that is busy, marked ErrBusy so the
+// bell asks again. Every other answer, and no answer, is a failed bell.
+//
+// THE RESPONSE BODY IS NEVER RECORDED. The reason returned here reaches the
+// day's record and `loc transcript` prints it, and a receiver's error page is
+// the receiver's text and not this seat's. The status code is the whole of
+// what is kept. The transport's own error text is left out for the same
+// reason the bell leaves out a client's: it is written by another layer.
+func (n *webhookNotifier) Ring(endpoint, address, bell, _ string) error {
+	u, err := webhookURL(address)
+	if err != nil {
+		return n.fail(endpoint, err.Error())
+	}
+	body, err := json.Marshal(webhookBell{EventType: webhookEvent, Endpoint: endpoint, Bell: bell})
+	if err != nil {
+		return n.fail(endpoint, "webhook: the bell could not be encoded")
+	}
+	req, err := http.NewRequest(http.MethodPost, u.String(), bytes.NewReader(body))
+	if err != nil {
+		return n.fail(endpoint, "webhook: the request could not be built")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := n.client.Do(req)
+	if err != nil {
+		var ue *url.Error
+		if errors.As(err, &ue) && ue.Timeout() {
+			return n.fail(endpoint, fmt.Sprintf("webhook: no answer in %s", n.client.Timeout))
+		}
+		return n.fail(endpoint, "webhook: the receiver could not be reached")
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+
+	switch code := resp.StatusCode; {
+	case code >= 200 && code < 300:
+		n.log(fmt.Sprintf("nudge %s rang '%s'", endpoint, bell))
+		return nil
+	case code == http.StatusTooManyRequests || code == http.StatusServiceUnavailable:
+		return busyRefusal{n.refuse(endpoint, fmt.Sprintf("webhook status %d", code))}
+	default:
+		return n.fail(endpoint, fmt.Sprintf("webhook status %d", code))
+	}
+}
+
+func (n *webhookNotifier) refuse(endpoint, reason string) error {
+	n.log(fmt.Sprintf("nudge %s refused: %s", endpoint, reason))
+	return fmt.Errorf("refused: %s", reason)
+}
+
+func (n *webhookNotifier) fail(endpoint, reason string) error {
 	n.log(fmt.Sprintf("nudge %s BELL FAILED: %s", endpoint, reason))
 	return errors.New(reason)
 }

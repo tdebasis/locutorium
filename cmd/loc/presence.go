@@ -163,6 +163,10 @@ func subscribeVerb(args []string) error {
 	if err := mcpserve.ValidListenerType(agentType); err != nil {
 		return err
 	}
+	// The address is checked for the same reason, where its type has a rule.
+	if err := mcpserve.ValidListenerAddress(agentType, address); err != nil {
+		return err
+	}
 	pid, err := strconv.Atoi(pidArg)
 	if err != nil || pid <= 0 {
 		return fmt.Errorf("invalid --pid '%s': a process id is a positive number", pidArg)

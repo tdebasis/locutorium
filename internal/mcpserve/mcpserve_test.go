@@ -402,6 +402,33 @@ func TestServe_RefusesWithoutListenerEnv(t *testing.T) {
 	}
 }
 
+// AN ADDRESS ITS TYPE MUST REFUSE IS THE SAME REFUSAL. A webhook seat whose
+// address is off this machine would register, read as attended, and fail at
+// every ring, so the server stops where it stops for a missing address.
+func TestServe_RefusesAWebhookAddressOffThisMachine(t *testing.T) {
+	dir := home(t, "provider = none\n")
+	t.Setenv("LOC_LISTENER_TYPE", "webhook")
+	t.Setenv("LOC_LISTENER_ADDRESS", "http://example.com/hooks/bell")
+	f := &fake{}
+	serverT, _ := mcp.NewInMemoryTransports()
+	done := make(chan error, 1)
+	go func() { done <- Serve(context.Background(), f.deps(), serverT) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("the server started with a webhook address that is not loopback")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Serve did not return within 3s: it is serving instead of refusing")
+	}
+	if len(f.subscribed) != 0 {
+		t.Errorf("a refused server registered anyway: %v", f.subscribed)
+	}
+	if !strings.Contains(delivery(t, dir), "not loopback") {
+		t.Errorf("the refusal was not written to the delivery log: %q", delivery(t, dir))
+	}
+}
+
 // The seat is freed even when the medium has gone with the runtime. Bounded,
 // because nothing is waiting for us by then and a hang would be the worst of
 // the endings available.

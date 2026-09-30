@@ -84,7 +84,7 @@ bell reaches the seat:
   "LOC_LISTENER_ADDRESS": "<pane target>"}}}}
 ```
 
-`LOC_LISTENER_TYPE` is `tmux`, `claude` or `none`. The server refuses to start without both
+`LOC_LISTENER_TYPE` is `tmux`, `claude`, `webhook` or `none`. The server refuses to start without both
 listener variables.
 
 `docs/CLI.md` §mcp is what that server does and what a runtime configured in TOML wants instead.

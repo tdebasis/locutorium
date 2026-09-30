@@ -190,9 +190,10 @@ SERVER_PID="$(sed -n 1p "$LOC_HOME/run/loc.pid" 2>/dev/null)"
   # presence.<instance>, a family no stream captures, so the room may exist
   # first and the case below asserts that it stayed empty through all three.
   # THE TYPE IS none, BECAUSE THIS SUITE HAS NO BELL. A registered type picks
-  # the notifier that rings a seat, and the set is closed to tmux, claude and
-  # none. There is no pane here and no runtime to carry a courier, so a seat in
-  # this suite finds its mail on its next read, which is what none means.
+  # the notifier that rings a seat, and the set is closed to tmux, claude,
+  # webhook and none. There is no pane here, no runtime to carry a courier and
+  # no receiver to post to, so a seat in this suite finds its mail on its next
+  # read, which is what none means.
   for _s in $(ep alice) $(ep bob) $(ep carol); do
     LOC_IDENTITY=$_s "$LOC_BIN_DIR/loc" subscribe "$_s" \
       --pid $$ --type none --version 0 >/dev/null \

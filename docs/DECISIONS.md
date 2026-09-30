@@ -615,3 +615,44 @@ price of a bound. `loc status` shows the state on the seat's row while the mail 
 - There is no warning at send time. The bell for this message has not rung when `send` returns, so
   a send-time warning could report only the seat's previous streak.
 - The hourly breaker is unchanged. A ring it suppresses is a try with the result `suppressed`.
+
+---
+
+## 18. A webhook listener type, for a seat that receives HTTP requests
+
+**Context:** Entry 11 put the bell in the binary and gave it three listener types. Two of them ring:
+`tmux` types into a pane, and `claude` sends a courier through Claude Code. An agent runtime that
+is not in a tmux pane, and is not Claude Code, had to register as `none`. That seat was never told
+that mail arrived.
+
+Many agent runtimes and automation tools can receive an HTTP request and start work from it.
+
+**Decision:** There is a fourth listener type, `webhook` (2026-09-29). The address of the seat is a
+URL. To ring the bell, the seat's server sends one `POST` to that URL. The body is JSON with three
+fields: `event_type`, which is always `loc.bell`, the `endpoint`, and the `bell` line.
+
+**This changes entry 11, which says that there are three types.** Entry 11 is not rewritten. Its
+other decisions stand: the binary carries the bell, and there is no fallback from one notifier to
+another.
+
+**Consequences:**
+
+- **The bell stays on the local machine.** The address must be an `http` URL on `localhost` or a
+  loopback IP address, with no user information. `subscribe` and `loc mcp` refuse any other address
+  before the seat registers. The notifier follows no redirect and uses no proxy.
+- **The request is not signed and carries no token.** This is deliberate. The local machine is the
+  boundary, as it is for the broker in entry 12. Any local process can send the same request, and
+  any local process can already use the broker. The bell is not for use between computers or across
+  the internet. A signed request and a receiver on another machine are future scope.
+- **The bell does not contain the message.** A receiver learns that mail arrived and nothing else.
+  The seat reads its queue with `read`, so the message still has one reader and is taken once.
+- **The product does not know the receiver.** The body is fixed. The receiver maps it to its own
+  action. No receiver is named in the product.
+- **The status code is the result.** A `2xx` status is a bell that rang. `429` and `503` mean that
+  the receiver is busy, and they are recorded as `refused`, so the breaker is refunded and the
+  bell tries again under entry 17. Any other status, a receiver that cannot be reached, and no
+  answer in 5 seconds are recorded as `failed`.
+- **The record holds the status code only.** The response body is the receiver's text. It is never
+  written to the delivery log or to the day's record.
+- **A bell that rang is not a message that was read.** The receiver can accept the request and do
+  nothing. Entry 17 already covers this: while the seat has unread mail, the bell tries again.

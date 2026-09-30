@@ -65,7 +65,7 @@ It gives a JSON form and a TOML form. Copy the one your runtime reads, then fill
 from the table above. This page keeps no second copy of that block, so the two cannot drift apart.
 
 `LOC_LISTENER_TYPE` chooses the notifier that rings the seat. `tmux` types the bell into the pane.
-`claude` sends a one-shot courier. `none` rings nothing. This walkthrough uses `tmux`, because a
+`claude` sends a one-shot courier. `webhook` sends one HTTP request to a URL on the same machine. `none` rings nothing. This walkthrough uses `tmux`, because a
 pane waking is the thing to watch. Both listener variables are required, and the server refuses to
 start without them (`CLI.md` §mcp).
 

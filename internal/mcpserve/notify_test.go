@@ -1,12 +1,17 @@
 package mcpserve
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -340,7 +345,7 @@ func TestNotify_AnUnknownListenerTypeIsRefusedByName(t *testing.T) {
 	if err == nil {
 		t.Fatal("the retired name claude-courier was accepted")
 	}
-	for _, want := range []string{"claude-courier", "tmux", "claude", "none"} {
+	for _, want := range []string{"claude-courier", "tmux", "claude", "webhook", "none"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the refusal does not name %q: %s", want, err)
 		}
@@ -348,6 +353,241 @@ func TestNotify_AnUnknownListenerTypeIsRefusedByName(t *testing.T) {
 	for _, ok := range ListenerTypes {
 		if err := ValidListenerType(ok); err != nil {
 			t.Errorf("the valid type %q was refused: %v", ok, err)
+		}
+	}
+}
+
+// EVERY TYPE BUT `none` HAS A NOTIFIER OF ITS OWN. newNotifier ends in a
+// default that returns the silent one, so a type added to ListenerTypes and
+// not to the switch would register seats that read as reachable and ring
+// nothing. This is the case that fails when that happens.
+func TestNotify_EveryTypeButNoneHasItsOwnNotifier(t *testing.T) {
+	for _, typ := range ListenerTypes {
+		n, err := newNotifier(typ, func(string) {}, time.Now)
+		if err != nil {
+			t.Fatalf("newNotifier(%q): %v", typ, err)
+		}
+		_, silent := n.(silentNotifier)
+		if silent != (typ == ListenerNone) {
+			t.Errorf("type %q: silent notifier = %v", typ, silent)
+		}
+	}
+}
+
+// ---------------------------------------------------------------- webhook
+
+// receiver is a loopback HTTP server of this test's own, on a port the kernel
+// picks. It answers every request with one status and one body, and keeps
+// what it was sent.
+type receiver struct {
+	*httptest.Server
+	hits        atomic.Int32
+	method      string
+	contentType string
+	body        []byte
+}
+
+func newReceiver(t *testing.T, status int, answer string) *receiver {
+	t.Helper()
+	r := &receiver{}
+	r.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		r.hits.Add(1)
+		r.method = req.Method
+		r.contentType = req.Header.Get("Content-Type")
+		r.body, _ = io.ReadAll(req.Body)
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, answer)
+	}))
+	t.Cleanup(r.Close)
+	return r
+}
+
+const webhookBellLine = "🔔 1 new from alice → read"
+
+func TestWebhook_A2xxAnswerRingsAndTheBodyIsTheBell(t *testing.T) {
+	r := newReceiver(t, http.StatusAccepted, "")
+	rec := &recorder{}
+	n := newWebhookNotifier(rec.log)
+
+	if err := n.Ring("workshop.scribe", r.URL+"/hooks/bell", webhookBellLine, "alice"); err != nil {
+		t.Fatalf("Ring: %v", err)
+	}
+	if got := r.hits.Load(); got != 1 {
+		t.Fatalf("the receiver got %d requests, want 1", got)
+	}
+	if r.method != http.MethodPost {
+		t.Errorf("method = %q, want POST", r.method)
+	}
+	if r.contentType != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", r.contentType)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(r.body, &got); err != nil {
+		t.Fatalf("the body is not JSON: %v: %q", err, r.body)
+	}
+	want := map[string]string{"event_type": "loc.bell", "endpoint": "workshop.scribe", "bell": webhookBellLine}
+	if len(got) != len(want) {
+		t.Errorf("the body has %d fields, want %d: %q", len(got), len(want), r.body)
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("body[%q] = %q, want %q", k, got[k], v)
+		}
+	}
+	if !strings.Contains(rec.joined(), "nudge workshop.scribe rang") {
+		t.Errorf("the ring was not written to the delivery log: %q", rec.joined())
+	}
+}
+
+// 429 AND 503 ARE BUSY, and nothing else is. The mark is what makes the bell
+// refund its breaker and ask again, so a receiver that is broken must not
+// carry it.
+func TestWebhook_ABusyReceiverIsMarkedBusy(t *testing.T) {
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusServiceUnavailable} {
+		r := newReceiver(t, status, "")
+		rec := &recorder{}
+		err := newWebhookNotifier(rec.log).Ring("workshop.scribe", r.URL, webhookBellLine, "")
+		if !errors.Is(err, ErrBusy) {
+			t.Fatalf("status %d: err = %v, want ErrBusy", status, err)
+		}
+		want := fmt.Sprintf("refused: webhook status %d", status)
+		if err.Error() != want {
+			t.Errorf("status %d: reason = %q, want %q", status, err, want)
+		}
+		if !strings.Contains(rec.joined(), "nudge workshop.scribe "+want) {
+			t.Errorf("status %d: the refusal was not logged: %q", status, rec.joined())
+		}
+	}
+}
+
+// THE RECEIVER'S TEXT STAYS OUT OF THE RECORD. The reason reaches the day's
+// record and `loc transcript` prints it; the status code is all that is kept.
+func TestWebhook_AnErrorStatusFailsAndItsBodyIsNotRecorded(t *testing.T) {
+	const page = "RECEIVER-ERROR-PAGE-TEXT"
+	for _, status := range []int{http.StatusBadRequest, http.StatusUnauthorized, http.StatusNotFound, http.StatusInternalServerError} {
+		r := newReceiver(t, status, page)
+		rec := &recorder{}
+		err := newWebhookNotifier(rec.log).Ring("workshop.scribe", r.URL, webhookBellLine, "")
+		if err == nil {
+			t.Fatalf("status %d rang", status)
+		}
+		if errors.Is(err, ErrBusy) {
+			t.Errorf("status %d was marked busy: %v", status, err)
+		}
+		if want := fmt.Sprintf("webhook status %d", status); err.Error() != want {
+			t.Errorf("status %d: reason = %q, want %q", status, err, want)
+		}
+		if strings.Contains(err.Error(), page) || strings.Contains(rec.joined(), page) {
+			t.Errorf("status %d: the response body was recorded: %q / %q", status, err, rec.joined())
+		}
+		if !strings.Contains(rec.joined(), "BELL FAILED") {
+			t.Errorf("status %d: the failure was not logged: %q", status, rec.joined())
+		}
+	}
+}
+
+func TestWebhook_AReceiverThatIsDownFails(t *testing.T) {
+	r := newReceiver(t, http.StatusOK, "")
+	address := r.URL
+	r.Close() // the port is free again and nothing listens on it
+	rec := &recorder{}
+	err := newWebhookNotifier(rec.log).Ring("workshop.scribe", address, webhookBellLine, "")
+	if err == nil {
+		t.Fatal("a bell to a closed port rang")
+	}
+	if errors.Is(err, ErrBusy) {
+		t.Errorf("a receiver that is down was marked busy: %v", err)
+	}
+	if want := "webhook: the receiver could not be reached"; err.Error() != want {
+		t.Errorf("reason = %q, want %q", err, want)
+	}
+}
+
+func TestWebhook_ASlowReceiverFailsAtTheTimeout(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		<-release
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(release) }) // runs first: lets the handler return so Close can
+	n := newWebhookNotifier(func(string) {})
+	n.client.Timeout = 50 * time.Millisecond
+	err := n.Ring("workshop.scribe", srv.URL, webhookBellLine, "")
+	if err == nil {
+		t.Fatal("a receiver that never answered rang")
+	}
+	if errors.Is(err, ErrBusy) {
+		t.Errorf("a timeout was marked busy: %v", err)
+	}
+	if want := "webhook: no answer in 50ms"; err.Error() != want {
+		t.Errorf("reason = %q, want %q", err, want)
+	}
+}
+
+// A REDIRECT IS NOT FOLLOWED. It can name another machine, and the loopback
+// rule was applied to the address the seat registered and to nothing else.
+func TestWebhook_ARedirectIsNotFollowed(t *testing.T) {
+	target := newReceiver(t, http.StatusOK, "")
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		http.Redirect(w, req, target.URL, http.StatusFound)
+	}))
+	t.Cleanup(redirector.Close)
+	err := newWebhookNotifier(func(string) {}).Ring("workshop.scribe", redirector.URL, webhookBellLine, "")
+	if err == nil || err.Error() != "webhook status 302" {
+		t.Errorf("err = %v, want a failed bell with status 302", err)
+	}
+	if got := target.hits.Load(); got != 0 {
+		t.Errorf("the redirect was followed: the target got %d requests", got)
+	}
+}
+
+// THE ADDRESS MUST BE A LOOPBACK http URL. The rule is asked twice, before the
+// seat registers and again at every ring, and both askers are here.
+func TestWebhook_AnAddressOffThisMachineIsRefused(t *testing.T) {
+	const password = "hunter2"
+	refused := map[string]string{
+		"":                               "empty",
+		"127.0.0.1:8644":                 "not a URL",
+		"workshop:1.2":                   "must be http",
+		"https://127.0.0.1:8644/hooks":   "must be http",
+		"http:///hooks/bell":             "no host",
+		"http://example.com/hooks/bell":  "not loopback",
+		"http://192.168.1.10:8644/hooks": "not loopback",
+		"http://0.0.0.0:8644/hooks":      "not loopback",
+		"http://alice:" + password + "@127.0.0.1:8644/hooks": "user information",
+	}
+	for address, want := range refused {
+		err := ValidListenerAddress(ListenerWebhook, address)
+		if err == nil {
+			t.Errorf("address %q was accepted", address)
+			continue
+		}
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("address %q: the refusal does not say %q: %v", address, want, err)
+		}
+		if strings.Contains(err.Error(), password) {
+			t.Errorf("the refusal repeats the password: %v", err)
+		}
+		rec := &recorder{}
+		ringErr := newWebhookNotifier(rec.log).Ring("workshop.scribe", address, webhookBellLine, "")
+		if ringErr == nil || errors.Is(ringErr, ErrBusy) {
+			t.Errorf("address %q: Ring = %v, want a failed bell", address, ringErr)
+		}
+		if strings.Contains(rec.joined(), password) {
+			t.Errorf("the delivery log repeats the password: %q", rec.joined())
+		}
+	}
+	for _, address := range []string{
+		"http://127.0.0.1:8644/hooks/bell", "http://localhost:8644/hooks/bell", "http://[::1]:8644/hooks/bell",
+	} {
+		if err := ValidListenerAddress(ListenerWebhook, address); err != nil {
+			t.Errorf("the loopback address %q was refused: %v", address, err)
+		}
+	}
+	// The other types have no rule here: their addresses are opaque.
+	for _, typ := range []string{ListenerTmux, ListenerClaude, ListenerNone} {
+		if err := ValidListenerAddress(typ, "workshop:1.2"); err != nil {
+			t.Errorf("type %q refused an address: %v", typ, err)
 		}
 	}
 }
