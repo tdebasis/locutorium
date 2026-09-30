@@ -125,7 +125,8 @@ unknown name is refused before anything is sent.
   and no body. See `OPERATORS.md`.
 - **`loc send` puts the message in the queue and rings nothing.** The seat's own server is the one
   thing that notifies, through the notifier its registered type names: `tmux` types the bell into the
-  seat's pane, `claude` sends it through a one-shot courier, and `none` rings nothing at all — a seat
+  seat's pane, `claude` sends it through a one-shot courier, `webhook` sends it as one HTTP request
+  to a URL on the same machine, and `none` rings nothing at all — a seat
   registered as `none` finds its mail on its next `read`. A sender that rang as well would be a
   second bell for one message, and it is the one that knows least: it cannot coalesce, it is not
   capped, and it does not know what else is waiting for that seat.
@@ -718,13 +719,14 @@ Context Protocol. It does not return: it holds the seat for the life of the runt
 **Two environment variables are required, with no default:** `LOC_LISTENER_TYPE` — how this seat is
 reached — and `LOC_LISTENER_ADDRESS` — where to reach it. `loc mcp` never guesses at either.
 
-The type is a closed set of three, because it chooses the notifier that rings the seat. `subscribe`
-refuses any other value and names these three.
+The type is a closed set of four, because it chooses the notifier that rings the seat. `subscribe`
+refuses any other value and names these four.
 
 | type | what it does | what the address is |
 |---|---|---|
 | `tmux` | types the bell into the seat's pane and submits it | a tmux pane target, such as `%42` |
 | `claude` | runs a one-shot `claude -p` courier that delivers the bell with `SendMessage` | a tmux pane id the courier matches a session by |
+| `webhook` | sends the bell as one HTTP `POST` | a loopback `http` URL, such as `http://127.0.0.1:8644/hooks/bell` |
 | `none` | rings nothing; the seat finds its mail on the next `read` | unused, and still required |
 
 **Finding the address.** Run this inside the pane:
@@ -781,7 +783,33 @@ an agent's input box: typing into a pane that has dropped to a shell executes th
 written to the delivery log and the message waits in the queue.
 
 The `claude` notifier spawns at most one courier per seat per 30 seconds. A ring inside that window
-is dropped and logged `rate-limited`. Nothing is lost, because the queue holds the message. If one is empty or
+is dropped and logged `rate-limited`. Nothing is lost, because the queue holds the message.
+
+**The `webhook` notifier** sends one `POST` to the address. The body is JSON, and it is the same for
+every bell:
+
+```json
+{"event_type": "loc.bell", "endpoint": "workshop.scribe", "bell": "🔔 1 new from alice → read"}
+```
+
+The bell does not contain the message. The seat reads its queue with `read`, as every seat does. The
+receiver maps the request to its own action; `loc` does not know what program receives it.
+
+- **The address must stay on this machine.** It must be an `http` URL. Its host must be `localhost`
+  or a loopback IP address. It must not contain user information. `subscribe` and `loc mcp` refuse
+  any other address before the seat registers.
+- **The request is not signed and carries no token.** The local machine is the boundary, as it is
+  for the broker (`DECISIONS.md` §12). This bell is not for use between computers.
+- **The notifier follows no redirect and uses no proxy.** A redirect is a failed bell. The notifier
+  also refuses to connect to an address that is not loopback, whatever the name resolved to.
+- **The result comes from the status code.** A `2xx` status is a bell that rang. `429` and `503`
+  mean that the receiver is busy; the bell is recorded as refused, and it tries again on the usual
+  schedule. Any other status, a receiver that cannot be reached, and no answer in 5 seconds are a
+  failed bell. The message waits in the queue in every case.
+- **The record holds the status code only.** The response body is never written to the delivery log
+  or to the day's record.
+
+If one of the two variables is empty or
 unset, the server writes one line to stderr and one to the seat's delivery log, then exits 1 before
 touching the handshake or the registry — there is nothing to serve a seat as reachable through
 nowhere.

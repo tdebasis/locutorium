@@ -19,6 +19,7 @@ never means a particular deployment.
 | **wake** | the seat's `loc mcp` server rings the notifier that `LOC_LISTENER_TYPE` names | the knock on the door |
 | **bell** | one bell line; the addressee's own server rings it when mail lands in the queue. A topic publish rings nobody. | the bell; advisory, never load-bearing |
 | **courier** | the `claude` notifier: it starts one Claude session to carry the bell onto a seat's surface | the one who brings the note in |
+| **webhook** | the `webhook` notifier: it sends the bell as one HTTP request to a loopback URL that the seat registered | the bell rung through a door that a program opened |
 | **breaker** | `wake_breaker_per_minute` / `_per_hour`: caps wakes; suppression loses nothing | not knocking sixty times |
 | **try** | `wake_retry_seconds` / `wake_tries`: while mail is unread the bell tries again on a fixed gap, then stops. The end of a streak says how many tries rang | knocking again, then leaving the note |
 | **registry** | `loc registry`: every registered agent's whole record, read from the ledger on this machine. No broker, no identity, no health facts | the attendance book |

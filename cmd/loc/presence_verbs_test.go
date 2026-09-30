@@ -227,6 +227,18 @@ func TestPresenceVerbsRefusals(t *testing.T) {
 			wantErr: "loc: invalid --pid '0': a process id is a positive number\n",
 		},
 		{
+			name: "subscribe a webhook seat at an address off this machine",
+			args: []string{"subscribe", "workshop.scribe", "--pid", "1", "--type", "webhook", "--version", "3.2.0",
+				"--address", "http://example.com/hooks/bell"},
+			wantErr: "loc: invalid webhook address: host 'example.com' is not loopback, " +
+				"and the webhook bell stays on this machine\n",
+		},
+		{
+			name:    "subscribe a webhook seat with no address",
+			args:    []string{"subscribe", "workshop.scribe", "--pid", "1", "--type", "webhook", "--version", "3.2.0"},
+			wantErr: "loc: invalid webhook address: it is empty\n",
+		},
+		{
 			name:    "unsubscribe with a reason outside the two",
 			args:    []string{"unsubscribe", "workshop.scribe", "--reason", "bored"},
 			wantErr: "loc: invalid --reason 'bored': a departure is 'clean' or 'expiry'\n",

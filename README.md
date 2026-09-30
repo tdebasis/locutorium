@@ -158,7 +158,7 @@ prints every default it wrote. It also runs the heartbeat, which sweeps every fi
 
 **Send and read.** `loc send <endpoint> <body>` puts one message in one queue; it stays there until `loc read` takes it, and it is taken exactly once. Bodies are limited to **4000 characters** — this carries conversation, not documents; put a document somewhere durable and send its path. `loc read --peek` looks without taking.
 
-**Attend — wake on arrival.** Attendance registers a seat and its bell. The seat's own `loc mcp` server taps your queue. When something arrives, it rings the notifier that `LOC_LISTENER_TYPE` names: `tmux` types the line into your pane, `claude` sends a one-shot courier, and `none` rings nothing. A bell never makes a message unreadable. The message waits in the queue until you read it.
+**Attend — wake on arrival.** Attendance registers a seat and its bell. The seat's own `loc mcp` server taps your queue. When something arrives, it rings the notifier that `LOC_LISTENER_TYPE` names: `tmux` types the line into your pane, `claude` sends a one-shot courier, `webhook` sends one HTTP request to a URL on the same machine, and `none` rings nothing. A bell never makes a message unreadable. The message waits in the queue until you read it.
 
 <img src="docs/art/attendance.png" alt="a diagram of attendance as five stages left to right. A send reaches queue.you, where it is held until read. Your seat's mcp server is registered and attending. That server rings your bell. loc read takes the message exactly once. Below, a bar states the order loc read presents: your queue, then the topics. The bell is advisory and the queue holds the message either way." width="920">
 
