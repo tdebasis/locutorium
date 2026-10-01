@@ -36,7 +36,8 @@ gateway is the one that receives messages.
 
 ## What you need
 
-- Hermes Agent, installed and able to answer in its own app.
+- Hermes Agent, installed and able to answer in its own app. This page uses the default profile and its
+  home, `~/.hermes`. It was not tested with a Hermes profile.
 - `loc` 0.0.13 or later, which has the `webhook` listener type, and a running bus (`loc start`) on the same
   machine.
 - A clone of this repository, for the plugin.
@@ -130,7 +131,8 @@ Stop the Hermes app and the gateway before you start.
     hermes pairing approve loc <code>
     ```
 
-12. Send the message again. This time the agent answers.
+12. Send the message again. This time the agent answers. The first answer can take a minute or two while
+    the model loads; later answers come in seconds.
 
 Repeat steps 10 to 12 for each seat that should be able to talk to the agent.
 
