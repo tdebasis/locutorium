@@ -750,6 +750,31 @@ func TestBell_NamesTheCourierAfterTheSenders(t *testing.T) {
 	}
 }
 
+// A LONG NAME KEEPS ITS SENDER, THROUGH THE RING. The helpers are covered in
+// bell_test.go; this goes through serve and the recording notifier, because
+// the half of the rule that lives in ring (the line is built from the phrase,
+// never gated on the label) is invisible to a test of the helpers alone.
+func TestBell_ALongNameStillRingsWithItsSender(t *testing.T) {
+	home(t, "provider = none\nwake_window_seconds = 1\n")
+	f := &fake{}
+	sess, done := serve(t, f.deps())
+	defer stop(t, sess, done)
+	f.ready(t)
+
+	long := "lab." + strings.Repeat("x", 33) // 37 characters: too long for the label, and so is its seat part
+	f.ringFrom(long)
+	if !waitFor(3*time.Second, func() bool { return len(f.bells()) == 1 }) {
+		t.Fatalf("one arrival rang %v", f.bells())
+	}
+	if got := f.couriersRung()[0]; got != defaultCourierName {
+		t.Errorf("a name past the label cap named the courier %q; want %q", got, defaultCourierName)
+	}
+	want := "🔔 1 new from " + strings.Repeat("x", 33) + " of house lab → read"
+	if got := f.bells()[0]; got != want {
+		t.Errorf("the bell said %q; want %q", got, want)
+	}
+}
+
 // The backlog path asks the broker how much mail is waiting and never who sent
 // it, so it can name no seat.
 func TestBell_ABacklogNamesNoSender(t *testing.T) {
