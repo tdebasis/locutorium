@@ -37,8 +37,7 @@ gateway is the one that receives messages.
 ## What you need
 
 - Hermes Agent, installed and able to answer in its own app. This page uses the default profile and its
-  home, `~/.hermes`. If you set `HERMES_HOME`, use that folder wherever this page says `~/.hermes`. A Hermes
-  profile does not run a gateway of its own; `hermes gateway run` for a profile stops and prints the options.
+  home, `~/.hermes`. It was not tested with a Hermes profile.
 - `loc` 0.0.13 or later, which has the `webhook` listener type, and a running bus (`loc start`) on the same
   machine.
 - A clone of this repository, for the plugin.
