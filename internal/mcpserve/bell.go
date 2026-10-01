@@ -261,14 +261,14 @@ func (b *bell) fire() {
 	if stopped || n <= 0 {
 		return
 	}
-	b.try(n, courierName(senders))
+	b.try(n, courierName(senders), bellFrom(senders))
 }
 
 // ring hands the notifier one line for n, and reports what came back: nil
 // means the pane took it, errSuppressed means the breaker refused it, an
 // error wrapping ErrBusy means the seat is busy, and anything else means the
 // bell is broken. Called with the lock free.
-func (b *bell) ring(n int, courier string) error {
+func (b *bell) ring(n int, courier, from string) error {
 	b.mu.Lock()
 	if b.stopped {
 		b.mu.Unlock()
@@ -298,10 +298,11 @@ func (b *bell) ring(n int, courier string) error {
 	// The line names the sender whenever the name survived the shape check. A
 	// backlog, or a name that did not, falls back to the count alone rather than
 	// printing a placeholder: "from loc-bell" would be noise wearing a fact's
-	// clothes.
+	// clothes. The phrase and the courier label are computed apart, because a
+	// label has a length cap the line does not need (bellFrom).
 	line := fmt.Sprintf(bellLine, n)
-	if courier != defaultCourierName {
-		line = fmt.Sprintf(bellLineFrom, n, bellFrom(courier))
+	if from != "" {
+		line = fmt.Sprintf(bellLineFrom, n, from)
 	}
 	err := b.s.d.Notify.Ring(b.s.d.Endpoint, b.s.address, line, courier)
 	if errors.Is(err, ErrBusy) {
@@ -318,8 +319,8 @@ func (b *bell) ring(n int, courier string) error {
 }
 
 // try makes ONE TRY: it rings, and it hands the outcome to counted.
-func (b *bell) try(n int, courier string) {
-	result, reason := outcome(b.ring(n, courier))
+func (b *bell) try(n int, courier, from string) {
+	result, reason := outcome(b.ring(n, courier, from))
 	b.counted(n, result, reason)
 }
 
@@ -443,7 +444,7 @@ func (b *bell) again() {
 
 	// A later try asks the broker how much mail is waiting and never who sent
 	// it, so it names no seat, exactly as the backlog path does.
-	b.try(n, defaultCourierName)
+	b.try(n, defaultCourierName, "")
 }
 
 // endStreak closes a streak that ended without a give-up.
@@ -485,14 +486,19 @@ func (b *bell) giveBack(minute, hour int64) {
 //
 // One sender gives that seat's full endpoint, house and all: two houses on one
 // bus can each have a scribe, and a label of "scribe" alone reads the same for
-// both. Several give the first and a count of the rest, because the label has
-// room for one name and a bell that named only the first would hide the
-// others. None gives defaultCourierName.
+// both. The label has a length cap, and an endpoint has none, so a full name
+// that does not fit falls back to the seat's own part, which is what the label
+// carried before the house joined it. Several give the first and a count of
+// the rest, because the label has room for one name and a bell that named
+// only the first would hide the others. None gives defaultCourierName.
 func courierName(senders []string) string {
 	if len(senders) == 0 {
 		return defaultCourierName
 	}
 	first := senders[0]
+	if !seatNameShape(first) && seatNameShape(shortSeat(first)) {
+		first = shortSeat(first)
+	}
 	// THE WIRE VALUE IS NOT TRUSTED. `from` is written by the sending seat and
 	// this house holds that a sender field is forgeable, so it reaches argv
 	// only if it looks like a seat name. Unfiltered, a `from` of `-p` or
@@ -516,28 +522,48 @@ func courierName(senders []string) string {
 // so workshop.scribe reads as "scribe of house workshop". The house is always
 // named, because a reader cannot tell from a bare "scribe" which of two houses
 // on the bus it means, and a bell that named the house only when it differed
-// would ask the reader to know which case they were in. A courier label for
-// several senders, "workshop.scribe+2", reads as "scribe of house workshop and
-// 2 more". An endpoint with no dot has no house to name.
-func bellFrom(courier string) string {
-	label, more := courier, ""
-	if i := strings.LastIndex(label, "+"); i >= 0 {
-		more = " and " + label[i+1:] + " more"
-		label = label[:i]
+// would ask the reader to know which case they were in. Several senders read
+// as the first "and 2 more". An endpoint with no dot has no house to name.
+//
+// THE LINE IS NOT THE LABEL. The courier label goes on a command line and is
+// capped at 32 characters; this phrase is typed into a pane, and an endpoint
+// has no length limit, so the phrase takes its own cap. A sender whose name
+// fails the shape gives "", and the line falls back to the count alone.
+func bellFrom(senders []string) string {
+	if len(senders) == 0 {
+		return ""
 	}
-	seat := shortSeat(label)
-	if i := strings.LastIndex(label, "."); i >= 0 {
-		return seat + " of house " + label[:i] + more
+	first := senders[0]
+	if !nameShape(first, bellFromMaxChars) || !nameShape(shortSeat(first), bellFromMaxChars) {
+		return ""
+	}
+	more := ""
+	if len(senders) > 1 {
+		more = fmt.Sprintf(" and %d more", len(senders)-1)
+	}
+	seat := shortSeat(first)
+	if i := strings.LastIndex(first, "."); i >= 0 {
+		return seat + " of house " + first[:i] + more
 	}
 	return seat + more
 }
+
+// bellFromMaxChars caps the sender's name in the bell line. A pane line is read
+// by a person, and a name past this is not a name a person reads.
+const bellFromMaxChars = 200
 
 // seatNameShape reports whether s is safe to hand to a command line as a
 // display name: letters, digits, dot, underscore and hyphen, and never leading
 // with a hyphen, which is what makes a word a flag. The cap is deliberate —
 // a label is read by a person in a prompt box, not parsed.
 func seatNameShape(s string) bool {
-	if s == "" || len(s) > 32 || s[0] == '-' {
+	return nameShape(s, 32)
+}
+
+// nameShape is seatNameShape with the cap as an argument, because the bell
+// line and the courier label need the same characters and different lengths.
+func nameShape(s string, maxChars int) bool {
+	if s == "" || len(s) > maxChars || s[0] == '-' {
 		return false
 	}
 	for _, r := range s {

@@ -41,19 +41,51 @@ func TestCourierNameRefusesAnythingThatIsNotASeatName(t *testing.T) {
 // house is named every time, never only when it differs from the reader's: a
 // rule with two cases asks the reader to know which one they are in.
 func TestBellFromNamesTheSeatAndItsHouse(t *testing.T) {
-	cases := map[string]string{
-		"workshop.scribe":   "scribe of house workshop",
-		"workshop.scribe+2": "scribe of house workshop and 2 more",
-		"ada":               "ada",
-		"ada+1":             "ada and 1 more",
+	cases := []struct {
+		senders []string
+		want    string
+	}{
+		{[]string{"workshop.scribe"}, "scribe of house workshop"},
+		{[]string{"workshop.scribe", "workshop.binder", "workshop.warden"}, "scribe of house workshop and 2 more"},
+		{[]string{"ada"}, "ada"},
+		{[]string{"ada", "bob"}, "ada and 1 more"},
+		{nil, ""},
+		{[]string{"workshop.-p"}, ""},
+		{[]string{"workshop.scribe\nsecond line"}, ""},
 	}
-	for courier, want := range cases {
-		if got := bellFrom(courier); got != want {
-			t.Errorf("bellFrom(%q) = %q, want %q", courier, got, want)
+	for _, c := range cases {
+		if got := bellFrom(c.senders); got != c.want {
+			t.Errorf("bellFrom(%q) = %q, want %q", c.senders, got, c.want)
 		}
 	}
 	// Two seats of one name in two houses must not read alike.
-	if bellFrom("workshop.scribe") == bellFrom("library.scribe") {
-		t.Errorf("two houses' scribes read alike: %q", bellFrom("workshop.scribe"))
+	if bellFrom([]string{"workshop.scribe"}) == bellFrom([]string{"library.scribe"}) {
+		t.Errorf("two houses' scribes read alike: %q", bellFrom([]string{"workshop.scribe"}))
+	}
+}
+
+// A LONG NAME KEEPS ITS SENDER. The courier label is capped at 32 characters
+// and an endpoint is not, so a full name that does not fit the label must not
+// cost the bell its sender: the line still names seat and house, and the label
+// falls back to the seat's own part, which is what it carried before.
+func TestBellLongNamesKeepTheirSender(t *testing.T) {
+	long := "research-lab.literature-reviewer-x" // 34 characters
+	if len(long) <= 32 {
+		t.Fatalf("the fixture must be longer than the label cap; got %d", len(long))
+	}
+	if got, want := bellFrom([]string{long}), "literature-reviewer-x of house research-lab"; got != want {
+		t.Errorf("bellFrom(%q) = %q, want %q", long, got, want)
+	}
+	if got := courierName([]string{long}); got != "literature-reviewer-x" {
+		t.Errorf("courierName(%q) = %q, want the seat's own part", long, got)
+	}
+	// When even the seat's own part does not fit, the label falls back and the
+	// line still names the sender.
+	longer := "lab." + strings.Repeat("x", 33)
+	if got := courierName([]string{longer}); got != defaultCourierName {
+		t.Errorf("courierName(%q) = %q, want %q", longer, got, defaultCourierName)
+	}
+	if got := bellFrom([]string{longer}); got == "" {
+		t.Errorf("bellFrom(%q) = \"\"; the line must still name the sender", longer)
 	}
 }
