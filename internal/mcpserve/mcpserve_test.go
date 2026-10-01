@@ -716,16 +716,16 @@ func TestBell_NamesTheCourierAfterTheSenders(t *testing.T) {
 	if !waitFor(3*time.Second, func() bool { return len(f.bells()) == 1 }) {
 		t.Fatalf("one arrival rang %v", f.bells())
 	}
-	if got := f.couriersRung()[0]; got != "scribe" {
-		t.Errorf("one sender named the courier %q; want scribe", got)
+	if got := f.couriersRung()[0]; got != "workshop.scribe" {
+		t.Errorf("one sender named the courier %q; want workshop.scribe", got)
 	}
 	// THE LINE NAMES THE SENDER TOO, and this assertion used to say the
 	// opposite. A tmux endpoint has no courier session to name, so naming the
 	// courier alone left those panes reading an anonymous count while every
 	// other pane saw a sender. A name is not a body: the line still carries the
 	// count and where to go, and never the message.
-	if got := f.bells()[0]; got != "🔔 1 new from scribe → read" {
-		t.Errorf("the bell said %q; want the count and the sender", got)
+	if got := f.bells()[0]; got != "🔔 1 new from scribe of house workshop → read" {
+		t.Errorf("the bell said %q; want the count, the sender and its house", got)
 	}
 
 	// TWO SENDERS GIVE THE FIRST AND A COUNT OF THE REST. The label holds one
@@ -735,8 +735,8 @@ func TestBell_NamesTheCourierAfterTheSenders(t *testing.T) {
 	if !waitFor(3*time.Second, func() bool { return len(f.bells()) == 2 }) {
 		t.Fatalf("two arrivals rang %v", f.bells())
 	}
-	if got := f.couriersRung()[1]; got != "binder+1" {
-		t.Errorf("two senders named the courier %q; want binder+1", got)
+	if got := f.couriersRung()[1]; got != "workshop.binder+1" {
+		t.Errorf("two senders named the courier %q; want workshop.binder+1", got)
 	}
 
 	// AND NO SENDER GIVES THE FALLBACK. This is the unparsable payload; the
@@ -747,6 +747,31 @@ func TestBell_NamesTheCourierAfterTheSenders(t *testing.T) {
 	}
 	if got := f.couriersRung()[2]; got != "loc-bell" {
 		t.Errorf("an arrival with no sender named the courier %q; want loc-bell", got)
+	}
+}
+
+// A LONG NAME KEEPS ITS SENDER, THROUGH THE RING. The helpers are covered in
+// bell_test.go; this goes through serve and the recording notifier, because
+// the half of the rule that lives in ring (the line is built from the phrase,
+// never gated on the label) is invisible to a test of the helpers alone.
+func TestBell_ALongNameStillRingsWithItsSender(t *testing.T) {
+	home(t, "provider = none\nwake_window_seconds = 1\n")
+	f := &fake{}
+	sess, done := serve(t, f.deps())
+	defer stop(t, sess, done)
+	f.ready(t)
+
+	long := "lab." + strings.Repeat("x", 33) // 37 characters: too long for the label, and so is its seat part
+	f.ringFrom(long)
+	if !waitFor(3*time.Second, func() bool { return len(f.bells()) == 1 }) {
+		t.Fatalf("one arrival rang %v", f.bells())
+	}
+	if got := f.couriersRung()[0]; got != defaultCourierName {
+		t.Errorf("a name past the label cap named the courier %q; want %q", got, defaultCourierName)
+	}
+	want := "🔔 1 new from " + strings.Repeat("x", 33) + " of house lab → read"
+	if got := f.bells()[0]; got != want {
+		t.Errorf("the bell said %q; want %q", got, want)
 	}
 }
 
