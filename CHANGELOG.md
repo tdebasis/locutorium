@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.14](https://github.com/tdebasis/locutorium/compare/v0.0.13...v0.0.14) (2026-10-01)
+
+
+### Features
+
+* **mcp:** name the sender's house in the bell ([#211](https://github.com/tdebasis/locutorium/issues/211)) ([be409ac](https://github.com/tdebasis/locutorium/commit/be409ac6a56a752a8a49d152d17bffec5545942b))
+
 ## [0.0.13](https://github.com/tdebasis/locutorium/compare/v0.0.12...v0.0.13) (2026-09-30)
 
 
