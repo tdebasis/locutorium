@@ -25,6 +25,9 @@ your own checkout is not touched. `--main` builds this checkout's `HEAD`. With n
 | bash ≥ 3.2 | the installer and the suite (macOS ships 3.2; that is the floor) | — |
 | `nats` | the conformance suite asserts stream state through the NATS CLI; `loc` itself speaks the protocol and never runs it | `brew install nats-io/nats-tools/nats` |
 
+The build needs Go 1.27 or newer. If an older `go` (1.21 or newer) is installed, the `go` command
+downloads Go 1.27 automatically.
+
 The broker is embedded in the binary, so no server package is needed. `loc start` runs it and
 `loc stop` ends it. `loc start` also runs the heartbeat, which sweeps every five minutes.
 

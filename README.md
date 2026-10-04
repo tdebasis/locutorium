@@ -117,7 +117,8 @@ through `loc mcp`, a stdio MCP server the agent runtime launches and ends.
 
 Dependencies: `python3`, and for the conformance suite the `nats` CLI
 (`brew install nats-io/nats-tools/nats`). The broker is embedded in the binary, so no server package
-is needed. For the Go build only: `go` and `make` (`brew install go`).
+is needed. For the Go build only: `go` and `make` (`brew install go`). The build needs Go 1.27 or
+newer. If an older `go` (1.21 or newer) is installed, the `go` command downloads Go 1.27 automatically.
 
 <details>
 <summary><b>First deployment</b> — two lines</summary>
