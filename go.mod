@@ -1,6 +1,6 @@
 module github.com/tdebasis/locutorium
 
-go 1.25.0
+go 1.27
 
 require (
 	github.com/modelcontextprotocol/go-sdk v1.7.0
