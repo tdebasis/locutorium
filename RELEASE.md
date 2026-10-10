@@ -57,7 +57,9 @@ how the project is built or released.
 
 Every action in `.github/workflows/` is pinned to a full commit SHA, with its version in a comment
 after it. A tag such as `v4` can be moved to other code; a commit SHA cannot. To update an action,
-change the SHA and the comment together, and take the SHA from the action's own repository.
+change the SHA and the comment together. Take the SHA of the commit the tag points to, from the
+action's own repository: `git ls-remote <repository> 'refs/tags/<tag>^{}'` gives it for an annotated
+tag, and `refs/tags/<tag>` for a lightweight one. An annotated tag's own object is not a commit.
 
 ## The token
 
