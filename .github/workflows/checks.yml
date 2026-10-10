@@ -271,7 +271,9 @@ jobs:
       # (updated in place each push), never an agent. Only on a pull request,
       # where there is a conversation to comment on.
       - name: comment coverage on the pull request
-        if: github.event_name == 'pull_request' && steps.probe.outputs.present == 'true'
+        # A pull request opened by Dependabot runs with a read-only token, so the
+        # comment cannot be posted; the coverage is still on the run summary.
+        if: github.event_name == 'pull_request' && steps.probe.outputs.present == 'true' && github.actor != 'dependabot[bot]'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
           COVERAGE_TITLE: 'Go coverage'
