@@ -1,0 +1,7 @@
+# A change to these files changes how the project is built or released.
+/.github/workflows/            @tdebasis
+/.github/CODEOWNERS            @tdebasis
+/release-please-config.json    @tdebasis
+/.release-please-manifest.json @tdebasis
+/install.sh                    @tdebasis
+/.github/dependabot.yml        @tdebasis

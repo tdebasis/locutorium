@@ -44,6 +44,23 @@ A merge commit hides the title and gives the tool the branch commits instead.
 A Release PR needs no code review. The tool writes every line of it. Read the version number and
 the changelog section, then merge.
 
+Branch protection requires no approving review. The project has one maintainer account, and GitHub
+does not let the author of a pull request approve it, so a required approval would block every
+merge. Each pull request is reviewed before the maintainer merges it, but that review is not a
+GitHub approval.
+
+`.github/CODEOWNERS` names the maintainer as the owner of the workflows, the release configuration
+and `install.sh`. It does not block a merge on its own. It marks the files where a change alters
+how the project is built or released.
+
+## Workflow actions
+
+Every action in `.github/workflows/` is pinned to a full commit SHA, with its version in a comment
+after it. A tag such as `v4` can be moved to other code; a commit SHA cannot. To update an action,
+change the SHA and the comment together. Take the SHA of the commit the tag points to, from the
+action's own repository: `git ls-remote <repository> 'refs/tags/<tag>^{}'` gives it for an annotated
+tag, and `refs/tags/<tag>` for a lightweight one. An annotated tag's own object is not a commit.
+
 ## The token
 
 The workflow reads the repository secret `RELEASE_PLEASE_TOKEN`. It is a fine-grained personal access

@@ -1,0 +1,27 @@
+# Dependabot: monthly version updates, one grouped pull request per ecosystem.
+# Security updates are switched on in the repository settings; they arrive as
+# soon as an advisory applies, and the limits below do not hold them back.
+# The "chore(deps)" title makes no release (RELEASE.md, PR titles). A security
+# fix that should ship is retitled "fix(deps): ..." before the squash merge.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    groups:
+      go:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"

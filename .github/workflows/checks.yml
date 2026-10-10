@@ -26,7 +26,7 @@ jobs:
     outputs:
       product: ${{ steps.diff.outputs.product }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
       - id: diff
@@ -55,7 +55,7 @@ jobs:
     name: hygiene
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0          # the whole history; no step here reads a tag
       - name: written for strangers
@@ -79,7 +79,7 @@ jobs:
       contents: read
       pull-requests: write   # the coverage comment is posted by the CI bot, not an agent
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0          # the tags are the version; git describe needs them
       - id: probe
@@ -88,7 +88,7 @@ jobs:
         run: |
           if [ -f go.mod ]; then echo "present=true" >> "$GITHUB_OUTPUT"
           else echo "present=false" >> "$GITHUB_OUTPUT"; echo "no go.mod yet — skipping"; fi
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         if: steps.probe.outputs.present == 'true'
         with:
           go-version: '1.27'
@@ -138,7 +138,7 @@ jobs:
         # where somebody goes looking for a build to try — and an unqualified
         # `loc` in that list tells them nothing about whether it will run.
         if: steps.probe.outputs.present == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ steps.stamped.outputs.name }}
           path: build/bin/loc
@@ -238,7 +238,7 @@ jobs:
       - name: keep the coverage report
         id: coverage-artifact
         if: steps.probe.outputs.present == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: go-coverage
           path: |
@@ -271,7 +271,10 @@ jobs:
       # (updated in place each push), never an agent. Only on a pull request,
       # where there is a conversation to comment on.
       - name: comment coverage on the pull request
-        if: github.event_name == 'pull_request' && steps.probe.outputs.present == 'true'
+        # A pull request opened by Dependabot runs with a read-only token, so the
+        # comment cannot be posted; the coverage is still on the run summary. The
+        # test names who opened the pull request, so a re-run by a person skips too.
+        if: github.event_name == 'pull_request' && steps.probe.outputs.present == 'true' && github.event.pull_request.user.login != 'dependabot[bot]'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
           COVERAGE_TITLE: 'Go coverage'
@@ -422,7 +425,7 @@ jobs:
         # what made the first hosted run red. The version matches the `go` job:
         # one version for one thing.
         if: runner.environment == 'github-hosted'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: '1.27'
           cache: true
