@@ -4,3 +4,4 @@
 /release-please-config.json    @tdebasis
 /.release-please-manifest.json @tdebasis
 /install.sh                    @tdebasis
+/.github/dependabot.yml        @tdebasis
