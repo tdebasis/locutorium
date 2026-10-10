@@ -272,8 +272,9 @@ jobs:
       # where there is a conversation to comment on.
       - name: comment coverage on the pull request
         # A pull request opened by Dependabot runs with a read-only token, so the
-        # comment cannot be posted; the coverage is still on the run summary.
-        if: github.event_name == 'pull_request' && steps.probe.outputs.present == 'true' && github.actor != 'dependabot[bot]'
+        # comment cannot be posted; the coverage is still on the run summary. The
+        # test names who opened the pull request, so a re-run by a person skips too.
+        if: github.event_name == 'pull_request' && steps.probe.outputs.present == 'true' && github.event.pull_request.user.login != 'dependabot[bot]'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         env:
           COVERAGE_TITLE: 'Go coverage'
