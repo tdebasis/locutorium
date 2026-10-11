@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.15](https://github.com/tdebasis/locutorium/compare/v0.0.14...v0.0.15) (2026-10-11)
+
+
+### Bug Fixes
+
+* **deps:** bump the go group with 3 updates ([fb5007a](https://github.com/tdebasis/locutorium/commit/fb5007a61f114e960b04e0eff3e91583736f400b))
+
 ## [0.0.14](https://github.com/tdebasis/locutorium/compare/v0.0.13...v0.0.14) (2026-10-01)
 
 
