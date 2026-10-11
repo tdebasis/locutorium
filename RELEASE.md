@@ -39,6 +39,11 @@ before the merge, not after.
 Squash merge every pull request. The squash commit takes the PR title, so the title reaches the tool.
 A merge commit hides the title and gives the tool the branch commits instead.
 
+The repository sets the squash commit title to the PR title and its message to the PR body. This
+holds for a pull request with one commit too. Before 2026-10-10 the setting took a one-commit
+pull request's commit title. So #221 took its commit's `chore` title and released nothing. A
+`BEGIN_COMMIT_OVERRIDE` block in the merged PR body, and a rerun of the workflow, recovered it.
+
 ## Review
 
 A Release PR needs no code review. The tool writes every line of it. Read the version number and

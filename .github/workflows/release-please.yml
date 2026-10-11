@@ -8,10 +8,10 @@ on:
   push:
     branches: [main]
 
+# The action acts with RELEASE_PLEASE_TOKEN below, never with the built-in
+# GITHUB_TOKEN. So the built-in token needs only to read the repository.
 permissions:
-  contents: write
-  pull-requests: write
-  issues: write
+  contents: read
 
 jobs:
   release-please:
