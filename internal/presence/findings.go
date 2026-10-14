@@ -26,8 +26,11 @@ import "sort"
 type FindingKind int
 
 const (
-	// DeadPID is a row whose process is gone. Its queue, its row and its
-	// server pidfile all outlived the thing they describe.
+	// DeadPID is a row whose process is gone. Its row and its server pidfile
+	// outlived the thing they describe, and the sweep removes them. Its queue
+	// is KEPT: a dead process is evidence that the agent stopped, not that its
+	// mail is unwanted, and once the row is gone the queue is a QueueNoRow
+	// like any other (#234).
 	DeadPID FindingKind = iota
 	// QueueNoRow is a queue that no row claims. It is REPORTED AND NEVER
 	// REMOVED. Mail sent to it is stored for a seat the ledger does not hold,
@@ -72,9 +75,11 @@ type Finding struct {
 //
 // THE ORDER IS THE REPAIR ORDER. A caller that acts on the slice from first to
 // last performs #27's passes in #27's sequence: dead pids first, because a reap
-// destroys the queue its own row named; queues with no row second, which the
-// caller only prints; missing queues last, so a queue recreated in the third
-// pass is never described by the second. Unreadable rows come last of all,
+// removes the row its own queue was claimed by; queues with no row second,
+// which the caller only prints; missing queues last, so a queue recreated in
+// the third pass is never described by the second. A queue whose dead row is
+// reaped in the first pass is not described by the second in the same pass:
+// the listing was taken while the row still stood, and the next pass names it. Unreadable rows come last of all,
 // because there is nothing to act on. There is only something to say.
 //
 // A QUEUE WITH NO ROW IS A FINDING WHATEVER ITS INSTANCE. The caller prints it

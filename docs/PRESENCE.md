@@ -152,6 +152,12 @@ it is bounded by how often something looks. Deployments should size that interva
 
 An agent that restarts subscribes again, as a new instance, with a new process id.
 
+**A crash costs the registration, not the mail.** The check removes a dead process's registration
+and keeps its queue, and so does a new server that finds the dead registration on its seat. A dead
+process is evidence that the agent stopped, not that its mail is unwanted. The agent's next
+subscribe adopts the queue and everything waiting in it; until then the queue is reported as a
+queue with no registration. Only a deliberate unsubscribe destroys a queue.
+
 ## The two process ids a seat records
 
 A seat in the presence model records two process ids. One goes into its registration. One goes into a
@@ -176,7 +182,8 @@ leaves the file behind, so a stale file can name a process id the system has sin
 
 **Attendance is the registration's process id.** The sweep judges a seat by that number and its start
 time. It reaps a row whose process is gone. It removes the seat's server pidfile as part of the same
-repair. The sweep never reads the pidfile.
+repair, and it keeps the seat's queue and the mail in it for the seat's next subscribe. The sweep
+never reads the pidfile.
 
 **The pidfile answers a different question.** It tells a reader which process is currently serving the
 seat. A runtime can outlive the server it started, and the two records then disagree. The seat reads
@@ -233,8 +240,9 @@ default; being an agent and being a consumer are separate roles.
 ### Queue lifetime
 
 In the inner parlor the queue is created when an agent subscribes and destroyed when it
-unsubscribes. There is no queue for an agent that is not running, and therefore no mailbox to
-accumulate, drain or reconcile.
+unsubscribes. The one exception is an agent that crashed: its queue is kept for its next subscribe
+(§How an agent leaves), and a person removes it with `loc unsubscribe` if the agent is not coming
+back.
 
 **A note for implementers.** Subjects and the durable objects backing them are often named under
 different rules — a message broker may allow characters in a subject that it forbids in a stream or

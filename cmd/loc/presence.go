@@ -366,11 +366,14 @@ var (
 // sweepVerb reconciles the three records a seat has: its ledger row, its queue
 // and its process.
 //
-// IT DELETES A QUEUE ONLY WITH ITS OWN DEAD ROW. The ledger holds a row, the
-// row names a process, and the process is gone: the row and the queue go
-// together. A queue no row claims is PRINTED and left alone, whatever instance
-// it is in. Deleting on the absence of a row destroys mail on evidence that
-// cannot tell a departed agent from a lost row (#141).
+// IT DELETES NO QUEUE. The ledger holds a row, the row names a process, and
+// the process is gone: the row is reaped and the queue stays, with the mail in
+// it. A dead process is evidence that the agent stopped; it is not evidence
+// that the mail is unwanted, and the seat is usually started again (#234). A
+// queue no row claims is PRINTED and left alone, whatever instance it is in.
+// Deleting on the absence of a row destroys mail on evidence that cannot tell
+// a departed agent from a lost row (#141). Only a deliberate `loc unsubscribe`
+// deletes a queue.
 //
 // IT TAKES NO ARGUMENT. A process id means something only on the machine that
 // holds it, so a sweep is a machine-wide act by nature. It returns the number
@@ -414,12 +417,16 @@ func sweep(w io.Writer, open presenceOpener) (changes int, err error) {
 		for _, f := range findings {
 			switch f.Kind {
 			case model.DeadPID:
-				if err := pr.DeleteQueue(f.Endpoint); err != nil {
-					return err
-				}
-				// `expired` and not `left`: the row outlived the process it
-				// named. Nobody unsubscribed, so no agent decided this.
-				loc.LogQueueDeleted(f.Endpoint, "expired", time.Now().UTC())
+				// THE ROW GOES AND THE QUEUE STAYS. The row outlived the
+				// process it named, and nobody unsubscribed, so no agent
+				// decided the seat was finished. Destroying the queue here
+				// threw away mail a crashed seat would have read when it came
+				// back (#234). From the next beat the queue is a queue with no
+				// row, which this sweep and `status` report in their own
+				// words and a later subscribe adopts. No queue-deleted record
+				// is written, because no queue was deleted; the printed line
+				// is the record, in the daemon's log. The reap is one change:
+				// the row and its pidfile are two halves of one stale fact.
 				if err := model.Remove(f.Endpoint); err != nil {
 					return err
 				}
@@ -427,19 +434,18 @@ func sweep(w io.Writer, open presenceOpener) (changes int, err error) {
 					return err
 				}
 				changes++
-				if _, err := fmt.Fprintf(w, "%s: reaped, the process is gone\n", f.Endpoint); err != nil {
+				if _, err := fmt.Fprintf(w, "%s: reaped, the process is gone; queue kept\n", f.Endpoint); err != nil {
 					return err
 				}
 			case model.QueueNoRow:
 				// NOTHING HAPPENS HERE, AND THE LINE IS THE WHOLE PASS. The
-				// sweep deletes a queue on positive evidence only: a row that
-				// names it and a process that is gone. An absent row is not
-				// evidence. It cannot tell an agent that left without
-				// finishing from a row this deployment lost, and destroying
-				// the mail is right for one of those and wrong for the other.
-				// So the operator is told, in the words `status` uses, and
-				// the queue stays until a person removes it or a later
-				// subscribe adopts it. It is not a change, so it is not
+				// sweep deletes no queue. An absent row is not evidence of
+				// anything about the mail: it cannot tell an agent that left
+				// without finishing from a row this deployment lost, or from
+				// a seat whose process died and whose row the sweep itself
+				// reaped. So the operator is told, in the words `status`
+				// uses, and the queue stays until a person removes it or a
+				// later subscribe adopts it. It is not a change, so it is not
 				// counted.
 				if _, err := fmt.Fprint(w, queueNoRowLine(f.Endpoint)); err != nil {
 					return err
@@ -795,7 +801,7 @@ func seatLines(w io.Writer, pr provider.Presence) error {
 	for _, f := range model.Findings(rows, unreadable, queues) {
 		switch f.Kind {
 		case model.DeadPID:
-			trouble[f.Endpoint] = "pid dead, next beat reaps it"
+			trouble[f.Endpoint] = "pid dead, next beat reaps the row; queue kept"
 		case model.MissingQueue:
 			trouble[f.Endpoint] = "queue missing, next beat repairs it"
 		case model.UnreadableRow:

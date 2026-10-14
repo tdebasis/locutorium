@@ -537,10 +537,10 @@ func TestUnsubscribeRemovesTheRowBeforeTheQueue(t *testing.T) {
 
 // ---------------------------------------------------------------------- sweep
 
-// The sweep reaps a registration whose process is gone — its row, its queue
-// and its server pidfile — and leaves a live one exactly where it is. It
-// reaches every instance the ledger holds a row for, because a machine holds
-// every process on it.
+// The sweep reaps a registration whose process is gone — its row and its
+// server pidfile, NOT its queue (#234) — and leaves a live one exactly where it
+// is. It reaches every instance the ledger holds a row for, because a machine
+// holds every process on it.
 func TestSweepReapsOnlyTheDead(t *testing.T) {
 	d := newPresenceDeployment(t)
 	writeFile(t, d.ledger("workshop.scribe.json"),
@@ -559,11 +559,14 @@ func TestSweepReapsOnlyTheDead(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("sweep exited %d (stderr %q)", code, errOut)
 	}
-	if len(d.spy.deleted) != 1 || d.spy.deleted[0] != "workshop.scribe" {
-		t.Errorf("sweep destroyed %v, want only the dead endpoint's queue", d.spy.deleted)
+	if len(d.spy.deleted) != 0 {
+		t.Errorf("sweep destroyed %v; a reap keeps the dead seat's queue", d.spy.deleted)
 	}
-	if !strings.Contains(out, "workshop.scribe: reaped") {
-		t.Errorf("sweep printed %q, want a line naming the reap", out)
+	if !strings.Contains(out, "workshop.scribe: reaped, the process is gone; queue kept\n") {
+		t.Errorf("sweep printed %q, want a line naming the reap and the kept queue", out)
+	}
+	if _, err := os.Stat(d.ledger("workshop.scribe.json")); !os.IsNotExist(err) {
+		t.Error("the dead registration survived the sweep")
 	}
 	// THE SWEEP PUBLISHES NOTHING. A departure event says an agent left; a
 	// reap says a record was wrong, and telling every listener the first when

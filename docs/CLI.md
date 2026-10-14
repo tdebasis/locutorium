@@ -382,15 +382,18 @@ every instance.
 
 | the disagreement | what the sweep does |
 |---|---|
-| a row whose process is gone | delete the queue, the row and the seat's server pidfile |
+| a row whose process is gone | remove the row and the seat's server pidfile; **keep the queue** |
 | a queue no row claims | print one line; **remove nothing** |
 | a live row with no queue | create the queue; the row is not rewritten |
 
-**It deletes a queue only together with its own dead row.** That is positive evidence: the ledger
-holds a row, the row names a process, and the process is gone. An ABSENT row is not evidence. It
+**It deletes no queue.** A dead process is evidence that the agent stopped, not that its mail is
+unwanted: a crashed agent is usually started again, and the mail was sent to its seat. So the reap
+removes the row and the pidfile, prints `<endpoint>: reaped, the process is gone; queue kept`, and
+the queue stays. From the next beat it is a queue with no row, reported in the line below, and the
+seat's next `subscribe` adopts it with the mail in it. An ABSENT row is not evidence either. It
 cannot tell an agent that left without finishing from a row this deployment lost, and the two want
-opposite treatment, so the sweep does neither and says what it found. A ledger with no rows
-therefore deletes nothing at all, in any instance.
+opposite treatment, so the sweep does neither and says what it found. Only `loc unsubscribe`
+deletes a queue.
 
 **A queue with no row stays until a person removes it.** The line names the remedy:
 
@@ -466,7 +469,7 @@ workshop.binder: row ok, queue ok, mail unread, bell made 3 of 3 tries, 2 rang, 
 workshop.clerk2: row ok, queue ok, mail unread, bell made 3 of 3 tries, none rang, last refused (pane busy) at 2026-09-16T22:51:36Z; no more until new mail
 workshop.relay: row ok, queue ok, mail unread, held by the seat's receiver since 2026-09-16T22:52:10Z
 workshop.clerk: queue missing, next beat repairs it
-atelier.scribe: pid dead, next beat reaps it
+atelier.scribe: pid dead, next beat reaps the row; queue kept
 workshop.legacy: row unreadable: <reason>
 atelier.stray: queue with no row; nothing removes it; remove it with loc unsubscribe atelier.stray
 QUEUE_scribe: queue with an unqualified name; the sweep cannot see it; remove it with the broker's own tool
@@ -824,7 +827,9 @@ registers this endpoint with its PARENT's pid — the runtime's — `LOC_LISTENE
 type, `LOC_LISTENER_ADDRESS` as the delivery address, the client's version from the initialize
 handshake, the agent token as the display name and the working directory; when the runtime lets go
 (stdin reaches EOF, or a signal arrives) it unsubscribes and exits 0. A seat held by
-a registration whose process is DEAD is displaced, and the dead pid is written to the delivery log.
+a registration whose process is DEAD is displaced, and the dead pid is written to the delivery log
+(`displaced <endpoint>: pid <n> is gone; queue kept`). Only the registration goes: the queue and
+the mail in it are kept, and the new registration adopts them.
 A seat held by a LIVE process that did not launch this server is refused, with the pid named, and the
 server exits 1 — the runtime shows it as failed, which is the truth. **The pid registered is whoever
 launched this process**, so a shell, a version manager or any other shim placed between the runtime
@@ -838,7 +843,8 @@ silent and its tools are gone. The failure shows in the runtime's own MCP status
 server as failed. Recovery is a fresh server: the person restarts the session, or the runtime
 reconnects the server where it can do that. The new server displaces the stale registration as it
 starts, and writes the displaced pid to the delivery log when that process is gone. `sweep` is the
-other route — it clears registrations whose runtime pid is gone, with no restart. Nothing else ever
+other route — it clears registrations whose runtime pid is gone, with no restart. Neither route
+deletes the seat's queue. Nothing else ever
 starts a second server for a seat, and a second server for a live seat is refused by name.
 
 **It runs one generation removed from the runtime.** A runtime may end its MCP child with a HARD
