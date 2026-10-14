@@ -224,6 +224,11 @@ func LogBellGaveUp(seat string, after, rang int, last string, at time.Time) {
 // absence of a row (#141), and that pass was its only writer. The word stays
 // in the format and the readers still parse it, because records written before
 // that change are still in the log and still mean what they said.
+//
+// THE SWEEP WRITES NO `expired` EITHER. It stopped deleting the queue of a
+// dead process (#234), so a reap deletes no queue and records none. `expired`
+// is still written by `loc unsubscribe --reason expiry`, and older records
+// from the sweep keep the meaning they had.
 func LogQueueDeleted(seat, reason string, at time.Time) {
 	logSeat(seat, "queue-deleted", reason, at)
 }

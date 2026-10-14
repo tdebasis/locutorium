@@ -103,7 +103,9 @@ func (p *Provider) DeleteQueue(endpoint string) error {
 	return fmt.Errorf("cannot destroy the queue for '%s': %v", endpoint, err)
 }
 
-// QueueExists answers whether anyone is attending an endpoint.
+// QueueExists answers whether an endpoint holds a queue: the medium's half of
+// whether anyone is attending it. The ledger's row is the other half, and the
+// caller asks it.
 //
 // An unreachable medium is an ERROR, not a "no". A send refused because
 // nobody is there and a send refused because we could not look are different

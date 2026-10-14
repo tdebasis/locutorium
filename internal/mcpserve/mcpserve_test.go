@@ -46,7 +46,9 @@ type fake struct {
 
 	subscribed   [][]string
 	unsubscribed [][]string
-	// calls is both verbs in the order they ran.
+	// departed is each reason a departure was announced with.
+	departed []string
+	// calls is the verbs and the announcements in the order they ran.
 	calls    []string
 	emitted  []string
 	nudged   []string
@@ -59,6 +61,7 @@ type fake struct {
 
 	unread    int
 	unreadErr error
+	departErr error
 	nudgeErr  error
 	sendErr   error
 	slowLeave time.Duration
@@ -91,6 +94,13 @@ func (f *fake) deps() Deps {
 			f.unsubscribed = append(f.unsubscribed, args)
 			f.calls = append(f.calls, "unsubscribe "+strings.Join(args[1:], " "))
 			return model.Remove(args[0])
+		},
+		Depart: func(reason string) error {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			f.departed = append(f.departed, reason)
+			f.calls = append(f.calls, "depart "+reason)
+			return f.departErr
 		},
 		Send: func(w io.Writer, to, body string) error {
 			if f.sendErr != nil {
@@ -370,25 +380,68 @@ func TestServe_RegistersTheRuntimesPidAndTheRuntimesName(t *testing.T) {
 	}
 }
 
-// A DEAD PREDECESSOR IS DISPLACED, AND SAID SO. A registration whose process
-// has no start time was already gone when it was recorded, which is exactly
-// what a crashed runtime leaves behind.
-func TestServe_DisplacesADeadIncumbentAndNamesItsPid(t *testing.T) {
+// A DEAD PREDECESSOR IS DISPLACED, AND SAID SO, AND ITS MAIL STAYS. A
+// registration whose process has no start time was already gone when it was
+// recorded, which is exactly what a crashed runtime leaves behind. A crash is
+// not the agent deciding to leave, so only the row goes: no unsubscribe runs
+// before the subscribe, because an unsubscribe destroys the queue (#234).
+// The departure is still announced, as `expiry`, before the new join, so a
+// watcher sees the dead agent leave.
+func TestServe_DisplacesADeadIncumbentAndKeepsTheQueue(t *testing.T) {
 	dir := home(t, "provider = none\n")
-	hold(t, 999999, "")
+	const crashed = "2026-01-01T00:00:00.000Z"
+	holdAt(t, 999999, "", crashed)
 	f := &fake{}
 	sess, done := serve(t, f.deps())
-	stop(t, sess, done)
+	f.ready(t)
 
-	if len(f.subscribed) != 1 {
-		t.Fatalf("a dead incumbent was not displaced: subscribed %d times", len(f.subscribed))
+	f.mu.Lock()
+	calls := append([]string(nil), f.calls...)
+	f.mu.Unlock()
+	if len(calls) != 2 || calls[0] != "depart expiry" || calls[1] != "subscribe" {
+		t.Errorf("the displacement ran %v; want the expiry announced and then a subscribe, and no unsubscribe, because an unsubscribe destroys the queue", calls)
 	}
-	if len(f.unsubscribed) < 2 || !strings.Contains(strings.Join(f.unsubscribed[0], " "), "--force") {
-		t.Errorf("the displacement was not forced: %v", f.unsubscribed)
+	if r := heldNow(t); r == nil || r.Registered == crashed || r.Process.PID != os.Getppid() {
+		t.Errorf("the dead predecessor's row was not replaced: %+v", r)
 	}
-	if !strings.Contains(delivery(t, dir), "displaced "+seat+": pid 999999 is gone") {
-		t.Errorf("the displacement left no trace; the log said %q", delivery(t, dir))
+	want := "displaced " + seat + ": pid 999999 is gone; queue kept"
+	if !strings.Contains(delivery(t, dir), want) {
+		t.Errorf("want %q in:\n%s", want, delivery(t, dir))
 	}
+
+	// The seat this server took is its own, so it frees it on the way out:
+	// one unsubscribe, the clean one, and only that.
+	stop(t, sess, done)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.unsubscribed) != 1 || !strings.Contains(strings.Join(f.unsubscribed[0], " "), "--reason clean") {
+		t.Errorf("want exactly the clean leave; the server unsubscribed %v", f.unsubscribed)
+	}
+}
+
+// AN ANNOUNCEMENT THAT CANNOT BE PUBLISHED DOES NOT COST THE SEAT. The
+// departure of a dead predecessor is news for watchers; the seat is the
+// runtime's either way, so the server says so in the log and takes it.
+func TestServe_TakesTheSeatWhenTheDeadIncumbentsDepartureCannotBeAnnounced(t *testing.T) {
+	dir := home(t, "provider = none\n")
+	hold(t, 999999, "")
+	f := &fake{departErr: fmt.Errorf("cannot reach the medium")}
+	sess, done := serve(t, f.deps())
+	f.ready(t)
+
+	if r := heldNow(t); r == nil || r.Process.PID != os.Getppid() {
+		t.Errorf("the seat was not taken: %+v", r)
+	}
+	log := delivery(t, dir)
+	for _, want := range []string{
+		"departure of " + seat + " not announced: cannot reach the medium",
+		"displaced " + seat + ": pid 999999 is gone; queue kept",
+	} {
+		if !strings.Contains(log, want) {
+			t.Errorf("want %q in:\n%s", want, log)
+		}
+	}
+	stop(t, sess, done)
 }
 
 // A LIVE SEAT IS NOT TAKEN, and the refusal names the pid — the only thing

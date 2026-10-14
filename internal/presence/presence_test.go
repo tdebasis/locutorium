@@ -696,6 +696,48 @@ func firstWordOfAttending(t *testing.T, report string) string {
 	return ""
 }
 
+// A QUEUE WITH NO ROW IS NOT ATTENDED (#234). It is the queue a reaped seat
+// keeps for its next subscribe, and the send path refuses new mail to it, so
+// the line answers `no` and says why. With the row back, the same queue is
+// attended.
+func TestAQueueKeptWithNoRowIsNotAttended(t *testing.T) {
+	now := time.Date(2026, 1, 14, 10, 0, 0, 0, time.UTC)
+	got := Derive("workshop.scribe", nil, Asked(true), nil, now, 10*time.Minute)
+	want := "  attending:  no (queue kept with no registration: a send to this endpoint is refused; " +
+		"the next subscribe adopts the mail in it)\n"
+	if !strings.Contains(got, want) {
+		t.Errorf("want %q in:\n%s", want, got)
+	}
+	if first := firstWordOfAttending(t, got); first != "no" {
+		t.Errorf("the attending answer is %q, want no", first)
+	}
+	got = Derive("workshop.scribe", reg("workshop.scribe", 4242, ""), Asked(true), nil, now, 10*time.Minute)
+	if first := firstWordOfAttending(t, got); first != "yes" {
+		t.Errorf("a row and a queue: the attending answer is %q, want yes\n%s", first, got)
+	}
+}
+
+// Registered answers from the file alone: absent is false, present is true,
+// and a row that cannot be read is still a row.
+func TestRegisteredAnswersFromTheFile(t *testing.T) {
+	scratch(t)
+	if ok, err := Registered("workshop.scribe"); err != nil || ok {
+		t.Errorf("an empty ledger: Registered = %v, %v; want false, nil", ok, err)
+	}
+	if err := Save(reg("workshop.scribe", 4242, "")); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := Registered("workshop.scribe"); err != nil || !ok {
+		t.Errorf("a saved row: Registered = %v, %v; want true, nil", ok, err)
+	}
+	if err := os.WriteFile(filepath.Join(Dir(), "workshop.clerk.json"), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := Registered("workshop.clerk"); err != nil || !ok {
+		t.Errorf("an unreadable row: Registered = %v, %v; want true, nil", ok, err)
+	}
+}
+
 // A value with no word at all is a report of nothing, and the reader above
 // must not index into an empty slice to discover it.
 func TestTheAttendingAnswerIsAlwaysOneOfThree(t *testing.T) {

@@ -290,12 +290,25 @@ func send(p provider.Provider, w io.Writer, to, body string) error {
 		loc.LogFailed(e, "too long")
 		return err
 	}
-	// WHERE ATTENDANCE COMES FROM. On a medium that carries presence, a queue
-	// exists exactly while an agent is subscribed to it, so its absence IS an
-	// absent recipient. That is a live fact, and it is the only attendance
-	// record this tool has: in the inner parlor there are no mailboxes for
-	// agents that are not running. A medium without presence cannot answer
-	// the question at all, so it does not refuse on it.
+	// WHERE ATTENDANCE COMES FROM. On a medium that carries presence, a seat
+	// is attended when the ledger holds its ROW and the medium holds its
+	// QUEUE. The row says an agent subscribed and has not been reaped or
+	// unsubscribed; the queue says a message has somewhere to wait. Both are
+	// asked, and either one missing is an absent recipient.
+	//
+	// THE QUEUE ALONE IS NOT ATTENDANCE ANY MORE. It used to be: a queue
+	// existed exactly while an agent was subscribed. Since #234 a seat whose
+	// process died keeps its queue, so the mail already sent to it survives
+	// until the seat comes back, and since #141 an interrupted unsubscribe
+	// leaves one too. Accepting new mail into a queue no row claims would
+	// tell the sender a seat is there that may never return. The mail
+	// already waiting stays; only new sends are refused.
+	//
+	// A crashed seat the sweep has not reaped yet still has its row, and is
+	// still attended, as it always was. A row that cannot be read is still a
+	// row: the file is there, and `status` reports it beside the seat. A
+	// medium without presence cannot answer the question at all, so it does
+	// not refuse on it.
 	pr, hasPresence := p.(provider.Presence)
 	if hasPresence {
 		if err := model.ValidEndpoint(to); err != nil {
@@ -305,17 +318,30 @@ func send(p provider.Provider, w io.Writer, to, body string) error {
 			loc.LogFailed(e, "target not registered")
 			return err
 		}
-		attended, err := pr.QueueExists(to)
+		queued, err := pr.QueueExists(to)
 		if err != nil {
 			// The question could not be asked, which is a fact about the
 			// medium and not about the recipient.
 			loc.LogFailed(e, "bus unreachable")
 			return err
 		}
-		if !attended {
+		if !queued {
 			loc.LogFailed(e, "target not registered")
 			return fmt.Errorf("nobody is attending '%s': no live subscription, "+
 				"so no queue to deliver to", to)
+		}
+		registered, err := model.Registered(to)
+		if err != nil {
+			// The ledger is on this machine, so this is a fault here and not
+			// a fact about the recipient. It is refused, because nothing
+			// says anybody is there.
+			loc.LogFailed(e, "target not registered")
+			return err
+		}
+		if !registered {
+			loc.LogFailed(e, "target not registered")
+			return fmt.Errorf("nobody is attending '%s': no live subscription; "+
+				"its queue is kept with the mail already in it, for the next subscribe to adopt", to)
 		}
 	}
 	// Say-semantics (config-gated; enable only once every endpoint registers
@@ -329,11 +355,11 @@ func send(p provider.Provider, w io.Writer, to, body string) error {
 	// listener ever writes. An agent that joined through the presence model
 	// (`subscribe`) runs no such listener and leaves no such file, so there the
 	// pidfile's silence says nothing about attendance — it is silent for every
-	// peer, present or absent. On that medium attendance IS the live queue
-	// (PRESENCE.md §Queue lifetime; §Inner and outer parlors), so the question
-	// this key asks has already been asked and answered a few lines up by the
-	// QueueExists refusal, from a live fact instead of a file. Without presence
-	// the pidfile is still the only answer available, and stays the one used.
+	// peer, present or absent. On that medium attendance is the row and the
+	// queue together (above), so the question this key asks has already been
+	// asked and answered a few lines up, from live facts instead of a file.
+	// Without presence the pidfile is still the only answer available, and
+	// stays the one used.
 	if !hasPresence && config.Value(config.SendRequiresAttendance) == "yes" && !loc.ListenerAlive(to) {
 		loc.LogFailed(e, "target not registered")
 		return fmt.Errorf("not attending: '%s' has no live listener "+
