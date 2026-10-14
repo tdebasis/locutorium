@@ -186,7 +186,9 @@ func TestMCPTools_EachToolIsTheVerbItIsNamedFor(t *testing.T) {
 // crashed runtime left its registration behind, naming a pid that is gone,
 // and mail was waiting in the queue. The next server displaces the dead
 // registration, keeps the queue, and its subscribe adopts it: the read tool
-// hands over the message the crashed seat never read.
+// hands over the message the crashed seat never read. The dead agent's
+// departure is announced, as `expiry`, before the new server's join, so a
+// watcher sees it leave.
 //
 // THE PLANT THAT TURNS THIS RED: put the forced unsubscribe back in the
 // dead-predecessor branch of displaceOrRefuse (internal/mcpserve/serve.go).
@@ -208,6 +210,8 @@ func TestMCPTools_ARestartOverACrashedSeatReadsTheMailLeftForIt(t *testing.T) {
 		t.Fatalf("the queue holds %d messages before the restart, want 1; the case proves nothing", n)
 	}
 
+	sub := p.witness(t, "presence.workshop")
+
 	p.as(t, e1)
 	s := serveInMemory(t, p)
 	// serveInMemory returns once ANY row is there, and the dead one already
@@ -228,5 +232,30 @@ func TestMCPTools_ARestartOverACrashedSeatReadsTheMailLeftForIt(t *testing.T) {
 	}
 	if got := s.text(t, "read", nil); !strings.Contains(got, "sent-before-the-crash") {
 		t.Errorf("the read tool did not hand over the mail left for the crashed seat; it said %q", first(got, 400))
+	}
+
+	// THE LEAVE, THEN THE JOIN. The forced unsubscribe this restart used to
+	// run published the leave; keeping the queue must not drop it.
+	var kinds []string
+	var leave map[string]any
+	for _, e := range collect(sub, 2*time.Second) {
+		m, ok := findEvent(t, []string{e}, "agent.unsubscribe")
+		if ok && leave == nil {
+			leave = m
+		}
+		if ok {
+			kinds = append(kinds, "agent.unsubscribe")
+		} else if _, ok := findEvent(t, []string{e}, "agent.subscribe"); ok {
+			kinds = append(kinds, "agent.subscribe")
+		}
+	}
+	if leave == nil {
+		t.Fatalf("the dead agent's departure was not announced; the events were %v", kinds)
+	}
+	if leave["reason"] != "expiry" || leave["endpoint"] != e1 {
+		t.Errorf("the departure was %v, want endpoint %s and reason expiry", leave, e1)
+	}
+	if len(kinds) < 2 || kinds[0] != "agent.unsubscribe" || kinds[1] != "agent.subscribe" {
+		t.Errorf("the events ran %v; want the dead agent's leave before the new join", kinds)
 	}
 }

@@ -329,7 +329,12 @@ func mcpDeps() (mcpserve.Deps, func(), error) {
 		},
 		// The emitter drops an unpublishable event on purpose; that decision
 		// belongs to the verb and is not repeated here.
-		Emit:   func(kind, endpoint, tool string) { _ = emitVerb([]string{kind, endpoint, "--tool", tool}) },
+		Emit: func(kind, endpoint, tool string) { _ = emitVerb([]string{kind, endpoint, "--tool", tool}) },
+		// The unsubscribe verb's announcement and nothing else of it: the
+		// queue is not touched (#234).
+		Depart: func(reason string) error {
+			return withPresence(func(pr provider.Presence) error { return emitDeparture(pr, me, reason) })
+		},
 		Watch:  l.WatchQueue,
 		Unread: l.Unread,
 	}, p.Close, nil

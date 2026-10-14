@@ -46,7 +46,9 @@ type fake struct {
 
 	subscribed   [][]string
 	unsubscribed [][]string
-	// calls is both verbs in the order they ran.
+	// departed is each reason a departure was announced with.
+	departed []string
+	// calls is the verbs and the announcements in the order they ran.
 	calls    []string
 	emitted  []string
 	nudged   []string
@@ -59,6 +61,7 @@ type fake struct {
 
 	unread    int
 	unreadErr error
+	departErr error
 	nudgeErr  error
 	sendErr   error
 	slowLeave time.Duration
@@ -91,6 +94,13 @@ func (f *fake) deps() Deps {
 			f.unsubscribed = append(f.unsubscribed, args)
 			f.calls = append(f.calls, "unsubscribe "+strings.Join(args[1:], " "))
 			return model.Remove(args[0])
+		},
+		Depart: func(reason string) error {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			f.departed = append(f.departed, reason)
+			f.calls = append(f.calls, "depart "+reason)
+			return f.departErr
 		},
 		Send: func(w io.Writer, to, body string) error {
 			if f.sendErr != nil {
@@ -375,6 +385,8 @@ func TestServe_RegistersTheRuntimesPidAndTheRuntimesName(t *testing.T) {
 // recorded, which is exactly what a crashed runtime leaves behind. A crash is
 // not the agent deciding to leave, so only the row goes: no unsubscribe runs
 // before the subscribe, because an unsubscribe destroys the queue (#234).
+// The departure is still announced, as `expiry`, before the new join, so a
+// watcher sees the dead agent leave.
 func TestServe_DisplacesADeadIncumbentAndKeepsTheQueue(t *testing.T) {
 	dir := home(t, "provider = none\n")
 	const crashed = "2026-01-01T00:00:00.000Z"
@@ -386,8 +398,8 @@ func TestServe_DisplacesADeadIncumbentAndKeepsTheQueue(t *testing.T) {
 	f.mu.Lock()
 	calls := append([]string(nil), f.calls...)
 	f.mu.Unlock()
-	if len(calls) != 1 || calls[0] != "subscribe" {
-		t.Errorf("the displacement ran %v; want a subscribe and nothing before it, because an unsubscribe destroys the queue", calls)
+	if len(calls) != 2 || calls[0] != "depart expiry" || calls[1] != "subscribe" {
+		t.Errorf("the displacement ran %v; want the expiry announced and then a subscribe, and no unsubscribe, because an unsubscribe destroys the queue", calls)
 	}
 	if r := heldNow(t); r == nil || r.Registered == crashed || r.Process.PID != os.Getppid() {
 		t.Errorf("the dead predecessor's row was not replaced: %+v", r)
@@ -405,6 +417,31 @@ func TestServe_DisplacesADeadIncumbentAndKeepsTheQueue(t *testing.T) {
 	if len(f.unsubscribed) != 1 || !strings.Contains(strings.Join(f.unsubscribed[0], " "), "--reason clean") {
 		t.Errorf("want exactly the clean leave; the server unsubscribed %v", f.unsubscribed)
 	}
+}
+
+// AN ANNOUNCEMENT THAT CANNOT BE PUBLISHED DOES NOT COST THE SEAT. The
+// departure of a dead predecessor is news for watchers; the seat is the
+// runtime's either way, so the server says so in the log and takes it.
+func TestServe_TakesTheSeatWhenTheDeadIncumbentsDepartureCannotBeAnnounced(t *testing.T) {
+	dir := home(t, "provider = none\n")
+	hold(t, 999999, "")
+	f := &fake{departErr: fmt.Errorf("cannot reach the medium")}
+	sess, done := serve(t, f.deps())
+	f.ready(t)
+
+	if r := heldNow(t); r == nil || r.Process.PID != os.Getppid() {
+		t.Errorf("the seat was not taken: %+v", r)
+	}
+	log := delivery(t, dir)
+	for _, want := range []string{
+		"departure of " + seat + " not announced: cannot reach the medium",
+		"displaced " + seat + ": pid 999999 is gone; queue kept",
+	} {
+		if !strings.Contains(log, want) {
+			t.Errorf("want %q in:\n%s", want, log)
+		}
+	}
+	stop(t, sess, done)
 }
 
 // A LIVE SEAT IS NOT TAKEN, and the refusal names the pid — the only thing

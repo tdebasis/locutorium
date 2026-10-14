@@ -66,6 +66,11 @@ type Deps struct {
 	Status      func(w io.Writer, endpoint string) error
 	Topics      func(w io.Writer) error
 	Emit        func(kind, endpoint, tool string)
+	// Depart publishes the seat's departure event with the reason given, and
+	// does nothing else: it is the announcement the unsubscribe verb makes,
+	// without the queue deletion that verb also makes. A dead predecessor is
+	// displaced with it (displaceOrRefuse).
+	Depart func(reason string) error
 
 	// The medium's listener seam. Watch rings arrived once per message
 	// published to the seat's queue subject, reconnected once per
@@ -445,6 +450,18 @@ func (s *server) displaceOrRefuse() error {
 	// queue, so a sender was told a message was accepted that its reader never
 	// saw (#234). The line keeps its old start, so a grep for a displacement
 	// still finds it.
+	//
+	// THE DEPARTURE IS STILL ANNOUNCED, as `expiry`. The forced unsubscribe
+	// published it, and a watcher that saw the dead agent join must see it
+	// leave before it sees this server join. The reason is `expiry` because
+	// that is the reason that means the process is gone (PRESENCE.md §How an
+	// agent leaves); the verb used to say `clean` only because nobody passed
+	// it one. A same-runtime re-take, above, announces nothing: that agent
+	// did not leave. An announcement that cannot be published is logged and
+	// does not cost the seat, as with every other event this server emits.
+	if err := s.d.Depart("expiry"); err != nil {
+		s.log(fmt.Sprintf("departure of %s not announced: %v", s.d.Endpoint, err))
+	}
 	s.log(fmt.Sprintf("displaced %s: pid %d is gone; queue kept", s.d.Endpoint, held.Process.PID))
 	return nil
 }
