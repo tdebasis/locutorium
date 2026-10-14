@@ -104,11 +104,12 @@ it:
 | variable | what it says |
 |---|---|
 | `LOC_LISTENER_TYPE` | which notifier rings this seat. `subscribe` refuses any value outside the set below. |
-| `LOC_LISTENER_ADDRESS` | where that notifier delivers: a pane target for `tmux`, a session name for `claude`, a loopback `http` URL for `webhook`. |
+| `LOC_LISTENER_ADDRESS` | where that notifier delivers: a pane target for `tmux`, `<herdr session>/<agent name>` for `herdr`, a session name for `claude`, a loopback `http` URL for `webhook`. |
 
 | type | what it does |
 |---|---|
 | `tmux` | types one bell line into the seat's pane, then submits it. It first checks that the pane accepts input. |
+| `herdr` | types one bell line into an agent that herdr runs, then submits it. It asks herdr for the agent's state first and waits while the agent is working, at a dialog, or holds a draft. Agent kinds without an input-box reader are refused. |
 | `claude` | starts one Claude session to carry the bell to the seat. At most one session per seat per 30 seconds. |
 | `webhook` | sends the bell as one HTTP `POST` to a URL on the same machine. The request is not signed. `429` and `503` mean that the receiver is busy. `202` with the reply header `Loc-Bell: held` means that the receiver has the bell and will deliver it later. |
 | `none` | rings nothing. The seat finds its mail on its next `loc read`. |

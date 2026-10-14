@@ -41,17 +41,18 @@ type Notifier interface {
 	Ring(endpoint, address, bell, courier string) error
 }
 
-// The four listener types. A deployment sets one of these in
+// The five listener types. A deployment sets one of these in
 // LOC_LISTENER_TYPE, and `subscribe` refuses anything else.
 const (
 	ListenerTmux    = "tmux"
+	ListenerHerdr   = "herdr"
 	ListenerClaude  = "claude"
 	ListenerWebhook = "webhook"
 	ListenerNone    = "none"
 )
 
 // ListenerTypes is the closed set, in the order a refusal names them.
-var ListenerTypes = []string{ListenerTmux, ListenerClaude, ListenerWebhook, ListenerNone}
+var ListenerTypes = []string{ListenerTmux, ListenerHerdr, ListenerClaude, ListenerWebhook, ListenerNone}
 
 // ValidListenerType reports whether a registered type has a notifier behind
 // it. A type with no notifier is refused at `subscribe`, because a seat
@@ -71,15 +72,19 @@ func ValidListenerType(t string) error {
 // registered with an address its bell must refuse would read as reachable and
 // every ring would fail.
 //
-// ONLY THE WEBHOOK TYPE HAS A RULE. A pane target and a pane id are opaque to
-// this binary until tmux or the runtime reads them, so the other types accept
-// any address here and their notifiers refuse an empty one at the ring.
+// ONLY THE WEBHOOK AND HERDR TYPES HAVE A RULE. A pane target and a pane id
+// are opaque to this binary until tmux or the runtime reads them, so the tmux
+// and claude types accept any address here and their notifiers refuse an
+// empty one at the ring.
 func ValidListenerAddress(listenerType, address string) error {
-	if listenerType != ListenerWebhook {
-		return nil
+	switch listenerType {
+	case ListenerWebhook:
+		_, err := webhookURL(address)
+		return err
+	case ListenerHerdr:
+		return validHerdrAddress(address)
 	}
-	_, err := webhookURL(address)
-	return err
+	return nil
 }
 
 // ErrBusy marks a refusal that a LATER RING CAN REPAIR. The pane was in copy
@@ -159,6 +164,8 @@ func newNotifier(listenerType string, log func(string), now func() time.Time) (N
 	switch listenerType {
 	case ListenerTmux:
 		return &tmuxNotifier{log: log}, nil
+	case ListenerHerdr:
+		return &herdrNotifier{log: log}, nil
 	case ListenerClaude:
 		return &courierNotifier{log: log, now: now, last: map[string]time.Time{}}, nil
 	case ListenerWebhook:
