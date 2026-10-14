@@ -843,6 +843,12 @@ type bellState struct {
 	stopped bool
 	rang    int
 	last    string
+
+	// heldSince is the stamp of the first `held` try in the run of them that
+	// the latest try ends, or "" when the latest try was not held. A receiver
+	// that still holds the bell answers `held` at every recheck, and "since"
+	// is when it first said so, not when it last did.
+	heldSince string
 }
 
 // words is the field as the row prints it.
@@ -855,7 +861,15 @@ type bellState struct {
 // bell that rang and was not answered is a different fact from a bell that
 // never rang, and they want different repairs: the first is a seat that is not
 // looking, the second is a bell that is broken or a pane that is busy.
+//
+// A HELD STREAK IS NOT AN UNANSWERED ONE (#228). The seat's own receiver has
+// the bell and is waiting until it is safe to deliver it. "Not answered" and
+// "none rang" would both send the operator after a broken bell that is not
+// broken, so the row says who holds it and since when.
 func (s bellState) words() string {
+	if !s.stopped && s.result == "held" {
+		return fmt.Sprintf("mail unread, held by the seat's receiver since %s", s.heldSince)
+	}
 	if !s.stopped {
 		return fmt.Sprintf("mail unread, bell tried %d of %d, last %s at %s",
 			s.try, s.of, s.lastWords(), s.ts)
@@ -941,9 +955,19 @@ func bellStreaks(rows []*model.Registration) map[string]bellState {
 		case ev.Seat != "" && ev.Status == "bell-try":
 			// A try replaces whatever stood, including a give-up: a new streak
 			// opens at try 1 and the bell is trying again.
-			streak[ev.Seat] = bellState{
+			prev := streak[ev.Seat]
+			next := bellState{
 				try: ev.Try, of: ev.Of, result: ev.Result, reason: ev.Reason, ts: ev.TS,
 			}
+			// A HELD TRY AFTER A HELD TRY keeps the first one's stamp: the
+			// receiver has held the bell since then.
+			if ev.Result == "held" {
+				next.heldSince = ev.TS
+				if !prev.stopped && prev.result == "held" && prev.heldSince != "" {
+					next.heldSince = prev.heldSince
+				}
+			}
+			streak[ev.Seat] = next
 		case ev.Seat != "" && ev.Status == "bell-gave-up":
 			s := streak[ev.Seat]
 			s.stopped, s.of, s.ts = true, ev.After, ev.TS

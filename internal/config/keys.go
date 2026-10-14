@@ -37,6 +37,7 @@ const (
 	HeartbeatLogRetentionDays = "heartbeat_log_retention_days"
 	WakeRetrySeconds          = "wake_retry_seconds"
 	WakeTries                 = "wake_tries"
+	WakeHeldRecheckSeconds    = "wake_held_recheck_seconds"
 )
 
 // Keys is the deployment's whole configuration, in the order the file writes
@@ -51,6 +52,7 @@ var Keys = []Key{
 	{HeartbeatLogRetentionDays, "7", "heartbeat log files older than this are deleted when loc starts"},
 	{WakeRetrySeconds, "60", "the fixed gap between one try of a seat's bell and the next"},
 	{WakeTries, "3", "how many times a bell tries while mail is unread, before it gives up"},
+	{WakeHeldRecheckSeconds, "300", "the gap before a bell asks again after the seat's receiver answered that it holds the bell"},
 }
 
 // Default returns the table's value for name, or "" when the table has no such

@@ -27,12 +27,13 @@ import (
 //	wake_breaker_per_minute  cap per calendar minute
 //	wake_breaker_per_hour    cap per calendar hour
 //
-// Two more keys belong to this listener alone. They sit in the config table,
+// Three more keys belong to this listener alone. They sit in the config table,
 // so the file the daemon writes carries them and their defaults live in one
 // place:
 //
-//	wake_retry_seconds       the FIXED gap between one try and the next
-//	wake_tries               how many tries a streak gets
+//	wake_retry_seconds         the FIXED gap between one try and the next
+//	wake_tries                 how many tries a streak gets
+//	wake_held_recheck_seconds  the gap after a receiver said it holds the bell
 //
 // ONE FLAT RULE (#144). While the seat has unread mail, the bell tries. A try
 // is a try whether it rang, whether a busy pane refused it, whether the
@@ -41,6 +42,14 @@ import (
 // After the last try the bell gives up and does nothing more for that streak.
 // A new arrival rings at once and starts a fresh count. A streak also ends,
 // silently, the moment the unread count is 0.
+//
+// ONE EXCEPTION: A HELD BELL (#228). A webhook receiver may answer that it has
+// the bell and will deliver it when it is safe. That try is written down as
+// `held`, but it is not a try of the streak: it spends none of the tries,
+// counts as no ring, gives the breaker its charge back, and the next try waits
+// wake_held_recheck_seconds instead of the fixed gap. A receiver still waiting
+// answers `held` again; one that has died answers nothing, that try is
+// `failed`, and the streak counts on from there.
 //
 // A suppressed wake loses NOTHING: the messages are in the queue, and the next
 // read finds all of them. That is what makes a cap safe to have.
@@ -51,13 +60,16 @@ const (
 	defaultBreakerHour   = 60
 )
 
-// The four words the record uses for what one try came to. They are the whole
-// vocabulary of the `result` field, and the counting reads none of them.
+// The five words the record uses for what one try came to. They are the whole
+// vocabulary of the `result` field. The counting reads ONE of them, `held`,
+// which is the receiver saying the try is not over yet (#228); the other four
+// change nothing about the count.
 const (
 	resultRang       = "rang"
 	resultRefused    = "refused"
 	resultSuppressed = "suppressed"
 	resultFailed     = "failed"
+	resultHeld       = "held"
 )
 
 // reasonNoCount is what a try reports when the broker could not say how much
@@ -88,6 +100,11 @@ type bell struct {
 	// gap is the wait between one try and the next. It is fixed: every wait
 	// in a streak is this long.
 	gap time.Duration
+
+	// heldGap is the wait after a try the receiver answered `held`. It is
+	// longer than gap on purpose: the receiver has the bell, and asking again
+	// is only how a receiver that died is found out.
+	heldGap time.Duration
 
 	// maxTries is how many tries a streak gets before the bell gives up.
 	maxTries int
@@ -138,6 +155,7 @@ func (s *server) startBell() func() {
 		perMin:    configInt("wake_breaker_per_minute", defaultBreakerMinute),
 		perHour:   configInt("wake_breaker_per_hour", defaultBreakerHour),
 		gap:       time.Duration(tableInt(config.WakeRetrySeconds)) * time.Second,
+		heldGap:   time.Duration(tableInt(config.WakeHeldRecheckSeconds)) * time.Second,
 		maxTries:  tableInt(config.WakeTries),
 		afterFunc: time.AfterFunc,
 	}
@@ -266,7 +284,8 @@ func (b *bell) fire() {
 
 // ring hands the notifier one line for n, and reports what came back: nil
 // means the pane took it, errSuppressed means the breaker refused it, an
-// error wrapping ErrBusy means the seat is busy, and anything else means the
+// error wrapping ErrBusy means the seat is busy, an error wrapping ErrHeld
+// means the receiver holds the bell for later, and anything else means the
 // bell is broken. Called with the lock free.
 func (b *bell) ring(n int, courier, from string) error {
 	b.mu.Lock()
@@ -305,12 +324,17 @@ func (b *bell) ring(n int, courier, from string) error {
 		line = fmt.Sprintf(bellLineFrom, n, from)
 	}
 	err := b.s.d.Notify.Ring(b.s.d.Endpoint, b.s.address, line, courier)
-	if errors.Is(err, ErrBusy) {
+	if errors.Is(err, ErrBusy) || errors.Is(err, ErrHeld) {
 		// A BUSY REFUSAL TYPED NOTHING, so it gets the charge back. The cap
 		// exists to stop the pane being hammered, and a refusal that never
 		// reached the pane hammered nothing. Left charged, six refusals in a
 		// minute would trip the breaker and silence the ring the seat is
 		// waiting for.
+		//
+		// A HELD BELL GETS IT BACK TOO (#228). The receiver has typed nothing
+		// yet either, and it is asked again every recheck for as long as the
+		// person is busy; charged, a long wait on a busy evening would trip
+		// the hourly cap and silence the bells after it.
 		b.mu.Lock()
 		b.giveBack(minute, hour)
 		b.mu.Unlock()
@@ -327,12 +351,20 @@ func (b *bell) try(n int, courier, from string) {
 // counted advances the streak by one try, writes the try down, and decides
 // what follows it.
 //
-// THE RESULT NEVER CHANGES THE COUNT. A ring, a busy refusal, a suppression
-// and a broken notifier all leave the streak one try further on and all arm
-// the next try for the same fixed gap. What the seat has, or has not, is
+// THE RESULT NEVER CHANGES THE COUNT, with one exception. A ring, a busy
+// refusal, a suppression and a broken notifier all leave the streak one try
+// further on and all arm the next try for the same fixed gap. What the seat has, or has not, is
 // unread mail; how a ring fared says nothing about that. While the streak has
 // tries left the next one is armed; at the last one the bell gives up, says so
 // in the record, and does nothing more until mail arrives again.
+//
+// THE EXCEPTION IS `held` (#228). The receiver has the bell and has not
+// delivered it, so the try is not over: it is written down, but the streak
+// stays where it was, no ring is counted, no give-up can follow it, and the
+// next try waits heldGap. Its line carries the number of the try it stands in
+// for — the next one the streak would make — so `2/3 held` then `2/3 failed`
+// reads as one slot asked twice. It is not a failed bell, so it raises no
+// warning.
 //
 // THE WARNING AND THE EVENT GO TO DIFFERENT READERS. The warning lands in
 // this seat's own delivery log, which is plain text and is found by somebody
@@ -348,27 +380,44 @@ func (b *bell) counted(n int, result, reason string) {
 		b.mu.Unlock()
 		return
 	}
-	b.tries++
+	held := result == resultHeld
+	if !held {
+		b.tries++
+	}
 	if result == resultRang {
 		b.rangs++
 	}
 	try, of, rangs := b.tries, b.maxTries, b.rangs
-	final := try >= of
-	if !final {
-		b.tryTimer = b.afterFunc(b.gap, b.again)
+	if held {
+		try = b.tries + 1
 	}
+	final := !held && try >= of
+	if !final {
+		gap := b.gap
+		if held {
+			gap = b.heldGap
+		}
+		b.tryTimer = b.afterFunc(gap, b.again)
+	}
+	heldGap := b.heldGap
 	b.mu.Unlock()
 
 	// It carries no uid. The watch reports an arrival and Unread reports a
 	// count, so the server knows that mail is waiting and never which message
 	// is waiting (WatchQueue, internal/provider/provider.go).
 	loc.LogBellTry(b.s.d.Endpoint, try, of, result, reason, b.s.d.Now())
-	if result == resultRang {
+	switch result {
+	case resultRang:
 		b.s.log(fmt.Sprintf("wake %s count=%d", b.s.d.Endpoint, n))
 		if try > 1 {
 			b.s.log(fmt.Sprintf("bell %s rang on try %d of %d", b.s.d.Endpoint, try, of))
 		}
-	} else {
+	case resultHeld:
+		// A HELD BELL IS NOT A FAILED ONE. It goes to the delivery log and
+		// not to the runtime's log, which is where a broken bell shouts.
+		b.s.log(fmt.Sprintf("bell %s held by the receiver; asking again in %s",
+			b.s.d.Endpoint, heldGap))
+	default:
 		// A BELL THAT COULD NOT RING SAYS SO, and is never recorded as a wake.
 		b.s.warn(fmt.Sprintf("bell failed %s: %s", b.s.d.Endpoint, reason))
 	}
@@ -386,7 +435,7 @@ func (b *bell) counted(n int, result, reason string) {
 	}
 }
 
-// outcome says what one try came to, in the record's own four words.
+// outcome says what one try came to, in the record's own five words.
 //
 // The reason is the notifier's own text for a refusal and for a failure,
 // because "the pane is in copy mode" and "there is no such pane" want
@@ -397,6 +446,8 @@ func outcome(err error) (result, reason string) {
 		return resultRang, ""
 	case errors.Is(err, errSuppressed):
 		return resultSuppressed, errSuppressed.Error()
+	case errors.Is(err, ErrHeld):
+		return resultHeld, err.Error()
 	case errors.Is(err, ErrBusy):
 		return resultRefused, err.Error()
 	default:
@@ -600,7 +651,7 @@ func (b *bell) roll(now time.Time) {
 	}
 }
 
-// tableInt reads one of the two bell keys the config table holds. A value the
+// tableInt reads one of the three bell keys the config table holds. A value the
 // file cannot supply — a typo, a zero, a negative — falls back to the table's
 // own default, for the reason configInt gives below. The minimum is 1: a
 // streak of no tries is a bell that never rings, and a gap of no seconds is a

@@ -25,6 +25,10 @@ import (
 const (
 	testGap   = 60 * time.Second
 	testTries = 3
+
+	// testHeldGap is the recheck after a held try. It is not the table's
+	// 300 seconds: any value apart from testGap shows which gap was armed.
+	testHeldGap = 7 * time.Minute
 )
 
 // busy is what the tmux notifier returns for a transient refusal, built the
@@ -84,6 +88,7 @@ func retryBell(t *testing.T, f *fake, now func() time.Time) (*bell, *schedule, *
 		perMin:    defaultBreakerMinute,
 		perHour:   defaultBreakerHour,
 		gap:       testGap,
+		heldGap:   testHeldGap,
 		maxTries:  testTries,
 		afterFunc: sch.after,
 	}

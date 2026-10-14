@@ -634,3 +634,84 @@ func TestWebhook_AnAddressOffThisMachineIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// newAnsweringReceiver is a receiver that sets one reply header. The name is
+// written to the wire exactly as given, so a case can send a name in a case
+// the server would not have chosen.
+func newAnsweringReceiver(t *testing.T, status int, name, value string) *receiver {
+	t.Helper()
+	r := &receiver{}
+	r.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		r.hits.Add(1)
+		_, _ = io.ReadAll(req.Body)
+		if name != "" {
+			w.Header()[name] = []string{value}
+		}
+		w.WriteHeader(status)
+	}))
+	t.Cleanup(r.Close)
+	return r
+}
+
+// A 202 THAT SAYS `Loc-Bell: held` IS HELD (#228). The receiver has the bell
+// and will deliver it when it is safe, so it is neither a ring nor a refusal.
+// The header's NAME is matched as HTTP matches names, so a receiver that
+// writes it in lower case is read the same.
+//
+// PLANT: in Ring, delete the held arm, and the answer reads as rang.
+func TestWebhook_A202WithTheHeldHeaderIsHeld(t *testing.T) {
+	for _, name := range []string{"Loc-Bell", "loc-bell"} {
+		r := newAnsweringReceiver(t, http.StatusAccepted, name, "held")
+		rec := &recorder{}
+		err := newWebhookNotifier(rec.log).Ring("workshop.scribe", r.URL, webhookBellLine, "")
+		if !errors.Is(err, ErrHeld) {
+			t.Fatalf("header %q: err = %v, want ErrHeld", name, err)
+		}
+		if errors.Is(err, ErrBusy) {
+			t.Errorf("header %q: a held bell was marked busy: %v", name, err)
+		}
+		if want := "webhook status 202, Loc-Bell: held"; err.Error() != want {
+			t.Errorf("header %q: reason = %q, want %q", name, err, want)
+		}
+		if !strings.Contains(rec.joined(), "nudge workshop.scribe held") {
+			t.Errorf("header %q: the held answer was not logged: %q", name, rec.joined())
+		}
+		if strings.Contains(rec.joined(), "rang") {
+			t.Errorf("header %q: a held bell was logged as rung: %q", name, rec.joined())
+		}
+	}
+}
+
+// ONLY THE EXACT ANSWER IS HELD. A plain 202 is what every receiver written
+// before this answer sends, and it must still read as rang; so must a header
+// with a misspelled name, another value, or the right header on another 2xx.
+//
+// PLANT: in Ring, match the held arm on `code == http.StatusAccepted` alone,
+// and the plain 202 reads as held.
+// PLANT: in Ring, compare the value with strings.EqualFold, and `Held` reads
+// as held.
+func TestWebhook_OnlyTheExactHeldAnswerIsHeld(t *testing.T) {
+	for _, c := range []struct {
+		name        string
+		status      int
+		header, val string
+	}{
+		{"a plain 202", http.StatusAccepted, "", ""},
+		{"a misspelled header name", http.StatusAccepted, "Loc-Bel", "held"},
+		{"another value", http.StatusAccepted, "Loc-Bell", "busy"},
+		{"the value in another case", http.StatusAccepted, "Loc-Bell", "Held"},
+		{"the header on a 200", http.StatusOK, "Loc-Bell", "held"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := newAnsweringReceiver(t, c.status, c.header, c.val)
+			rec := &recorder{}
+			err := newWebhookNotifier(rec.log).Ring("workshop.scribe", r.URL, webhookBellLine, "")
+			if err != nil {
+				t.Fatalf("err = %v; want a bell that rang", err)
+			}
+			if !strings.Contains(rec.joined(), "nudge workshop.scribe rang") {
+				t.Errorf("the ring was not logged as rung: %q", rec.joined())
+			}
+		})
+	}
+}

@@ -464,6 +464,7 @@ workshop.scribe: row ok, queue ok
 workshop.crier: row ok, queue ok, mail unread, bell tried 2 of 3, last refused (pane busy) at 2026-09-16T22:47:36Z
 workshop.binder: row ok, queue ok, mail unread, bell made 3 of 3 tries, 2 rang, last rang at 2026-09-16T22:49:36Z; no more until new mail
 workshop.clerk2: row ok, queue ok, mail unread, bell made 3 of 3 tries, none rang, last refused (pane busy) at 2026-09-16T22:51:36Z; no more until new mail
+workshop.relay: row ok, queue ok, mail unread, held by the seat's receiver since 2026-09-16T22:52:10Z
 workshop.clerk: queue missing, next beat repairs it
 atelier.scribe: pid dead, next beat reaps it
 workshop.legacy: row unreadable: <reason>
@@ -491,7 +492,9 @@ that seat came after it. That is what `mail unread` says: the bell rang for mail
 shows that nobody took it. A `read` by the seat removes the field again. The two shapes are
 `mail unread, bell tried <k> of <n>, last <result> (<reason>) at <ts>` while the streak runs, and
 `mail unread, bell made <n> of <n> tries, <k> rang, last <result> at <ts>; no more until new mail`
-once it is finished. `none rang` stands for 0.
+once it is finished. `none rang` stands for 0. A third shape, `mail unread, held by the seat's
+receiver since <ts>`, stands while the latest try was `held`; `<ts>` is the first held answer in the
+run. A held streak is never shown as unanswered: the receiver has the bell.
 
 **A finished streak says how many tries rang.** A bell that rang and was not answered is a
 different fact from a bell that never rang. The first is a seat that is not looking. The second is
@@ -879,6 +882,19 @@ once. Nothing is lost to a suppressed wake: the queue keeps the truth.
 to. The four outcomes are `rang`, `refused` by a busy pane, `suppressed` by the breaker, and
 `failed` in the notifier. None of them changes what happens next.
 
+**A fifth outcome, `held`, is the one exception.** A `webhook` receiver answers `202` with the reply
+header `Loc-Bell: held` when it has the bell and will deliver it once it is safe, for example after
+the person at the terminal stops typing. The header name is matched without regard to case, and the
+value must be exactly `held`. A plain `202`, or a `202` with any other header or value, is `rang` as
+before. A held try is written down with the result `held`. It does not use one of the streak's
+tries, it does not count as a ring, and it is not charged to the breaker. The next try waits
+`wake_held_recheck_seconds` instead of `wake_retry_seconds`. A receiver that still holds the bell
+answers `held` again. A receiver that has died gives no answer, that try is `failed`, and the streak
+counts on as usual, so the mail is never left silent. A held try's line carries the number of the
+try it stands in for, so `2/3 held` followed by `2/3 failed` is one try asked twice. The streak
+still ends silently when the unread count reaches 0. Only the receiver at the seat's own loopback
+address can send the header.
+
 The gap between one try and the next is fixed at `wake_retry_seconds`. A streak gets `wake_tries`
 tries. After the last try the bell gives up. It does nothing more until mail arrives again. A new
 arrival rings at once and starts a fresh count.
@@ -895,12 +911,14 @@ is not written down, because it can carry the broker's address.
 the runtime's own log — stdout is the protocol's. No `wake` line is written for it: a failed bell is
 not a wake, and a log saying the pane was woken when it was not is worse than no log at all. A ring
 that types logs its `wake` line, and a ring after the first also logs
-`bell <endpoint> rang on try <k> of <n>`. A queue that reads empty logs
+`bell <endpoint> rang on try <k> of <n>`. A held try logs
+`bell <endpoint> held by the receiver; asking again in <gap>` and no `bell failed` line: a held
+bell is not a broken one. A queue that reads empty logs
 `bell <endpoint> stopped: the queue is empty`. A give-up logs
 `bell <endpoint> made <n> of <n> tries, <k> rang; no more until new mail`.
 
 **A busy refusal does not consume the breaker.** The caps limit how often the pane is typed into, and
-a refusal typed nothing. The minute and hour counters are given back for it. A ring that typed is
+a refusal typed nothing. The minute and hour counters are given back for it, and for a held try too. A ring that typed is
 charged, and a broken bell stays charged, because a notifier that failed will fail again.
 
 **The day's record holds every try.** Each one is a `bell-try` line with its `try`, its `of` and its
@@ -908,8 +926,9 @@ charged, and a broken bell stays charged, because a notifier that failed will fa
 is how many of the streak's tries reached the pane, and it is written even when it is 0. `last` is
 the final try's result. A give-up line with no `last` was written before those two fields existed,
 and a reader says so rather than reading the absent `rang` as a 0. A try that rang carries no
-`reason`; the other three carry the notifier's own text. The delivery log keeps its own evidence:
-the notifier writes `nudge <endpoint> refused: <reason>` every time it refuses.
+`reason`; the other four carry the notifier's own text. The delivery log keeps its own evidence:
+the notifier writes `nudge <endpoint> refused: <reason>` every time it refuses, and
+`nudge <endpoint> held` every time a receiver holds the bell.
 
 `bell-failed` was the old line, one per busy streak. No build writes one. `loc transcript` still
 reads one, and `loc status` ignores it.
@@ -987,6 +1006,7 @@ the bell; something else must then run `subscribe` and `unsubscribe` around the 
 | `wake_breaker_per_hour` | `60` | cap on wakes per hour (`loc mcp`) |
 | `wake_retry_seconds` | `60` | the fixed gap between one try of a seat's bell and the next (`loc mcp`) |
 | `wake_tries` | `3` | how many times a bell tries while mail is unread, before it gives up (`loc mcp`) |
+| `wake_held_recheck_seconds` | `300` | the gap before a bell asks again after the seat's receiver answered that it holds the bell (`loc mcp`) |
 
 **`idle_window` is the old name of `idle_timeout`.** `loc` never rewrites a config file that exists,
 so a deployment that set the old key keeps a line that does nothing. The new key takes its own value,
@@ -995,7 +1015,7 @@ the value in force.
 
 **The defaults live in one table**, `internal/config/keys.go`. `loc start` writes the file from it on
 first run, with each key's comment above it, so the file and the code cannot drift apart.
-`wake_retry_seconds` and `wake_tries` are in that table. `wake_window_seconds`,
+`wake_retry_seconds`, `wake_tries` and `wake_held_recheck_seconds` are in that table. `wake_window_seconds`,
 `wake_breaker_per_minute` and `wake_breaker_per_hour` are the deployment's and are not.
 
 **A default is not a deployment.** Every key above has one, so a home with no `config` file reads a

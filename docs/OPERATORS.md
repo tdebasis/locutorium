@@ -81,6 +81,7 @@ durable; listeners reconnect.
 | `wake_breaker_per_hour` | `60` | the hourly cap |
 | `wake_retry_seconds` | `60` | the fixed gap between one try of a seat's bell and the next |
 | `wake_tries` | `3` | how many times a bell tries while mail is unread, before it gives up |
+| `wake_held_recheck_seconds` | `300` | the gap before a bell asks again after the seat's receiver answered that it holds the bell |
 
 Change a key by editing the line; revert it by deleting the line.
 
@@ -109,7 +110,7 @@ it:
 |---|---|
 | `tmux` | types one bell line into the seat's pane, then submits it. It first checks that the pane accepts input. |
 | `claude` | starts one Claude session to carry the bell to the seat. At most one session per seat per 30 seconds. |
-| `webhook` | sends the bell as one HTTP `POST` to a URL on the same machine. The request is not signed. `429` and `503` mean that the receiver is busy. |
+| `webhook` | sends the bell as one HTTP `POST` to a URL on the same machine. The request is not signed. `429` and `503` mean that the receiver is busy. `202` with the reply header `Loc-Bell: held` means that the receiver has the bell and will deliver it later. |
 | `none` | rings nothing. The seat finds its mail on its next `loc read`. |
 
 There is no fallback from one notifier to another. A bell that could not ring is written to
@@ -118,6 +119,12 @@ There is no fallback from one notifier to another. A bell that could not ring is
 One flat rule governs the bell: while the seat has unread mail, the bell tries. A try is a try
 whatever it came to. It rang, a busy pane refused it, the breaker suppressed it, or the notifier
 failed. None of those changes what happens next.
+
+One answer is the exception. A `webhook` receiver that has the bell but cannot deliver it yet
+answers `202` with the header `Loc-Bell: held`. That try is recorded as `held`. It uses none of the
+streak's tries and does not count against the breaker, and the next try waits
+`wake_held_recheck_seconds`. A receiver that died meanwhile gives no answer, that try is `failed`,
+and the streak goes on counting from there.
 
 The gap between tries is `wake_retry_seconds`, and it is fixed. A streak gets `wake_tries` tries.
 After the last try the bell gives up, and it does nothing more until mail arrives again. A new
@@ -131,7 +138,7 @@ A seat that is busy for longer than its tries last gets no further ring. It find
 next `read`, and `loc status` shows the state until then.
 
 A busy refusal typed nothing into the pane, so it does not count against `wake_breaker_per_minute` or
-`wake_breaker_per_hour`. A ring that typed does count, and so does a broken bell.
+`wake_breaker_per_hour`. Nor does a held try. A ring that typed does count, and so does a broken bell.
 
 Identity comes from `LOC_IDENTITY` and from nothing else. A verb with no identity refuses
 (`cannot determine sender identity: set LOC_IDENTITY`). A refusal is correct; guessing is not.
@@ -203,8 +210,9 @@ A `sent` line with no `read` line under the same `uid` is a message nobody has c
 ```
 
 `bell-try` is ONE TRY of the seat's bell. `try` and `of` place it in its streak, and `result` is one
-of `rang`, `refused`, `suppressed` and `failed`. A try that rang carries no `reason`. The result is
-written down and it changes no count.
+of `rang`, `refused`, `suppressed`, `failed` and `held`. A try that rang carries no `reason`. The
+result is written down and it changes no count, except `held`: a held try uses none of the streak's
+tries, and its `try` is the number of the try it stands in for.
 
 `bell-gave-up` closes a streak that used all its tries. `rang` is how many of them reached the
 pane, and it is written even when it is 0. `last` is the final try's result. A bell that rang and
