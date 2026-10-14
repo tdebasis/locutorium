@@ -658,3 +658,54 @@ another.
   written to the delivery log or to the day's record.
 - **A bell that rang is not a message that was read.** The receiver can accept the request and do
   nothing. Entry 17 already covers this: while the seat has unread mail, the bell tries again.
+
+---
+
+## 19. A receiver may hold the bell
+
+**Context:** Entry 18 gave a `webhook` receiver three answers: a `2xx` is `rang`, `429` and `503` are
+`refused`, and anything else is `failed`. Some receivers cannot pass a bell on at once. One sits
+between a terminal and an agent and must wait until the person has finished typing. It has the
+bell, it will deliver it, and it cannot do so yet. Neither answer fits:
+
+- **Answering `2xx` records a seat as told when it was not.** The bell also keeps trying while the
+  mail is unread, and each try is charged to the breaker. A long wait on a busy evening can trip the
+  hourly cap and silence later bells for up to an hour.
+- **Answering `503` ends the streak with the seat recorded as never told.** After `wake_tries` tries
+  the bell gives up, while the receiver may still deliver the bell a minute later.
+
+**Decision (2026-10-13):** A receiver may answer `held`. It answers `202` with the reply header
+`Loc-Bell: held`. The header name is matched without regard to case, as HTTP matches names; the
+value must be exactly `held`. A plain `202`, or any other header or value, is still `rang`, so a
+receiver written before this answer is read exactly as before.
+
+A held try is written to the day's record with the result `held`. It does not use one of the
+streak's tries, it is not counted in the give-up line's `rang`, and it is not charged to the
+breaker. It is not a failed bell, so it raises no `bell failed` warning. The next try waits
+`wake_held_recheck_seconds`, a new setting with a default of 300 seconds, instead of
+`wake_retry_seconds`.
+
+**This changes entry 17's rule that the result never changes the counting.** Entry 17 is not
+rewritten. `held` is the one result the counting reads; the other four still change nothing.
+
+**Why.** The record should say what happened to the bell. `rang` would claim a delivery that has not
+happened, and `refused` followed by a give-up would claim the seat was never told while the
+receiver still holds the bell. A held bell also typed nothing, so it gets the same breaker refund a
+busy refusal gets.
+
+**Consequences:**
+
+- **Only a seat's own receiver can quiet that seat's bell.** The header is read only from the answer
+  to the seat's own address, which must be loopback, as entry 18 requires.
+- **The recheck keeps a dead receiver from leaving mail silent.** A receiver that still holds the
+  bell answers `held` again. A receiver that has died gives no answer, that try is recorded
+  `failed`, and the streak counts on as entry 17 describes, to its give-up.
+- **The streak still ends silently when the seat reads its mail.** The recheck asks the queue first,
+  as every later try does.
+- **A held try's line carries the number of the try it stands in for.** `2/3 held` followed by
+  `2/3 failed` is one try asked twice.
+- `loc status` shows a held streak as `held by the seat's receiver since <time>`, with the stamp of
+  the first held answer in the run. It never shows one as not answered, or as `none rang`.
+  `loc transcript` prints `held` as it prints the other results.
+- **The change is minor.** The envelope is unchanged. The record gains one `result` value and the
+  config gains one setting. Day files written before this change read as they did.

@@ -140,14 +140,16 @@ func LogRead(uid, by string, at time.Time) {
 //
 // EVERY TRY IS WRITTEN DOWN, and the result never changes the counting. `try`
 // and `of` say where this try sits in the streak; `result` is one of `rang`,
-// `refused`, `suppressed` and `failed`. A reader that wants to know whether a
+// `refused`, `suppressed`, `failed` and `held`. A `held` try is the one the
+// counting reads: it uses none of the streak's tries, and its `try` is the
+// number of the try it stands in for (#228). A reader that wants to know whether a
 // bell was rung again after one that did not get through reads it here: before
 // this, a ring that worked left no line at all, so "it was tried again and
 // worked" and "nobody tried and the seat looked by itself" were the same
 // record (#144).
 //
 // `reason` is left out for `rang`, which has none. It is the notifier's own
-// text for the other three, because the repair differs by what it says.
+// text for the other four, because the repair differs by what it says.
 //
 // It carries no `uid`. The server learns that mail arrived, not which message
 // arrived: the watch hands it an arrival and the count comes from Unread, so

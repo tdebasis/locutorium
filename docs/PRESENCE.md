@@ -441,6 +441,8 @@ mail arrives again. A new arrival rings at once and starts a fresh count. The da
 every try with its result, and the result changes no count. The end of a streak records how many
 of its tries rang, because a bell that rang and was not answered is a different fact from a bell
 that never rang. The two numbers are deployment keys. `docs/CLI.md` holds them and their defaults.
+One answer pauses the count: a `webhook` receiver that has the bell and cannot deliver it yet
+answers `held`, and the bell asks it again after a longer gap without spending a try (`DECISIONS.md` §19).
 
 ## Trust, in the inner parlor
 

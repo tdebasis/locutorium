@@ -107,6 +107,29 @@ func (b busyRefusal) Unwrap() error { return b.err }
 
 func (busyRefusal) Is(target error) bool { return target == ErrBusy }
 
+// ErrHeld marks a bell THE RECEIVER HAS AND WILL DELIVER LATER (#228). Only the
+// webhook notifier returns it, and only for a 202 whose reply carries the
+// header below. A receiver that sits between a pane and an agent must wait
+// until the person has stopped typing: it has the bell, it cannot pass it on
+// yet, and neither "rang" nor "busy" is true of it.
+//
+// IT IS NOT A RING AND NOT A REFUSAL. The bell records it as `held`, gives the
+// breaker its charge back, spends none of the streak's tries, and asks again
+// after wake_held_recheck_seconds. A receiver that died in the meantime gives
+// no answer to that later try, which is recorded `failed`, so held mail is
+// never left silent.
+var ErrHeld = errors.New("the receiver holds the bell")
+
+// heldAnswer carries ErrHeld the way busyRefusal carries ErrBusy: the marker
+// rides on the type, and the text that reaches the record does not change.
+type heldAnswer struct{ err error }
+
+func (h heldAnswer) Error() string { return h.err.Error() }
+
+func (h heldAnswer) Unwrap() error { return h.err }
+
+func (heldAnswer) Is(target error) bool { return target == ErrHeld }
+
 // courierWindow is the rate limit under the claude notifier: at most one
 // courier spawn per seat per this long (R35c). A courier is a whole Claude
 // session, so a queue that fills quickly would otherwise spawn one session per
@@ -337,6 +360,17 @@ func (n *courierNotifier) fail(endpoint, reason string) error {
 // that holds the connection must not hold the loop.
 const webhookTimeout = 5 * time.Second
 
+// THE HELD ANSWER. A receiver says it holds the bell by answering 202 with this
+// header set to exactly this value. The header NAME is matched as HTTP matches
+// names, without regard to case; the VALUE must be exact. Anything else — a
+// plain 202, a misspelled name, another value — is a 2xx and rang, as it was
+// before this answer existed, so a receiver that never heard of it is read
+// exactly as it always was.
+const (
+	webhookHeldHeader = "Loc-Bell"
+	webhookHeldValue  = "held"
+)
+
 // webhookEvent is the event_type of every bell. A receiver that takes several
 // kinds of request on one URL selects on it.
 const webhookEvent = "loc.bell"
@@ -437,7 +471,13 @@ func loopbackHost(host string) bool {
 // Ring posts the bell and reads the status, and nothing else, of the answer.
 //
 // 2xx rang. 429 and 503 are a receiver that is busy, marked ErrBusy so the
-// bell asks again. Every other answer, and no answer, is a failed bell.
+// bell asks again. A 202 that carries `Loc-Bell: held` is a receiver that has
+// the bell and will deliver it later, marked ErrHeld. Every other answer, and
+// no answer, is a failed bell.
+//
+// THE HELD ARM COMES FIRST. A 202 is also a 2xx, and checked second it would
+// never be reached. Only the receiver at the seat's own loopback address can
+// send the header, so only a seat's own receiver can quiet its bell.
 //
 // THE RESPONSE BODY IS NEVER RECORDED. The reason returned here reaches the
 // day's record and `loc transcript` prints it, and a receiver's error page is
@@ -470,6 +510,9 @@ func (n *webhookNotifier) Ring(endpoint, address, bell, _ string) error {
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 
 	switch code := resp.StatusCode; {
+	case code == http.StatusAccepted && resp.Header.Get(webhookHeldHeader) == webhookHeldValue:
+		n.log(fmt.Sprintf("nudge %s held", endpoint))
+		return heldAnswer{fmt.Errorf("webhook status %d, %s: %s", code, webhookHeldHeader, webhookHeldValue)}
 	case code >= 200 && code < 300:
 		n.log(fmt.Sprintf("nudge %s rang '%s'", endpoint, bell))
 		return nil

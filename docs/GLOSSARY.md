@@ -22,6 +22,7 @@ never means a particular deployment.
 | **webhook** | the `webhook` notifier: it sends the bell as one HTTP request to a loopback URL that the seat registered | the bell rung through a door that a program opened |
 | **breaker** | `wake_breaker_per_minute` / `_per_hour`: caps wakes; suppression loses nothing | not knocking sixty times |
 | **try** | `wake_retry_seconds` / `wake_tries`: while mail is unread the bell tries again on a fixed gap, then stops. The end of a streak says how many tries rang | knocking again, then leaving the note |
+| **held** | a `webhook` receiver's answer that it has the bell and will deliver it when safe: `202` with `Loc-Bell: held`. The try uses none of the streak's tries, and the bell asks again after `wake_held_recheck_seconds` | the porter has the note and is waiting for a pause |
 | **registry** | `loc registry`: every registered agent's whole record, read from the ledger on this machine. No broker, no identity, no health facts | the attendance book |
 | **watch** | `loc watch`, which follows the event stream and takes nothing | the silent observer |
 | **identity** | `LOC_IDENTITY`, and nothing else; a refusal, never a guess | knowing who is speaking |

@@ -457,3 +457,90 @@ func TestStatusShowsABellThatFailedInTheRegistrationsOwnSecond(t *testing.T) {
 		t.Errorf("row = %q\nwant  %q\n(a failure in the registration's own second is the startup case)", got, want)
 	}
 }
+
+// A HELD STREAK IS NOT AN UNANSWERED ONE (#228). The seat's own receiver has
+// the bell and will deliver it when it is safe. The row says so, with the
+// stamp of the first held answer in the run, and never the words that send an
+// operator after a broken bell.
+//
+// PLANT: in words, delete the held arm, and the row reads `bell tried 1 of 3,
+// last held`.
+// PLANT: in bellStreaks, set heldSince from every held line, and the second
+// case reads the later stamp.
+func TestStatusShowsAHeldStreakAsHeldNotUnanswered(t *testing.T) {
+	const s = "workshop.scribe"
+	for _, c := range []struct {
+		name  string
+		lines []string
+		want  string
+	}{
+		{
+			"one held try",
+			[]string{bellTryLine(s, "2026-01-15T22:47:36Z", 1, 3, "held", "webhook status 202, Loc-Bell: held")},
+			s + ": row ok, queue ok, mail unread, held by the seat's receiver since 2026-01-15T22:47:36Z",
+		},
+		{
+			// The receiver answers held at every recheck; "since" is the first.
+			"held at the recheck too",
+			[]string{
+				bellTryLine(s, "2026-01-15T22:47:36Z", 1, 3, "held", "webhook status 202, Loc-Bell: held"),
+				bellTryLine(s, "2026-01-15T22:52:36Z", 1, 3, "held", "webhook status 202, Loc-Bell: held"),
+			},
+			s + ": row ok, queue ok, mail unread, held by the seat's receiver since 2026-01-15T22:47:36Z",
+		},
+		{
+			"held after tries that did not get through",
+			[]string{
+				bellTryLine(s, "2026-01-15T22:46:36Z", 1, 3, "failed", "webhook: the receiver could not be reached"),
+				bellTryLine(s, "2026-01-15T22:47:36Z", 2, 3, "held", "webhook status 202, Loc-Bell: held"),
+			},
+			s + ": row ok, queue ok, mail unread, held by the seat's receiver since 2026-01-15T22:47:36Z",
+		},
+		{
+			// A new streak after a give-up opens its own held run.
+			"held after a give-up",
+			[]string{
+				bellTryLine(s, "2026-01-15T22:40:00Z", 3, 3, "refused", "pane busy"),
+				bellGaveUpLine(s, "2026-01-15T22:40:00Z", 3, 0, "refused"),
+				bellTryLine(s, "2026-01-15T22:47:36Z", 1, 3, "held", "webhook status 202, Loc-Bell: held"),
+			},
+			s + ": row ok, queue ok, mail unread, held by the seat's receiver since 2026-01-15T22:47:36Z",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := newPresenceDeployment(t)
+			wholeSeat(t, d, s)
+			seedDayLog(t, d, "2026-01-15", c.lines...)
+
+			got := seatRow(t, d, s)
+			if got != c.want {
+				t.Errorf("row = %q\nwant  %q", got, c.want)
+			}
+			for _, never := range []string{"none rang", "not answered"} {
+				if strings.Contains(got, never) {
+					t.Errorf("row = %q; a held streak must never read %q", got, never)
+				}
+			}
+			if !strings.Contains(got, "held by the seat's receiver") {
+				t.Errorf("row = %q; want it to say the receiver holds the bell", got)
+			}
+		})
+	}
+}
+
+// A RECEIVER THAT DIED AFTER `held` IS AN ORDINARY STREAK AGAIN. The recheck
+// got no answer and was recorded `failed`, and the row says that try, not the
+// held one before it.
+func TestStatusShowsAFailedTryAfterAHeldOne(t *testing.T) {
+	d := newPresenceDeployment(t)
+	wholeSeat(t, d, "workshop.scribe")
+	seedDayLog(t, d, "2026-01-15",
+		bellTryLine("workshop.scribe", "2026-01-15T22:47:36Z", 1, 3, "held", "webhook status 202, Loc-Bell: held"),
+		bellTryLine("workshop.scribe", "2026-01-15T22:52:36Z", 1, 3, "failed", "webhook: the receiver could not be reached"))
+
+	want := "workshop.scribe: row ok, queue ok, mail unread, bell tried 1 of 3, " +
+		"last failed (webhook: the receiver could not be reached) at 2026-01-15T22:52:36Z"
+	if got := seatRow(t, d, "workshop.scribe"); got != want {
+		t.Errorf("row = %q\nwant  %q", got, want)
+	}
+}
