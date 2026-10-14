@@ -153,9 +153,16 @@ type bell struct {
 	// cut says the watch lost its connection and no count has been read since.
 	// While it is set, mail can reach the queue with no arrival seen, so the
 	// bell cannot know who sent what waits. It is set by disconnected and
-	// cleared by the first count read after it: the reconnect's backlog, or a
-	// later try that finds the queue empty.
+	// cleared by the reconnect's backlog when its count is read, or by a later
+	// try that finds the queue empty after the reconnect.
 	cut bool
+
+	// back says the watch reconnected after the loss that set cut. An empty
+	// queue clears cut only when back is set: before the reconnect, mail can
+	// still land unseen after the queue reads empty. Every loss clears it
+	// (disconnected), and the reconnect's backlog sets it, whether or not its
+	// count is read.
+	back bool
 
 	// The breaker's counters, bucketed by calendar minute and hour exactly as
 	// the shell listener's are: a bucket that has rolled over starts empty,
@@ -242,6 +249,7 @@ func (b *bell) arrived(sender string) {
 func (b *bell) disconnected() {
 	b.mu.Lock()
 	b.cut = true
+	b.back = false
 	b.mu.Unlock()
 }
 
@@ -279,6 +287,13 @@ func (b *bell) backlog() {
 	if b.s.d.Unread == nil {
 		return
 	}
+	// The backlog runs at start and after every reconnect. At start nothing
+	// is cut, so a cut here means the watch is back.
+	b.mu.Lock()
+	if b.cut {
+		b.back = true
+	}
+	b.mu.Unlock()
 	n, err := b.s.d.Unread(b.s.d.Endpoint)
 	if err != nil {
 		// No count was read, so a lost connection stays lost as far as the
@@ -291,10 +306,14 @@ func (b *bell) backlog() {
 		return
 	}
 	// THE COUNT ENDS A CUT. A count read after the reconnect covers every
-	// message the watch missed. The window rings for it below, blind, so no
-	// name from before the cut reaches a later try.
+	// message the watch missed. The window rings for it below, blind and with
+	// no names, so no name from before the cut reaches this ring or a later
+	// try.
 	wasCut := b.cut
 	b.cut = false
+	if wasCut {
+		b.senders = nil
+	}
 	if n <= 0 {
 		b.mu.Unlock()
 		return
@@ -326,6 +345,13 @@ func (b *bell) fire() {
 	b.senders = nil
 	blind := b.blind
 	b.blind = false
+	// A WINDOW THAT RINGS WHILE THE WATCH IS DOWN NAMES NOBODY. Its senders
+	// are the ones seen before the loss, and mail from others can have landed
+	// since.
+	if b.cut {
+		blind = true
+		senders = nil
+	}
 	b.timer = nil
 	stopped := b.stopped
 	b.clearStreak()
@@ -547,11 +573,16 @@ func (b *bell) again() {
 		return
 	}
 	if n <= 0 {
-		// AN EMPTY QUEUE ALSO ENDS A CUT. No mail waits, so no unseen sender
-		// has mail waiting. Without this, a reconnect whose backlog count
-		// failed would leave every later try nameless until the next reconnect.
+		// AN EMPTY QUEUE ENDS A CUT, BUT ONLY AFTER THE RECONNECT. Once the
+		// watch is back it sees every new arrival, so an empty queue then
+		// means no unseen sender has mail waiting. Before the reconnect it
+		// means nothing: mail can land unseen a moment later. Without this,
+		// a reconnect whose backlog count failed would leave every ring
+		// nameless until the next reconnect.
 		b.mu.Lock()
-		b.cut = false
+		if b.back {
+			b.cut = false
+		}
 		b.mu.Unlock()
 		b.endStreak()
 		b.s.log(fmt.Sprintf("bell %s stopped: the queue is empty", b.s.d.Endpoint))
