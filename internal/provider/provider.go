@@ -109,7 +109,9 @@ type Listener interface {
 	// WatchQueue calls arrived once for every message that reaches endpoint's
 	// queue, and reconnected once for every time the connection to the medium
 	// has been re-established — the moment at which arrivals were missed. It
-	// CONSUMES NOTHING: watching must never compete with reading for the mail.
+	// calls disconnected once for every time the connection is lost, which is
+	// the moment the watch stops seeing arrivals. Either callback may be nil.
+	// It CONSUMES NOTHING: watching must never compete with reading for the mail.
 	// The returned function stops the watch and releases whatever it holds.
 	//
 	// arrived is given the SENDER of the message, which is the envelope's
@@ -117,7 +119,7 @@ type Listener interface {
 	// looked at rather than taken. A payload this build cannot parse yields an
 	// EMPTY sender and still rings: a bell says that mail arrived, and mail in
 	// a form nobody here reads is still mail.
-	WatchQueue(endpoint string, arrived func(sender string), reconnected func()) (stop func(), err error)
+	WatchQueue(endpoint string, arrived func(sender string), reconnected, disconnected func()) (stop func(), err error)
 
 	// Unread is how many messages endpoint has not yet taken. Unlike Status,
 	// which prints "?" rather than fail a whole report over one number, this

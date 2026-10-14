@@ -87,7 +87,9 @@ var errSuppressed = errors.New("suppressed by the breaker")
 // defaultCourierName is what the courier is called when the bell cannot say
 // who sent the mail. The startup backlog path asks the broker HOW MUCH mail is
 // waiting and never who sent it, so it names no seat; a name invented there
-// would be a guess standing in the one field a reader trusts.
+// would be a guess standing in the one field a reader trusts. A later try of a
+// streak asks the same question, and it names a seat only under the rule in
+// laterNames.
 const defaultCourierName = "loc-bell"
 
 // bell coalesces arrivals and rings the seat's notifier.
@@ -137,6 +139,31 @@ type bell struct {
 	// line, which stays a count with no body.
 	senders []string
 
+	// blind says the window's count holds mail with no known sender: an
+	// arrival whose sender did not parse, or a backlog that found more mail
+	// than the watch saw. It is cleared when the window rings.
+	blind bool
+
+	// The streak's senders and the count its first ring announced. A later try
+	// reads them to name the courier (laterNames). They are nil and 0 when the
+	// first ring could not name every message, and clearStreak forgets them.
+	streakSenders []string
+	streakN       int
+
+	// cut says the watch lost its connection and no count has been read since.
+	// While it is set, mail can reach the queue with no arrival seen, so the
+	// bell cannot know who sent what waits. It is set by disconnected and
+	// cleared by the reconnect's backlog when its count is read, or by a later
+	// try that finds the queue empty after the reconnect.
+	cut bool
+
+	// back says the watch reconnected after the loss that set cut. An empty
+	// queue clears cut only when back is set: before the reconnect, mail can
+	// still land unseen after the queue reads empty. Every loss clears it
+	// (disconnected), and the reconnect's backlog sets it, whether or not its
+	// count is read.
+	back bool
+
 	// The breaker's counters, bucketed by calendar minute and hour exactly as
 	// the shell listener's are: a bucket that has rolled over starts empty,
 	// and the hour rolling over is what un-trips the breaker.
@@ -161,7 +188,7 @@ func (s *server) startBell() func() {
 	}
 	s.b = b
 
-	stop, err := s.d.Watch(s.d.Endpoint, b.arrived, b.backlog)
+	stop, err := s.d.Watch(s.d.Endpoint, b.arrived, b.backlog, b.disconnected)
 	if err != nil {
 		return func() {}
 	}
@@ -201,10 +228,29 @@ func (b *bell) arrived(sender string) {
 		return
 	}
 	b.pending++
+	if sender == "" {
+		b.blind = true
+	}
 	b.note(sender)
 	if b.timer == nil {
 		b.timer = time.AfterFunc(b.window, b.fire)
 	}
+}
+
+// disconnected is the watch losing its connection. From now until the
+// reconnect, an arrival reaches the queue and the watch does not see it, so
+// what the bell remembers about senders stops being the whole story.
+//
+// A NAME THERE WOULD BE A GUESS. Mail from an unseen sender can land, and a
+// read can then take some of the mail, and the count can still fit the
+// senders the bell saw. Nothing in the count shows the difference. So while
+// the flag is up, a later try names no seat (laterNames), and the backlog that
+// the reconnect asks for treats the whole window as mail with no known sender.
+func (b *bell) disconnected() {
+	b.mu.Lock()
+	b.cut = true
+	b.back = false
+	b.mu.Unlock()
 }
 
 // note records one sender. Called under the lock.
@@ -241,8 +287,17 @@ func (b *bell) backlog() {
 	if b.s.d.Unread == nil {
 		return
 	}
+	// The backlog runs at start and after every reconnect. At start nothing
+	// is cut, so a cut here means the watch is back.
+	b.mu.Lock()
+	if b.cut {
+		b.back = true
+	}
+	b.mu.Unlock()
 	n, err := b.s.d.Unread(b.s.d.Endpoint)
-	if err != nil || n <= 0 {
+	if err != nil {
+		// No count was read, so a lost connection stays lost as far as the
+		// names go.
 		return
 	}
 	b.mu.Lock()
@@ -250,8 +305,24 @@ func (b *bell) backlog() {
 		b.mu.Unlock()
 		return
 	}
-	if n > b.pending {
-		b.pending = n
+	// THE COUNT ENDS A CUT. A count read after the reconnect covers every
+	// message the watch missed. The window rings for it below, blind and with
+	// no names, so no name from before the cut reaches this ring or a later
+	// try.
+	wasCut := b.cut
+	b.cut = false
+	if wasCut {
+		b.senders = nil
+	}
+	if n <= 0 {
+		b.mu.Unlock()
+		return
+	}
+	if n > b.pending || wasCut {
+		// The watch saw fewer messages than the broker holds, or it was not
+		// watching for a while, so some of this mail has no known sender.
+		b.pending = max(b.pending, n)
+		b.blind = true
 	}
 	if b.timer != nil {
 		b.timer.Stop()
@@ -272,9 +343,23 @@ func (b *bell) fire() {
 	b.pending = 0
 	senders := b.senders
 	b.senders = nil
+	blind := b.blind
+	b.blind = false
+	// A WINDOW THAT RINGS WHILE THE WATCH IS DOWN NAMES NOBODY. Its senders
+	// are the ones seen before the loss, and mail from others can have landed
+	// since.
+	if b.cut {
+		blind = true
+		senders = nil
+	}
 	b.timer = nil
 	stopped := b.stopped
 	b.clearStreak()
+	// THE STREAK KEEPS ITS FIRST RING'S SENDERS only when they account for
+	// every message that ring announced. A blind window keeps none.
+	if !stopped && n > 0 && !blind && len(senders) > 0 {
+		b.streakSenders, b.streakN = senders, n
+	}
 	b.mu.Unlock()
 	if stopped || n <= 0 {
 		return
@@ -488,14 +573,71 @@ func (b *bell) again() {
 		return
 	}
 	if n <= 0 {
+		// AN EMPTY QUEUE ENDS A CUT, BUT ONLY AFTER THE RECONNECT. Once the
+		// watch is back it sees every new arrival, so an empty queue then
+		// means no unseen sender has mail waiting. Before the reconnect it
+		// means nothing: mail can land unseen a moment later. Without this,
+		// a reconnect whose backlog count failed would leave every ring
+		// nameless until the next reconnect.
+		b.mu.Lock()
+		if b.back {
+			b.cut = false
+		}
+		b.mu.Unlock()
 		b.endStreak()
 		b.s.log(fmt.Sprintf("bell %s stopped: the queue is empty", b.s.d.Endpoint))
 		return
 	}
 
-	// A later try asks the broker how much mail is waiting and never who sent
-	// it, so it names no seat, exactly as the backlog path does.
-	b.try(n, defaultCourierName, "")
+	b.mu.Lock()
+	names := b.laterNames(n)
+	b.mu.Unlock()
+	b.try(n, courierName(names), bellFrom(names))
+}
+
+// laterNames is who a later try may name, or nil when it may name no one.
+// Called under the lock.
+//
+// A LATER TRY NAMES A SEAT ONLY WHEN THE COUNT ENTAILS IT. The try asks the
+// broker how much mail waits and never who sent it. The streak remembers the
+// senders its first ring named and how many messages that ring announced, and
+// the open window holds any mail that arrived since. Those senders are named
+// when every one of these is true:
+//
+//   - the first ring named every message it announced, and so did the window;
+//   - the queue holds no more than the two counts together, so no mail from
+//     an unseen sender can be waiting;
+//   - with several senders, the queue holds exactly that many. A smaller count
+//     means some mail was read, and the count cannot say whose;
+//   - the watch has not lost its connection since the last count. While it
+//     is lost, mail lands unseen (disconnected).
+//
+// Anything else names no seat, exactly as the backlog path does.
+func (b *bell) laterNames(n int) []string {
+	if len(b.streakSenders) == 0 || b.blind || b.cut {
+		return nil
+	}
+	names := append([]string(nil), b.streakSenders...)
+	for _, s := range b.senders {
+		seen := false
+		for _, have := range names {
+			if have == s {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			names = append(names, s)
+		}
+	}
+	known := b.streakN + b.pending
+	if n > known {
+		return nil
+	}
+	if len(names) > 1 && n != known {
+		return nil
+	}
+	return names
 }
 
 // endStreak closes a streak that ended without a give-up.
@@ -505,8 +647,8 @@ func (b *bell) endStreak() {
 	b.mu.Unlock()
 }
 
-// clearStreak cancels a waiting try and forgets the count. Called under the
-// lock.
+// clearStreak cancels a waiting try and forgets the count and the senders.
+// Called under the lock.
 func (b *bell) clearStreak() {
 	if b.tryTimer != nil {
 		b.tryTimer.Stop()
@@ -514,6 +656,8 @@ func (b *bell) clearStreak() {
 	}
 	b.tries = 0
 	b.rangs = 0
+	b.streakSenders = nil
+	b.streakN = 0
 }
 
 // giveBack returns the minute and hour charges for a ring that TYPED NOTHING.

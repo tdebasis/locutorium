@@ -29,7 +29,7 @@ func TestWatchQueue_RingsOnArrivalAndConsumesNothing(t *testing.T) {
 	defer nc.Close()
 
 	var rings atomic.Int64
-	stop, err := p.WatchQueue("alice", func(string) { rings.Add(1) }, nil)
+	stop, err := p.WatchQueue("alice", func(string) { rings.Add(1) }, nil, nil)
 	if err != nil {
 		t.Fatalf("WatchQueue: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestWatchQueue_ReportsTheSenderAndStillConsumesNothing(t *testing.T) {
 	defer nc.Close()
 
 	senders := make(chan string, 4)
-	stop, err := p.WatchQueue("alice", func(from string) { senders <- from }, nil)
+	stop, err := p.WatchQueue("alice", func(from string) { senders <- from }, nil, nil)
 	if err != nil {
 		t.Fatalf("WatchQueue: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestWatchQueue_AnUnparsablePayloadRingsWithNoSender(t *testing.T) {
 	defer nc.Close()
 
 	senders := make(chan string, 4)
-	stop, err := p.WatchQueue("alice", func(from string) { senders <- from }, nil)
+	stop, err := p.WatchQueue("alice", func(from string) { senders <- from }, nil, nil)
 	if err != nil {
 		t.Fatalf("WatchQueue: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestWatchQueue_AnUnreachableMediumIsAnError(t *testing.T) {
 	p := h.as(t, "alice")
 	write(t, filepath.Join(h.home, "config"), "nats_url = "+loctest.ClosedPort(t)+"\n")
 
-	if stop, err := p.WatchQueue("alice", func(string) {}, nil); err == nil {
+	if stop, err := p.WatchQueue("alice", func(string) {}, nil, nil); err == nil {
 		stop()
 		t.Fatal("a watch was established against a medium that is not there")
 	}
@@ -188,6 +188,14 @@ func TestUnread_AnUnreachableMediumIsAnError(t *testing.T) {
 // the backlog again. Proved through a relay this test owns: the scratch server
 // cannot be stopped and started under the client, but the path to it can be
 // cut, which is the same event as far as the client is concerned.
+//
+// IT ALSO SAYS WHEN THE BREAK BEGAN, and it says so before it says the
+// connection is back. From the loss to the reconnect the watch sees nothing,
+// and a caller that names senders from what the watch saw needs to know that
+// span is open.
+//
+// PLANT: in WatchQueue, delete the DisconnectErrHandler option, and this case
+// fails on the missing loss.
 func TestWatchQueue_ARestoredConnectionSaysSo(t *testing.T) {
 	h := newHarness(t, "alice")
 	p := h.as(t, "alice")
@@ -195,8 +203,17 @@ func TestWatchQueue_ARestoredConnectionSaysSo(t *testing.T) {
 	relay := newRelay(t, h.url)
 	write(t, filepath.Join(h.home, "config"), "nats_url = nats://"+relay.addr+"\n")
 
+	var mu sync.Mutex
+	var events []string
+	note := func(e string) {
+		mu.Lock()
+		defer mu.Unlock()
+		events = append(events, e)
+	}
 	var back atomic.Int64
-	stop, err := p.WatchQueue("alice", func(string) {}, func() { back.Add(1) })
+	stop, err := p.WatchQueue("alice", func(string) {},
+		func() { note("back"); back.Add(1) },
+		func() { note("lost") })
 	if err != nil {
 		t.Fatalf("WatchQueue through the relay: %v", err)
 	}
@@ -211,6 +228,12 @@ func TestWatchQueue_ARestoredConnectionSaysSo(t *testing.T) {
 	if back.Load() == 0 {
 		t.Fatal("the connection came back and the listener never said so; " +
 			"a seat that missed the gap is never told to look again")
+	}
+	mu.Lock()
+	got := append([]string(nil), events...)
+	mu.Unlock()
+	if len(got) < 2 || got[0] != "lost" {
+		t.Errorf("the listener reported %v; want the loss first, then the reconnect", got)
 	}
 }
 

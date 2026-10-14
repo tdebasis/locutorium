@@ -35,8 +35,13 @@ const listenReconnectWait = 1 * time.Second
 // where a reconnect would only turn a dead server into a long wait; a listener
 // that gave up on the first blip would instead leave its seat registered and
 // deaf, which is the failure nobody notices. Each re-establishment calls
-// reconnected, because arrivals during the gap were seen by no one.
-func (p *Provider) WatchQueue(endpoint string, arrived func(sender string), reconnected func()) (func(), error) {
+// reconnected, because arrivals during the gap were seen by no one. Each loss
+// calls disconnected, because from that moment the watch sees nothing, and a
+// caller that names senders must stop trusting what it saw. The client runs
+// both callbacks in order on one goroutine, so a loss is always reported
+// before the reconnect that ends it. Closing the connection also reports a
+// loss; the caller is stopping by then.
+func (p *Provider) WatchQueue(endpoint string, arrived func(sender string), reconnected, disconnected func()) (func(), error) {
 	nc, err := Dial(p.brokerURL(),
 		natsgo.Name("loc"),
 		natsgo.Timeout(ackTimeout),
@@ -46,6 +51,11 @@ func (p *Provider) WatchQueue(endpoint string, arrived func(sender string), reco
 		natsgo.ReconnectHandler(func(*natsgo.Conn) {
 			if reconnected != nil {
 				reconnected()
+			}
+		}),
+		natsgo.DisconnectErrHandler(func(*natsgo.Conn, error) {
+			if disconnected != nil {
+				disconnected()
 			}
 		}),
 	)

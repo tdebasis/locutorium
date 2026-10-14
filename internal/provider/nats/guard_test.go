@@ -156,7 +156,7 @@ func TestWatchQueueSaysTheMissingDeploymentAsItself(t *testing.T) {
 	t.Setenv("LOC_HOME", t.TempDir())
 
 	p := &Provider{}
-	stop, err := p.WatchQueue("workshop.scribe", nil, nil)
+	stop, err := p.WatchQueue("workshop.scribe", nil, nil, nil)
 	if stop != nil {
 		// Only reachable if the refusal regresses, and then this arm holds a
 		// connection; release it before failing (Assayer N5).
@@ -236,7 +236,7 @@ func TestWatchQueueDialsThroughTheGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := &Provider{}
-	stop, err := p.WatchQueue("workshop.scribe", nil, nil)
+	stop, err := p.WatchQueue("workshop.scribe", nil, nil, nil)
 	if stop != nil {
 		// Only reachable if BOTH seams regress at once, and then this arm has
 		// opened a live connection; close it before failing (Assayer N5).

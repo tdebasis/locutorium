@@ -339,8 +339,8 @@ func TestBell_ARefusedBellRingsAgainAndCarriesTheCount(t *testing.T) {
 	if got[1] != "🔔 3 new → read" {
 		t.Errorf("the second bell said %q; the queue holds three", got[1])
 	}
-	// A later try asks how much mail is waiting and never who sent it, so it
-	// names no seat.
+	// The arrival carried no sender, so the first ring could not name one and
+	// a later try names no seat either.
 	if c := f.couriersRung()[1]; c != defaultCourierName {
 		t.Errorf("the second try named the courier %q; want %q", c, defaultCourierName)
 	}
@@ -756,5 +756,480 @@ func TestBell_ANewArrivalResetsTheRingCount(t *testing.T) {
 	if got["rang"] != float64(0) {
 		t.Errorf("rang = %v, want 0. The earlier streak's ring was carried into this one. The record: %v",
 			got["rang"], results(t, dir))
+	}
+}
+
+// ── who a later try names ───────────────────────────────────────────────────
+
+// A LATER TRY NAMES THE SENDER THE FIRST RING NAMED. The first ring of a
+// streak knows who sent the mail, because the watch carried it. A later try
+// asks the queue only how much mail waits; when that count is no more than
+// the first ring announced, and nothing else has arrived, the mail that waits
+// is that sender's mail, so naming that sender is a fact and not a guess.
+// Before this rule every later try was called "loc-bell".
+//
+// A QUEUE THAT HOLDS MORE NAMES NOBODY. The extra mail reached the queue
+// without the watch seeing it, so its sender is unknown.
+//
+// PLANT: in laterNames, delete the `if n > known` arm, and the third arm
+// names workshop.binder for mail it never saw.
+func TestBell_ALaterTryNamesTheSenderTheFirstRingNamed(t *testing.T) {
+	for _, c := range []struct {
+		name        string
+		unread      int // what the queue holds at the second try
+		wantCourier string
+		wantBell    string
+	}{
+		{"nothing was read", 2,
+			"workshop.binder", "🔔 2 new from binder of house workshop → read"},
+		{"one of the two was read", 1,
+			"workshop.binder", "🔔 1 new from binder of house workshop → read"},
+		{"the queue holds more than the first ring announced", 3,
+			defaultCourierName, "🔔 3 new → read"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			home(t, "provider = none\n")
+			f := &fake{unread: 2, nudgeErr: busy("pane_in_mode")}
+			b, sch, _ := retryBell(t, f, nil)
+
+			b.arrived("workshop.binder")
+			b.arrived("workshop.binder")
+			b.fire()
+			f.unread = c.unread
+			sch.run(t, 0)
+
+			if got := f.couriersRung(); len(got) != 2 || got[1] != c.wantCourier {
+				t.Errorf("the couriers were %v; want the second to be %q", got, c.wantCourier)
+			}
+			if got := f.bells(); len(got) != 2 || got[1] != c.wantBell {
+				t.Errorf("the bells were %q; want the second to be %q", got, c.wantBell)
+			}
+		})
+	}
+}
+
+// AN ARRIVAL DURING THE STREAK JOINS THE NAMES, OR THE TRY NAMES NOBODY. Mail
+// from a second sender that lands while the streak is open sits in the
+// window until the window rings for it. A try that falls inside that window
+// knows both senders and both counts. It names both when the queue holds no
+// more than those counts account for. When the queue holds more, some of the
+// mail came from a sender the bell never saw, and the try names no seat.
+//
+// With two senders the count must match exactly. A queue that holds fewer
+// means some of the mail was read, and the count cannot say whose.
+//
+// PLANT: in laterNames, delete the `if len(names) > 1 && n != known` arm, and
+// the third arm names workshop.binder for mail that may all be the other
+// sender's.
+func TestBell_AnArrivalDuringTheStreakJoinsTheNamesOrTheTryNamesNobody(t *testing.T) {
+	for _, c := range []struct {
+		name        string
+		unread      int
+		wantCourier string
+		wantBell    string
+	}{
+		{"the queue holds the two announced messages", 2,
+			"workshop.binder+1", "🔔 2 new from binder of house workshop and 1 more → read"},
+		{"the queue holds a message nobody announced", 3,
+			defaultCourierName, "🔔 3 new → read"},
+		{"one of the two was read and the count cannot say whose", 1,
+			defaultCourierName, "🔔 1 new → read"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			home(t, "provider = none\n")
+			f := &fake{unread: 1, nudgeErr: busy("pane_in_mode")}
+			b, sch, _ := retryBell(t, f, nil)
+
+			b.arrived("workshop.binder")
+			b.fire()
+			// A second sender's mail lands while the streak is open, and its
+			// window has not rung yet.
+			b.arrived("workshop.mason")
+			f.unread = c.unread
+			sch.run(t, 0)
+
+			if got := f.couriersRung(); len(got) != 2 || got[1] != c.wantCourier {
+				t.Errorf("the couriers were %v; want the second to be %q", got, c.wantCourier)
+			}
+			if got := f.bells(); len(got) != 2 || got[1] != c.wantBell {
+				t.Errorf("the bells were %q; want the second to be %q", got, c.wantBell)
+			}
+		})
+	}
+}
+
+// A STREAK THE BACKLOG STARTED NAMES NO SEAT ON ANY TRY. The backlog asks the
+// broker how much mail waits and never who sent it. When the broker holds
+// more than the watch saw, some of the mail has no known sender, so a later
+// try names nobody, even though the first ring named the sender it saw.
+//
+// PLANT: in backlog, delete the `b.blind = true` line, and the second arm
+// names workshop.binder on its later try.
+func TestBell_AStreakTheBacklogStartedNamesNoSeat(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		watch []string // the arrivals the watch saw before the backlog asked
+	}{
+		{"the watch saw nothing", nil},
+		{"the watch saw less than the broker holds", []string{"workshop.binder"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			home(t, "provider = none\n")
+			f := &fake{unread: 3, nudgeErr: busy("pane_in_mode")}
+			b, sch, _ := retryBell(t, f, nil)
+
+			for _, s := range c.watch {
+				b.arrived(s)
+			}
+			b.backlog()
+			sch.run(t, 0)
+
+			got := f.couriersRung()
+			if len(got) != 2 {
+				t.Fatalf("the couriers were %v; want two tries", got)
+			}
+			if got[1] != defaultCourierName {
+				t.Errorf("the later try named the courier %q; want %q", got[1], defaultCourierName)
+			}
+			if b := f.bells(); b[1] != "🔔 3 new → read" {
+				t.Errorf("the later bell said %q; want the count alone", b[1])
+			}
+		})
+	}
+}
+
+// A NEW STREAK DOES NOT CARRY THE OLD STREAK'S SENDERS. The names belong to
+// the mail the first ring announced. When that streak ends, the names go with
+// it, so the next streak names only what it saw itself.
+//
+// PLANT: in fire, set the streak's senders before clearStreak runs instead of
+// after it, and the new streak's later try names nobody.
+func TestBell_ANewStreakDoesNotCarryTheOldSenders(t *testing.T) {
+	t.Run("a new sender's streak names only the new sender", func(t *testing.T) {
+		home(t, "provider = none\n")
+		f := &fake{unread: 1, nudgeErr: busy("pane_in_mode")}
+		b, sch, _ := retryBell(t, f, nil)
+
+		b.arrived("workshop.binder")
+		b.fire()
+		sch.run(t, 0)
+		sch.run(t, 1) // try 3: the bell gives up
+		if tryArmed(b) {
+			t.Fatal("the first streak did not give up")
+		}
+
+		b.arrived("workshop.mason")
+		b.fire()
+		sch.run(t, 2)
+
+		got := f.couriersRung()
+		if len(got) != 5 {
+			t.Fatalf("the couriers were %v; want three tries and then two", got)
+		}
+		if got[4] != "workshop.mason" {
+			t.Errorf("the new streak's later try named %q; want workshop.mason alone. All: %v", got[4], got)
+		}
+	})
+	t.Run("a backlog streak after a named one names no seat", func(t *testing.T) {
+		home(t, "provider = none\n")
+		f := &fake{unread: 0, nudgeErr: busy("pane_in_mode")}
+		b, sch, _ := retryBell(t, f, nil)
+
+		b.arrived("workshop.binder")
+		b.fire()
+		sch.run(t, 0) // the queue reads empty: the streak ends silently
+
+		f.unread = 1
+		b.backlog()
+		sch.run(t, 1)
+
+		got := f.couriersRung()
+		if len(got) != 3 {
+			t.Fatalf("the couriers were %v; want one try, then two", got)
+		}
+		if got[1] != defaultCourierName || got[2] != defaultCourierName {
+			t.Errorf("the backlog streak named %v; want %q on both tries", got[1:], defaultCourierName)
+		}
+	})
+}
+
+// AN ARRIVAL WITH NO KNOWN SENDER DURING THE STREAK NAMES NOBODY. Its sender
+// did not parse, so the window that holds it is blind. A later try that falls
+// inside that window cannot say the mail that waits is the first ring's
+// sender's mail, even when the count fits: one message in it has a sender
+// nobody knows.
+//
+// PLANT: in laterNames, delete the `b.blind` check, and both arms name
+// workshop.binder.
+// PLANT: in arrived, delete the `if sender == "" { b.blind = true }` arm, and
+// both arms name workshop.binder.
+func TestBell_AnUnknownSenderDuringTheStreakNamesNobody(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		unread int
+	}{
+		{"the queue holds both messages", 2},
+		{"one of the two was read", 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			home(t, "provider = none\n")
+			f := &fake{unread: 1, nudgeErr: busy("pane_in_mode")}
+			b, sch, _ := retryBell(t, f, nil)
+
+			b.arrived("workshop.binder")
+			b.fire()
+			// Mail whose sender did not parse lands while the streak is open,
+			// and its window has not rung yet.
+			b.arrived("")
+			f.unread = c.unread
+			sch.run(t, 0)
+
+			if got := f.couriersRung(); len(got) != 2 || got[1] != defaultCourierName {
+				t.Errorf("the couriers were %v; want the second to be %q", got, defaultCourierName)
+			}
+			want := fmt.Sprintf("🔔 %d new → read", c.unread)
+			if got := f.bells(); len(got) != 2 || got[1] != want {
+				t.Errorf("the bells were %q; want the second to be %q", got, want)
+			}
+		})
+	}
+}
+
+// ── a watch that lost its connection ────────────────────────────────────────
+
+// WHILE THE WATCH IS DOWN, A LATER TRY NAMES NOBODY. Between the loss and the
+// reconnect the watch sees no arrival. Mail from another sender can land, a
+// read can take some mail, and the count can still fit what the first ring
+// announced. A name then would be a guess, so the try names no seat.
+//
+// THE RECONNECT'S BACKLOG ENDS IT. The count it reads covers everything the
+// watch missed, and the window rings for it with no names. After that, a new
+// sender's streak is named again.
+//
+// PLANT: in laterNames, delete the `b.cut` check, and the try during the loss
+// names workshop.binder.
+// PLANT: in backlog, delete the `b.cut = false` line, and the new streak after
+// the reconnect names nobody.
+func TestBell_ALaterTryWhileTheWatchIsDownNamesNobody(t *testing.T) {
+	home(t, "provider = none\n")
+	f := &fake{unread: 2, nudgeErr: busy("pane_in_mode")}
+	b, sch, _ := retryBell(t, f, nil)
+
+	b.arrived("workshop.binder")
+	b.arrived("workshop.binder")
+	b.fire()
+
+	b.disconnected()
+	// Unseen, another sender's mail lands and a read takes some of the mail.
+	// The queue holds two, which fits the first ring's count.
+	f.unread = 2
+	sch.run(t, 0)
+
+	got := f.couriersRung()
+	if len(got) != 2 || got[1] != defaultCourierName {
+		t.Fatalf("the couriers were %v; a try while the watch was down must name %q",
+			got, defaultCourierName)
+	}
+
+	// The connection comes back, and the backlog rings with no names.
+	b.backlog()
+	if got := f.couriersRung(); len(got) != 3 || got[2] != defaultCourierName {
+		t.Fatalf("the couriers were %v; the reconnect's ring must name %q", got, defaultCourierName)
+	}
+
+	// A new sender's streak after the reconnect is named on its later try.
+	b.arrived("workshop.mason")
+	f.unread = 1
+	b.fire()
+	sch.run(t, 2)
+	if got := f.couriersRung(); len(got) != 5 || got[4] != "workshop.mason" {
+		t.Errorf("the couriers were %v; after the reconnect a later try names workshop.mason", got)
+	}
+}
+
+// A WINDOW OPEN ACROSS THE LOSS GIVES ITS STREAK NO NAMES. The window saw one
+// sender before the watch went down. In the gap, another sender's mail can
+// land and a read can take the first. The backlog's count then fits the
+// window and still holds none of the sender the window saw, so a later try
+// names nobody.
+//
+// The first ring names nobody too
+// (TestBell_AWindowOpenAcrossTheLossNamesNobodyOnItsFirstRing).
+//
+// PLANT: in backlog, set wasCut to false in place of b.cut, and the later try
+// names workshop.binder for mail that may be someone else's.
+func TestBell_AWindowOpenAcrossTheLossNamesNobodyLater(t *testing.T) {
+	home(t, "provider = none\n")
+	f := &fake{unread: 1, nudgeErr: busy("pane_in_mode")}
+	b, sch, _ := retryBell(t, f, nil)
+
+	b.arrived("workshop.binder")
+	b.disconnected()
+	b.backlog()
+	sch.run(t, 0)
+
+	if got := f.couriersRung(); len(got) != 2 || got[1] != defaultCourierName {
+		t.Errorf("the couriers were %v; want the second to be %q", got, defaultCourierName)
+	}
+	if got := f.bells(); len(got) != 2 || got[1] != "🔔 1 new → read" {
+		t.Errorf("the bells were %q; want the second to be the count alone", got)
+	}
+}
+
+// AN EMPTY QUEUE ALSO ENDS THE LOSS, AFTER THE RECONNECT. When the
+// reconnect's count could not be read, nothing has said what the watch
+// missed. A later try that finds the queue empty says it: the watch is back,
+// so no mail waits from a sender it did not see.
+//
+// PLANT: in again, delete the `b.cut = false` line under the empty queue, and
+// the new streak names nobody.
+// PLANT: in backlog, delete the `b.back = true` line, and the new streak
+// names nobody.
+func TestBell_AnEmptyQueueEndsTheLoss(t *testing.T) {
+	home(t, "provider = none\n")
+	f := &fake{unread: 1, nudgeErr: busy("pane_in_mode")}
+	b, sch, _ := retryBell(t, f, nil)
+
+	b.arrived("workshop.binder")
+	b.fire()
+	b.disconnected()
+	f.unreadErr = errors.New("timed out")
+	b.backlog() // the reconnect's count fails
+	f.unreadErr = nil
+	f.unread = 0
+	sch.run(t, 0) // the queue reads empty: the streak ends
+
+	b.arrived("workshop.mason")
+	f.unread = 1
+	b.fire()
+	sch.run(t, 1)
+
+	if got := f.couriersRung(); len(got) != 3 || got[2] != "workshop.mason" {
+		t.Errorf("the couriers were %v; want the new streak's later try to name workshop.mason", got)
+	}
+}
+
+// AN EMPTY QUEUE ENDS THE LOSS ONLY AFTER THE RECONNECT. While the connection
+// is still down, an empty queue says nothing about the mail that lands next:
+// the watch cannot see it. So the flag stays up until a reconnect is seen.
+//
+//  1. workshop.binder's mail arrives, seen, and its window opens.
+//  2. The connection drops.
+//  3. The seat reads; a later try finds the queue empty.
+//  4. Still down, another sender's mail lands, unseen.
+//  5. The reconnect's backlog counts one message, which fits the window.
+//
+// The second arm runs the same steps after an earlier loss whose reconnect
+// count failed. That reconnect is not the one after this loss.
+//
+// PLANT: in again, clear `b.cut` on an empty queue without the `b.back`
+// check, and both arms name workshop.binder after the reconnect for mail that
+// is another sender's.
+// PLANT: in disconnected, delete the `b.back = false` line, and the second arm
+// names workshop.binder.
+func TestBell_AnEmptyQueueWhileTheWatchIsDownKeepsTheLoss(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		before func(b *bell, f *fake)
+	}{
+		{"one loss", func(*bell, *fake) {}},
+		{"a second loss after a reconnect whose count failed", func(b *bell, f *fake) {
+			b.disconnected()
+			f.unreadErr = errors.New("timed out")
+			b.backlog()
+			f.unreadErr = nil
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			home(t, "provider = none\n")
+			f := &fake{unread: 1, nudgeErr: busy("pane_in_mode")}
+			b, sch, _ := retryBell(t, f, nil)
+
+			b.arrived("workshop.binder")
+			b.fire() // a streak is open, so a later try is waiting
+			c.before(b, f)
+
+			b.arrived("workshop.binder") // step 1: the window opens
+			b.disconnected()             // step 2
+			f.unread = 0
+			sch.run(t, 0) // step 3: the queue reads empty and the streak ends
+			f.unread = 1  // step 4: another sender's mail lands unseen
+			b.backlog()   // step 5: the reconnect
+			sch.run(t, 1)
+
+			got := f.couriersRung()
+			if len(got) != 3 {
+				t.Fatalf("the couriers were %v; want the first ring, then the reconnect's two tries", got)
+			}
+			if got[1] != defaultCourierName || got[2] != defaultCourierName {
+				t.Errorf("after the reconnect the couriers were %v; want %q on both", got[1:], defaultCourierName)
+			}
+		})
+	}
+}
+
+// THE FIRST RING OF A WINDOW OPEN ACROSS THE LOSS NAMES NOBODY. The window saw
+// workshop.binder before the watch went down. While it was down, mail from
+// another sender could land, so the window's names are a guess for what the
+// ring announces.
+//
+// PLANT: in fire, delete the `if b.cut` guard, and the first arm's ring names
+// workshop.binder.
+// PLANT: in backlog, delete the `b.senders = nil` line under `wasCut`, and the
+// second arm's ring names workshop.binder.
+func TestBell_AWindowOpenAcrossTheLossNamesNobodyOnItsFirstRing(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		rings func(b *bell)
+	}{
+		{"the window rings while the watch is down", func(b *bell) { b.fire() }},
+		{"the reconnect's backlog rings the window", func(b *bell) { b.backlog() }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			home(t, "provider = none\n")
+			f := &fake{unread: 1, nudgeErr: busy("pane_in_mode")}
+			b, _, _ := retryBell(t, f, nil)
+
+			b.arrived("workshop.binder")
+			b.disconnected()
+			c.rings(b)
+
+			if got := f.couriersRung(); len(got) != 1 || got[0] != defaultCourierName {
+				t.Errorf("the couriers were %v; want one ring that names %q", got, defaultCourierName)
+			}
+			if got := f.bells(); len(got) != 1 || got[0] != "🔔 1 new → read" {
+				t.Errorf("the bells were %q; want the count alone", got)
+			}
+		})
+	}
+}
+
+// THE BELL HEARS THE LOSS. startBell hands the watch the bell's own
+// disconnected, so a lost connection reaches the flag the later tries read.
+//
+// PLANT: in startBell, pass nil in place of b.disconnected, and the watch has
+// nothing to call.
+func TestBell_TheWatchReportsALossToTheBell(t *testing.T) {
+	home(t, "provider = none\n")
+	f := &fake{}
+	d := f.deps()
+	d.Stderr = &bytes.Buffer{}
+	s := &server{d: d.withDefaults(), address: "workshop:1.2"}
+	stopBell := s.startBell()
+	defer stopBell()
+
+	f.mu.Lock()
+	lost := f.disconnected
+	f.mu.Unlock()
+	if lost == nil {
+		t.Fatal("the bell gave the watch no way to report a loss")
+	}
+	f.disconnect()
+
+	s.b.mu.Lock()
+	cut := s.b.cut
+	s.b.mu.Unlock()
+	if !cut {
+		t.Error("the watch reported a loss and the bell did not hear it")
 	}
 }

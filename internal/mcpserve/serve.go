@@ -66,10 +66,10 @@ type Deps struct {
 	Emit        func(kind, endpoint, tool string)
 
 	// The medium's listener seam. Watch rings arrived once per message
-	// published to the seat's queue subject and reconnected once per
-	// re-established connection; Unread answers the backlog question at start
-	// and after each of those.
-	Watch  func(endpoint string, arrived func(sender string), reconnected func()) (stop func(), err error)
+	// published to the seat's queue subject, reconnected once per
+	// re-established connection, and disconnected once per lost one; Unread
+	// answers the backlog question at start and after each reconnect.
+	Watch  func(endpoint string, arrived func(sender string), reconnected, disconnected func()) (stop func(), err error)
 	Unread func(endpoint string) (int, error)
 
 	// Signals is the caller's OWN signal channel, when it has one. The
