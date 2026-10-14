@@ -186,17 +186,29 @@ func TestNotify_NoneRingsNothingAndSaysNothing(t *testing.T) {
 // ---------------------------------------------------------------- claude
 
 // fakeClaude puts a `claude` first on PATH that records its argv and the two
-// environment guards, and exits with the code given. THE REAL BINARY IS NEVER
+// environment guards, prints a courier's stream that proves a send to the
+// session on pane %42, and exits with the code given. THE REAL BINARY IS NEVER
 // INVOKED BY A TEST.
 func fakeClaude(t *testing.T, exitCode int) string {
 	t.Helper()
+	return fakeClaudeSays(t, exitCode, courierStream(courierSent))
+}
+
+// fakeClaudeSays is fakeClaude with the courier's standard output given.
+func fakeClaudeSays(t *testing.T, exitCode int, stdout string) string {
+	t.Helper()
 	dir := t.TempDir()
 	rec := filepath.Join(dir, "argv")
+	out := filepath.Join(dir, "stdout")
+	if err := os.WriteFile(out, []byte(stdout), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	script := "#!/bin/sh\n" +
 		"{ for a in \"$@\"; do printf '%s\\n' \"$a\"; done\n" +
 		"  printf 'LOC_COURIER=%s\\n' \"$LOC_COURIER\"\n" +
 		"  printf 'LOC_IDENTITY=[%s]\\n' \"$LOC_IDENTITY\"\n" +
 		"  printf -- '--END--\\n'; } >> " + rec + "\n" +
+		"cat " + out + "\n" +
 		fmt.Sprintf("exit %d\n", exitCode)
 	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(script), 0o700); err != nil {
 		t.Fatal(err)
@@ -204,6 +216,32 @@ func fakeClaude(t *testing.T, exitCode int) string {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return rec
 }
+
+// THE CANNED COURIER STREAMS. Each line has the shape of a line the runtime
+// stores in a courier's session transcript (#216): the ListAgents listing, the
+// SendMessage call, and its result, whose failure is "success":false with no
+// is_error flag. The system line stands for the init event and is ignored.
+const (
+	courierInit    = `{"type":"system","subtype":"init","session_id":"s1","tools":["ListAgents","SendMessage"]}`
+	courierListing = `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_list","name":"ListAgents","input":{}}]}}
+{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_list","type":"tool_result","content":"This session is loc-bell [d877eb].\n\nPeer sessions (2):\n  scribe [57c49f]  ·  interactive  ·  idle  ·  tmux workshop:@2.%42  ·  started 1h ago\n  clerk [9b368a]  ·  interactive  ·  idle  ·  tmux workshop:@0.%4  ·  started 1h ago"}]}}`
+	courierCall   = `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_send","name":"SendMessage","input":{"to":"%s","message":"[LOC] 🔔 1 new → read — run /read-loc now."}}]}}`
+	courierOK     = `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_send","type":"tool_result","content":[{"type":"text","text":"{\"success\":true,\"message\":\"sent to scribe\",\"msg_id\":\"m1\"}"}]}]}}`
+	courierNoOne  = `{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_send","type":"tool_result","content":[{"type":"text","text":"{\"success\":false,\"message\":\"No agent named 'scribe [57c49f]' is reachable.\\nUse ListAgents to see everyone you can message.\"}"}]}]}}`
+	courierDenied = `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"<tool_use_error>permission denied</tool_use_error>","is_error":true,"tool_use_id":"toolu_send"}]}}`
+	courierProse  = `{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Sent the message to scribe."}]}}`
+	courierDone   = `{"type":"result","subtype":"success","is_error":false,"result":"done"}`
+)
+
+var (
+	courierSent = []string{courierInit, courierListing, fmt.Sprintf(courierCall, "scribe"), courierOK, courierDone}
+	// The incident in #216: no session on the pane, nothing sent, exit 0.
+	// The closing prose is the model's own and claims a send, which is
+	// exactly what the reading must not believe.
+	courierNoMatch = []string{courierInit, courierListing, courierProse, courierDone}
+)
+
+func courierStream(lines []string) string { return strings.Join(lines, "\n") + "\n" }
 
 func TestNotify_ClaudeSpawnsTheCourierWithItsPromptAndItsTwoGuards(t *testing.T) {
 	rec := fakeClaude(t, 0)
@@ -225,6 +263,7 @@ func TestNotify_ClaudeSpawnsTheCourierWithItsPromptAndItsTwoGuards(t *testing.T)
 		"tmux pane id is '%42'",
 		"[LOC] 🔔 1 new → read — run /read-loc now.",
 		"--allowedTools\nListAgents,SendMessage\n",
+		"--output-format\nstream-json\n--verbose\n",
 		"LOC_COURIER=1\n",
 		"LOC_IDENTITY=[]\n",
 	} {
@@ -300,6 +339,179 @@ func TestNotify_ClaudeReportsTheCouriersExitCode(t *testing.T) {
 	}
 	if want := "nudge workshop.scribe BELL FAILED: courier exit 3"; r.joined() != want {
 		t.Errorf("delivery log said %q; want %q", r.joined(), want)
+	}
+}
+
+// #216: THE BELL RINGS ONLY ON A SEND THE STREAM PROVES. A courier exits 0
+// whatever it did, so each case below exits 0 and differs only in what it
+// printed.
+func TestNotify_ClaudeRingsOnlyOnAProvenSend(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		stream string
+		want   string // "" means the bell rang
+	}{
+		{"a send the runtime confirmed", courierStream(courierSent), ""},
+		{"the session named by its id", courierStream([]string{courierListing,
+			fmt.Sprintf(courierCall, "scribe [57c49f]"), courierOK, courierDone}), ""},
+		{"no session on the pane, and prose that claims a send", courierStream(courierNoMatch),
+			"courier found no matching session"},
+		{"a send that reached no one", courierStream([]string{courierListing,
+			fmt.Sprintf(courierCall, "scribe [57c49f]"), courierNoOne, courierDone}),
+			"courier send failed: No agent named 'scribe [57c49f]' is reachable."},
+		{"a send the runtime refused", courierStream([]string{courierListing,
+			fmt.Sprintf(courierCall, "scribe"), courierDenied, courierDone}),
+			"courier send failed: permission denied"},
+		{"a send to a session on another pane", courierStream([]string{courierListing,
+			fmt.Sprintf(courierCall, "clerk"), courierOK, courierDone}),
+			"courier sent to 'clerk', not the session on pane %42"},
+		{"output that is not a stream", "Sent the message to scribe.\n", reasonNoResult},
+		{"no output at all", "", reasonNoResult},
+		{"a stream in a shape this does not read", `{"type":"assistant","message":{"content":"SendMessage to scribe: success"}}` + "\n" + courierDone + "\n",
+			"courier found no matching session"},
+		{"a stream that stops before the run ends", courierStream([]string{courierInit, courierListing}),
+			reasonNoResult},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			fakeClaudeSays(t, 0, c.stream)
+			r := &recorder{}
+			n, err := newNotifier(ListenerClaude, r.log, time.Now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = n.Ring("workshop.scribe", "%42", "🔔 1 new → read", "")
+			if c.want == "" {
+				if err != nil {
+					t.Fatalf("a proven send failed: %v", err)
+				}
+				if want := "nudge workshop.scribe rang '🔔 1 new → read'"; r.joined() != want {
+					t.Errorf("delivery log said %q; want %q", r.joined(), want)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("recorded as a ring; the delivery log said %q", r.joined())
+			}
+			if errors.Is(err, ErrBusy) || errors.Is(err, ErrHeld) {
+				t.Errorf("the failure is marked busy or held: %v", err)
+			}
+			if err.Error() != c.want {
+				t.Errorf("the failure says %q; want %q", err.Error(), c.want)
+			}
+			if want := "nudge workshop.scribe BELL FAILED: " + c.want; r.joined() != want {
+				t.Errorf("delivery log said %q; want %q", r.joined(), want)
+			}
+		})
+	}
+}
+
+// N1: AN ADDRESS THAT IS A SESSION NAME is matched exactly, as the name
+// alone or as ListAgents' "name [id]". A PANE TARGET is the known gap:
+// ListAgents does not print targets, so the runtime's confirmation is the
+// whole of the evidence there.
+func TestNotify_ClaudeMatchesTheAddresseeByAddressForm(t *testing.T) {
+	sentTo := func(to string) string {
+		return courierStream([]string{courierListing, fmt.Sprintf(courierCall, to), courierOK, courierDone})
+	}
+	for _, c := range []struct {
+		name, address, stream, want string
+	}{
+		{"a name, sent to that name", "scribe", sentTo("scribe"), ""},
+		{"a name, sent to name [id]", "scribe", sentTo("scribe [57c49f]"), ""},
+		{"a name, sent to another session", "scribe", sentTo("clerk"),
+			"courier sent to 'clerk', not the session named scribe"},
+		{"a name, sent to a longer name", "scribe", sentTo("house.scribe [5b2d3e]"),
+			"courier sent to 'house.scribe [5b2d3e]', not the session named scribe"},
+		{"a name, sent to a numbered twin", "scribe", sentTo("scribe (2) [abc123]"),
+			"courier sent to 'scribe (2) [abc123]', not the session named scribe"},
+		{"a dotted name, sent to that name [id]", "house.scribe", sentTo("house.scribe [5b2d3e]"), ""},
+		{"a dotted name, sent to another session", "house.scribe", sentTo("clerk"),
+			"courier sent to 'clerk', not the session named house.scribe"},
+		{"a pane target, any confirmed send", "workshop:2.1", sentTo("clerk"), ""},
+		{"a pane target with a window id and pane id", "workshop:@2.%4", sentTo("clerk"), ""},
+		{"a pane target, no send", "workshop:2.1", courierStream(courierNoMatch),
+			"courier found no matching session"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			fakeClaudeSays(t, 0, c.stream)
+			r := &recorder{}
+			n, err := newNotifier(ListenerClaude, r.log, time.Now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = n.Ring("workshop.scribe", c.address, "🔔 1 new → read", "")
+			got := ""
+			if err != nil {
+				got = err.Error()
+			}
+			if got != c.want {
+				t.Errorf("the ring came to %q; want %q (delivery log: %q)", got, c.want, r.joined())
+			}
+		})
+	}
+}
+
+// N2: A STRAY SEND IS NAMED. The courier wrote to another session before the
+// right one. The bell rang — the seat was told — and the delivery log says
+// who else was written to, delivered or not.
+func TestNotify_ClaudeNamesAStraySendBeforeTheRightOne(t *testing.T) {
+	stray := strings.ReplaceAll(fmt.Sprintf(courierCall, "clerk"), "toolu_send", "toolu_stray")
+	strayOK := strings.ReplaceAll(courierOK, "toolu_send", "toolu_stray")
+	missed := strings.ReplaceAll(fmt.Sprintf(courierCall, "nobody [000000]"), "toolu_send", "toolu_miss")
+	missedNo := strings.ReplaceAll(courierNoOne, "toolu_send", "toolu_miss")
+	fakeClaudeSays(t, 0, courierStream([]string{courierListing, stray, strayOK, missed, missedNo,
+		fmt.Sprintf(courierCall, "scribe"), courierOK, courierDone}))
+	r := &recorder{}
+	n, err := newNotifier(ListenerClaude, r.log, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := n.Ring("workshop.scribe", "%42", "🔔 1 new → read", ""); err != nil {
+		t.Fatalf("the right send was made and the ring failed: %v", err)
+	}
+	want := "nudge workshop.scribe courier also sent to 'clerk' (delivered), not the session on pane %42\n" +
+		"nudge workshop.scribe courier also sent to 'nobody [000000]' (not delivered: No agent named 'scribe [57c49f]' is reachable.), not the session on pane %42\n" +
+		"nudge workshop.scribe rang '🔔 1 new → read'"
+	if r.joined() != want {
+		t.Errorf("delivery log said\n%s\nwant\n%s", r.joined(), want)
+	}
+}
+
+// A LIVE STREAM. testdata/courier-stream-sent.jsonl is the standard output of
+// one real `claude -p --output-format stream-json --verbose` courier run, cut
+// to the lines after init, with the session names replaced and the request
+// ids redacted. It holds the event types this does not read (rate limits,
+// thinking-token counts, a ToolSearch) between the ones it does, and its send
+// went to "scribe [acefd1]" on pane %4.
+func TestNotify_ClaudeReadsARealCourierStream(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("testdata", "courier-stream-sent.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ address, want string }{
+		{"%4", ""},
+		{"scribe", ""},
+		{"%5", "courier sent to 'scribe [acefd1]', not the session on pane %5"},
+	} {
+		reason, strays := courierOutcome(b, c.address)
+		if reason != c.want || len(strays) != 0 {
+			t.Errorf("address %s: reason %q, strays %q; want %q and none", c.address, reason, strays, c.want)
+		}
+	}
+}
+
+// A PANE TARGET IS NOT IN THE LISTING. ListAgents prints pane ids, so for an
+// address such as workshop:2.1 the addressee cannot be matched mechanically,
+// and the runtime's own confirmation of the send is the whole of the evidence.
+func TestNotify_ClaudeTrustsAConfirmedSendForAPaneTarget(t *testing.T) {
+	fakeClaudeSays(t, 0, courierStream(courierSent))
+	r := &recorder{}
+	n, err := newNotifier(ListenerClaude, r.log, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := n.Ring("workshop.scribe", "workshop:2.1", "🔔 1 new → read", ""); err != nil {
+		t.Fatalf("a confirmed send to a pane target failed: %v", err)
 	}
 }
 

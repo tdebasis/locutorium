@@ -317,10 +317,18 @@ func (n *courierNotifier) Ring(endpoint, address, bell, courier string) error {
 	if courier != "" {
 		args = append(args, "-n", courier)
 	}
+	// THE COURIER'S OWN EVENTS ARE THE EVIDENCE (#216). A courier that found
+	// no session sends nothing and still exits 0, so the exit code cannot say
+	// whether the bell rang. stream-json prints every tool call and its result
+	// as one JSON line each, and courierOutcome reads those, never the
+	// model's closing prose.
 	args = append(args, "-p", fmt.Sprintf(courierPrompt, address, bell),
-		"--allowedTools", "ListAgents,SendMessage")
+		"--allowedTools", "ListAgents,SendMessage",
+		"--output-format", "stream-json", "--verbose")
+	var stdout bytes.Buffer
 	cmd := exec.Command("claude", args...)
 	cmd.Stdin = devnull
+	cmd.Stdout = &stdout
 	cmd.Env = append(os.Environ(), "LOC_COURIER=1", "LOC_IDENTITY=")
 	if err := cmd.Run(); err != nil {
 		var ee *exec.ExitError
@@ -328,6 +336,13 @@ func (n *courierNotifier) Ring(endpoint, address, bell, courier string) error {
 			return n.fail(endpoint, fmt.Sprintf("courier exit %d", ee.ExitCode()))
 		}
 		return n.fail(endpoint, fmt.Sprintf("courier: %v", err))
+	}
+	reason, strays := courierOutcome(stdout.Bytes(), address)
+	if reason != "" {
+		return n.fail(endpoint, reason)
+	}
+	for _, s := range strays {
+		n.log(fmt.Sprintf("nudge %s courier also sent to %s, %s", endpoint, s, notAt(address)))
 	}
 	n.log(fmt.Sprintf("nudge %s rang '%s'", endpoint, bell))
 	return nil
