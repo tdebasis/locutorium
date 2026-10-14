@@ -921,6 +921,26 @@ func TestStatusSeesARegisteredSeatWithNoQueue(t *testing.T) {
 	}
 }
 
+// A SEAT REAPED WITH ITS QUEUE KEPT IS NOT ATTENDING (#234). The queue is
+// there and the row is not, and the send path refuses new mail to it, so the
+// report says `no` and says the mail is kept. A `yes` here would contradict
+// the send it describes.
+//
+// THE PLANT THAT TURNS THIS RED: answer attendingLine from the queue alone.
+func TestStatusSaysAKeptQueueWithNoRowIsNotAttending(t *testing.T) {
+	d := newPresenceDeployment(t)
+	d.spy.exists["workshop.scribe"] = true
+
+	code, out, errOut := exec("status", "workshop.scribe")
+	assertResult(t, code, out, errOut, 0,
+		"workshop.scribe\n"+
+			"  registered: no\n"+
+			"  attending:  no (queue kept with no registration: a send to this endpoint is refused; "+
+			"the next subscribe adopts the mail in it)\n"+
+			"  process:    unknown (no registration)\n"+
+			"  activity:   unknown (no registration)\n", "")
+}
+
 // A seat that subscribed holds a queue, and the same question answers yes.
 func TestStatusSeesASubscribedSeatAttending(t *testing.T) {
 	newPresenceDeployment(t)
@@ -1032,8 +1052,9 @@ func TestStatusStopsWhenTheReaderGoesAway(t *testing.T) {
 // static registry file has nothing to say about it — in either direction.
 func TestSendDerivesAttendanceFromTheLiveSubscription(t *testing.T) {
 	d := newPresenceDeployment(t)
-	// The file lists nobody, and the send still goes: what matters is that a
-	// queue is there to deliver to.
+	// The file lists nobody, and the send still goes: what matters is that
+	// the ledger holds the seat's row and a queue is there to deliver to.
+	liveRow(t, d, "workshop.scribe")
 	d.spy.exists["workshop.scribe"] = true
 
 	code, out, errOut := exec("send", "workshop.scribe", "hello")
@@ -1046,6 +1067,39 @@ func TestSendDerivesAttendanceFromTheLiveSubscription(t *testing.T) {
 	if len(d.spy.sends) != 1 {
 		t.Errorf("SendQueue calls: %v, want only the first", d.spy.sends)
 	}
+}
+
+// A QUEUE NO ROW CLAIMS IS NOT ATTENDANCE (#234). It is the queue a reaped
+// seat keeps for its next subscribe, or one an interrupted unsubscribe left.
+// The mail already in it stays; a new send is refused, because nothing says
+// anybody will ever read it.
+//
+// THE PLANT THAT TURNS THIS RED: drop the row check from send in main.go.
+func TestSendRefusesAQueueNoRowClaims(t *testing.T) {
+	d := newPresenceDeployment(t)
+	d.spy.exists["workshop.scribe"] = true
+
+	code, out, errOut := exec("send", "workshop.scribe", "hello")
+	assertResult(t, code, out, errOut, 1, "",
+		"loc: nobody is attending 'workshop.scribe': no live subscription; "+
+			"its queue is kept with the mail already in it, for the next subscribe to adopt\n")
+	if len(d.spy.sends) != 0 {
+		t.Errorf("SendQueue calls: %v, want none", d.spy.sends)
+	}
+	if !d.spy.exists["workshop.scribe"] {
+		t.Error("the refused send removed the kept queue")
+	}
+}
+
+// A ROW THAT CANNOT BE READ IS STILL A ROW. The file is there and `status`
+// reports it beside the seat, so a send to its queue goes as it always did.
+func TestSendDeliversToAQueueBesideAnUnreadableRow(t *testing.T) {
+	d := newPresenceDeployment(t)
+	writeFile(t, d.ledger("workshop.scribe.json"), "{not json at all")
+	d.spy.exists["workshop.scribe"] = true
+
+	code, out, errOut := exec("send", "workshop.scribe", "hello")
+	assertSent(t, code, out, errOut, "workshop.scribe")
 }
 
 // A send to something that is not an endpoint at all is refused for what is

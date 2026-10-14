@@ -81,9 +81,12 @@ type Presence interface {
 	// reason Queues gives.
 	UnqualifiedQueues() ([]string, error)
 
-	// QueueExists answers whether an endpoint is attended. A medium that
-	// cannot be reached is an ERROR here, never a "no": absence and ignorance
-	// are different answers, and only one of them justifies refusing a send.
+	// QueueExists answers whether an endpoint holds a queue. It is half of
+	// attendance: the send path also asks the ledger for the seat's row,
+	// because a queue is kept for a seat whose process died (#234). A medium
+	// that cannot be reached is an ERROR here, never a "no": absence and
+	// ignorance are different answers, and only one of them justifies
+	// refusing a send.
 	QueueExists(endpoint string) (bool, error)
 
 	// Emit speaks one event in an instance's subject, without waiting for the

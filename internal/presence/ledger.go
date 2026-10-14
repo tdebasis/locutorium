@@ -68,6 +68,19 @@ func Load(endpoint string) (*Registration, error) {
 	return &r, nil
 }
 
+// Registered reports whether the ledger holds a row for the endpoint. A row
+// that cannot be read is still a row: the file is there, and only a reader
+// that needs its contents has a reason to refuse it.
+func Registered(endpoint string) (bool, error) {
+	if _, err := os.Stat(regPath(endpoint)); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // Save writes a registration. The write is atomic, so a reader never sees half
 // a registration and a crash mid-write leaves the previous one intact.
 func Save(r *Registration) error {

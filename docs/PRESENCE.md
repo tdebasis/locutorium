@@ -156,7 +156,8 @@ An agent that restarts subscribes again, as a new instance, with a new process i
 and keeps its queue, and so does a new server that finds the dead registration on its seat. A dead
 process is evidence that the agent stopped, not that its mail is unwanted. The agent's next
 subscribe adopts the queue and everything waiting in it; until then the queue is reported as a
-queue with no registration. Only a deliberate unsubscribe destroys a queue.
+queue with no registration, and a new send to the endpoint is refused, because nobody is attending
+it. Only a deliberate unsubscribe destroys a queue.
 
 ## The two process ids a seat records
 
@@ -591,8 +592,10 @@ elapsed with events missing are different situations, and a tool that prints onl
 hides which one it is looking at.
 
 **`attending` is the reachable question**, and this document separates it from the alive question
-above. The verb asks the medium whether the endpoint holds a queue — the same question the send
-path asks — so a seat whose queue is gone reads as unreachable instead of reading as healthy. The
+above. The verb asks the medium whether the endpoint holds a queue and reads the answer beside the
+registration — the same two questions the send path asks — so a seat whose queue is gone reads as
+unreachable instead of reading as healthy, and a queue kept with no registration reads as not
+attended. The
 line takes three values, because *the broker holds no queue* and *the broker could not be asked* are
 different facts. Registered, alive and working are read locally and the medium cannot take them
 away: a broker that will not answer costs this report the `attending` line and nothing else, and the

@@ -105,8 +105,9 @@ func TestFalsifierSweepRecreatesAMissingQueue(t *testing.T) {
 // MAIL (#234). A crash is not the agent deciding to leave: the seat is usually
 // started again, and the mail was sent to it. The reap writes no queue-deleted
 // record, because no queue was deleted; the next beat reports the kept queue
-// as a queue with no row; and the seat's next subscribe adopts it and reads
-// what was waiting.
+// as a queue with no row; a NEW send to the seat is refused, because a kept
+// queue is not attendance; and the seat's next subscribe adopts the queue and
+// reads what was waiting.
 //
 // THE PLANT THAT TURNS THIS RED: put `pr.DeleteQueue(f.Endpoint)` back in the
 // DeadPID case of sweep.
@@ -182,6 +183,18 @@ func TestFalsifierSweepReapsTheRowAndKeepsTheMail(t *testing.T) {
 		t.Errorf("the second beat printed:\n%q\nwant:\n%q", out.String(), want)
 	}
 
+	// A NEW SEND IS REFUSED. The seat may never come back, and a sender told
+	// its message was accepted would believe somebody is there.
+	p.as(t, "host")
+	code, sendOut, errOut := exec("send", e1, "sent-after-the-reap")
+	t.Logf("send exit=%d stdout=%q stderr=%q", code, sendOut, errOut)
+	if code == 0 || !strings.Contains(errOut, "nobody is attending '"+e1+"'") {
+		t.Errorf("a send to a reaped seat was not refused: exit %d, stdout %q, stderr %q", code, sendOut, errOut)
+	}
+	if n := p.qcount(q1); n != 1 {
+		t.Errorf("the kept queue holds %d messages after the refused send, want the 1 sent before the crash", n)
+	}
+
 	// THE ADOPTION. The seat comes back, subscribes, and reads its mail.
 	p.subscribeLive(t, e1)
 	p.as(t, e1)
@@ -189,6 +202,9 @@ func TestFalsifierSweepReapsTheRowAndKeepsTheMail(t *testing.T) {
 	t.Logf("read exit=%d stdout=%q stderr=%q", code, readOut, errOut)
 	if code != 0 || !strings.Contains(readOut, "waiting-through-the-crash") {
 		t.Errorf("the mail sent before the crash did not read back: exit %d, stdout %q", code, readOut)
+	}
+	if strings.Contains(readOut, "sent-after-the-reap") {
+		t.Errorf("the refused send was delivered after all: %q", readOut)
 	}
 }
 
@@ -398,15 +414,24 @@ func (p *presence) logToday(t *testing.T) string {
 //
 // Every earlier build deleted that queue and the mail in it: before #140
 // because no row claimed it, and after #140 whenever another row kept the
-// instance alive. This build reports it and stops. The mail sent while the
-// seat was away is still there when the seat subscribes again: a queue is held
-// until it is read, and the address is the agent.
+// instance alive. This build reports it and stops. The mail sent before the
+// seat went is still there when the seat subscribes again: a queue is held
+// until it is read, and the address is the agent. Mail sent while the seat is
+// away is refused (#234): a queue no row claims holds what it had and takes
+// nothing new.
 //
 // THE PLANT THAT TURNS THIS RED: put `pr.DeleteQueue(f.Endpoint)` back in the
 // QueueNoRow case of sweep.
 func TestFalsifierSweepReportsAQueueWithNoRowAndKeepsItsMail(t *testing.T) {
 	p := newPresence(t)
 	p.subscribeLive(t, e1)
+
+	// Mail arrives while the seat is subscribed, and is not read before the
+	// seat goes. Since #234 a send to a queue no row claims is refused, so the
+	// mail this case keeps is the mail sent before the row went.
+	if code, _, errOut := exec("send", e1, "held-until-read"); code != 0 {
+		t.Fatalf("send exited %d (stderr %q)", code, errOut)
+	}
 
 	// The unsubscribe is abandoned where issue #141 says it is abandoned: at
 	// the seam between removing the row and deleting the queue. Goexit ends
@@ -439,9 +464,10 @@ func TestFalsifierSweepReportsAQueueWithNoRowAndKeepsItsMail(t *testing.T) {
 		t.Fatal("the queue went with the row; the arm is not in the state #141 describes")
 	}
 
-	// Mail arrives for the absent seat and is stored in the standing queue.
-	if code, _, errOut := exec("send", e1, "held-until-read"); code != 0 {
-		t.Fatalf("send exited %d (stderr %q)", code, errOut)
+	// A new send to the absent seat is refused: a queue no row claims is not
+	// attendance (#234). The mail already in it stays.
+	if code, _, errOut := exec("send", e1, "sent-while-away"); code == 0 {
+		t.Errorf("a send to a queue no row claims was accepted (stderr %q)", errOut)
 	}
 
 	var out strings.Builder
@@ -460,7 +486,7 @@ func TestFalsifierSweepReportsAQueueWithNoRowAndKeepsItsMail(t *testing.T) {
 		t.Fatal("the sweep deleted a queue no row claimed")
 	}
 	if n := p.qcount(q1); n != 1 {
-		t.Errorf("the queue holds %d messages, want the 1 sent while the seat was away", n)
+		t.Errorf("the queue holds %d messages, want the 1 sent before the seat went", n)
 	}
 	if log := p.logToday(t); strings.Contains(log, "queue-deleted") {
 		t.Errorf("the sweep recorded a queue-deleted event:\n%s", log)
@@ -472,7 +498,7 @@ func TestFalsifierSweepReportsAQueueWithNoRowAndKeepsItsMail(t *testing.T) {
 	code, readOut, errOut := exec("read")
 	t.Logf("read exit=%d stdout=%q stderr=%q", code, readOut, errOut)
 	if code != 0 || !strings.Contains(readOut, "held-until-read") {
-		t.Errorf("the mail sent while the seat was away did not read back: exit %d, stdout %q", code, readOut)
+		t.Errorf("the mail sent before the seat went did not read back: exit %d, stdout %q", code, readOut)
 	}
 }
 

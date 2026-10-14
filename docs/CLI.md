@@ -116,6 +116,12 @@ loc send <endpoint> <body>
 Delivers one message. The endpoint must be a registered seat in the ledger, and an
 unknown name is refused before anything is sent.
 
+- **Attendance is the row and the queue together.** The ledger must hold the seat's row and the
+  medium its queue. A queue with no row is refused with `nobody is attending '<endpoint>': no live
+  subscription; its queue is kept with the mail already in it, for the next subscribe to adopt`.
+  That is the queue a reaped seat keeps (§sweep): the mail already in it waits for the seat's next
+  subscribe, and nothing new is added for a seat that may not come back.
+
 - **Body limit is 4000 characters, not bytes.** Counted in codepoints, so emoji cost one each. An
   over-long body is refused *before* it reaches the medium — nothing is partially sent.
 - Prints `sent → queue.<endpoint> uid=<uuid>`. There is one form of that line and it does not vary
@@ -484,7 +490,8 @@ sentence and leaves the queue where it is; the line names the verb that removes 
 The row gives three facts. Each fact has its own mechanism. No fact follows from another.
 
 - *Registered* — the ledger holds a row for this seat. The seat exists.
-- *Attending* — the queue exists. A message to this seat has somewhere to wait.
+- *Attending* — the row and the queue both exist. A message to this seat has somewhere to wait, and
+  somebody subscribed to take it.
 - *Notifiable* — the bell reaches this seat's operator. The operator learns that mail arrived.
 
 `row ok` does not mean `can be told`. A seat can hold a row and a queue, and still take no more
@@ -540,8 +547,9 @@ workshop.scribe
   activity:   unknown (no registration)
 ```
 
-**`attending` asks the broker whether this endpoint holds a queue.** It is the same question the
-send path asks, so a `no` here means a send to this endpoint is refused now. A seat whose queue is
+**`attending` asks the broker whether this endpoint holds a queue, and reads it beside the row.**
+Those are the two questions the send path asks, so a `no` here means a send to this endpoint is
+refused now. A seat whose queue is
 gone is registered, alive and working by the other three facts while it can receive nothing, and
 before this line existed the seat had no way to learn it (#135).
 
@@ -551,6 +559,7 @@ The line has three values and not two.
 |---|---|
 | `yes (queue exists)` | the broker holds a queue; a send to this endpoint is delivered |
 | `no (no queue: a send to this endpoint is refused)` | the broker was asked and holds no queue |
+| `no (queue kept with no registration: a send to this endpoint is refused; the next subscribe adopts the mail in it)` | the broker holds a queue and the ledger no row: a reaped seat's kept mail, or an interrupted unsubscribe |
 | `unknown (could not ask: <reason>)` | no provider opened, the provider carries no presence, or the broker did not answer |
 
 `unknown` is never `no`. A question that could not be put says nothing about the endpoint, and a
@@ -829,7 +838,10 @@ handshake, the agent token as the display name and the working directory; when t
 (stdin reaches EOF, or a signal arrives) it unsubscribes and exits 0. A seat held by
 a registration whose process is DEAD is displaced, and the dead pid is written to the delivery log
 (`displaced <endpoint>: pid <n> is gone; queue kept`). Only the registration goes: the queue and
-the mail in it are kept, and the new registration adopts them.
+the mail in it are kept, and the new registration adopts them. The dead agent's departure is still
+published, as `agent.unsubscribe` with reason `expiry`, before the new server's join. A seat
+re-taken from an earlier server of the same, still running runtime publishes no departure: that
+agent did not leave.
 A seat held by a LIVE process that did not launch this server is refused, with the pid named, and the
 server exits 1 — the runtime shows it as failed, which is the truth. **The pid registered is whoever
 launched this process**, so a shell, a version manager or any other shim placed between the runtime
@@ -1003,7 +1015,7 @@ the bell; something else must then run `subscribe` and `unsubscribe` around the 
 | `provider` | `nats` | which transport loc talks to; only nats exists |
 | `nats_url` | `nats://127.0.0.1:4222` | where the medium is |
 | `idle_timeout` | `10m` | how long after an event `status <endpoint>` still reads *active* |
-| `send_requires_attendance` | `no` | refuse sends to endpoints that are not attending. With the NATS provider the key is satisfied by the live queue: a subscribed peer attends, and an unsubscribed one has no queue, so its send is refused for absence. |
+| `send_requires_attendance` | `no` | refuse sends to endpoints that are not attending. With the NATS provider the key is satisfied by the row and the queue: a subscribed peer attends, and a send to an endpoint with no row or no queue is refused for absence whatever this key says. |
 | `monitor_url` | none | the broker's HTTP monitoring endpoint; no verb reads it, and `loc start` opens no such port |
 | `topic_window` | `7d` | how long topic messages live; `loc start` gives the `TOPICS` stream this age limit |
 | `heartbeat_log_retention_days` | `7` | heartbeat log files older than this are deleted when loc starts |
