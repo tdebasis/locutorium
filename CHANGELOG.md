@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.0.16](https://github.com/tdebasis/locutorium/compare/v0.0.15...v0.0.16) (2026-10-14)
+
+
+### Features
+
+* **bell:** let a webhook receiver answer held ([#229](https://github.com/tdebasis/locutorium/issues/229)) ([c985f24](https://github.com/tdebasis/locutorium/commit/c985f240b4201113ce6d6cab3d6da02d87b2531e))
+
+
+### Bug Fixes
+
+* a crashed seat keeps its unread mail ([#235](https://github.com/tdebasis/locutorium/issues/235)) ([19bc8cf](https://github.com/tdebasis/locutorium/commit/19bc8cff728c8971f0bf5fcfa7abcf2e0502afda))
+* **mcpserve:** a departing listener leaves a seat it no longer owns ([#232](https://github.com/tdebasis/locutorium/issues/232)) ([b21e1af](https://github.com/tdebasis/locutorium/commit/b21e1afe40e8d879cd787f2d4cec2e126c190131))
+* **mcpserve:** a later bell try names the sender when the count allows it ([#227](https://github.com/tdebasis/locutorium/issues/227)) ([75ca587](https://github.com/tdebasis/locutorium/commit/75ca587b9711f560dd19b18eccb891368204742d))
+* **mcpserve:** the courier bell rings only on a send its stream proves ([#237](https://github.com/tdebasis/locutorium/issues/237)) ([067cc23](https://github.com/tdebasis/locutorium/commit/067cc239790bc8119382eeb672b7def62eebb563))
+
 ## [0.0.15](https://github.com/tdebasis/locutorium/compare/v0.0.14...v0.0.15) (2026-10-11)
 
 
