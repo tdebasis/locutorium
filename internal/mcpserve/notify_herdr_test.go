@@ -54,6 +54,9 @@ const (
 	screenDraft   = "output above\n" + boxRule + "\n❯ half a thought\n" + boxRule + "\n"
 	screenDraft2  = "output above\n" + boxRule + "\n❯ \n  and a second line\n" + boxRule + "\n"
 	screenNoBox   = "a shell prompt $ \n"
+	// An earlier prompt in the history above the box: the box is the LAST ❯.
+	screenOldPromptThenDraft = "❯ an old prompt\n⏺ its answer\n" + boxRule + "\n❯\u00a0half a thought\n" + boxRule + "\n"
+	screenOldDraftThenEmpty  = "❯ an old prompt with words\n⏺ its answer\n" + boxRule + "\n❯\u00a0\n" + boxRule + "\n"
 )
 
 // prompted returns the argv of every `agent prompt` the fake saw.
@@ -87,6 +90,17 @@ func TestNotify_HerdrTypesTheBellIntoAnIdleEmptyBox(t *testing.T) {
 	}
 }
 
+func TestNotify_HerdrReadsTheLastPromptNotAnOldOne(t *testing.T) {
+	file := fakeHerdr(t, herdrGet("claude", "idle"), 0, screenOldDraftThenEmpty)
+	n := &herdrNotifier{log: (&recorder{}).log}
+	if err := n.Ring("workshop.scribe", "workshop/scribe", "🔔", ""); err != nil {
+		t.Fatalf("an old prompt in the history was read as the box: %v", err)
+	}
+	if prompted(t, file) == "" {
+		t.Error("the bell was not typed into the empty box under an old prompt")
+	}
+}
+
 func TestNotify_HerdrTypesOverClaudesOwnSuggestion(t *testing.T) {
 	file := fakeHerdr(t, herdrGet("claude", "idle"), 0, screenSuggest)
 	n := &herdrNotifier{log: (&recorder{}).log}
@@ -114,7 +128,9 @@ func TestNotify_HerdrRefuses(t *testing.T) {
 		{"draft on line 2", "workshop/scribe", "🔔", herdrGet("claude", "idle"), 0, screenDraft2, true, "draft in the input box"},
 		{"no box", "workshop/scribe", "🔔", herdrGet("claude", "idle"), 0, screenNoBox, true, "input box not found"},
 		{"other kind", "workshop/scribe", "🔔", herdrGet("codex", "idle"), 0, screenEmpty, false, "no draft check for agent kind 'codex'"},
-		{"unknown state", "workshop/scribe", "🔔", herdrGet("claude", "unknown"), 0, screenEmpty, false, "agent state 'unknown'"},
+		{"unknown state", "workshop/scribe", "🔔", herdrGet("claude", "unknown"), 0, screenEmpty, true, "agent state 'unknown'"},
+		{"strange state", "workshop/scribe", "🔔", herdrGet("claude", "sleeping"), 0, screenEmpty, false, "agent state 'sleeping'"},
+		{"draft under an old prompt", "workshop/scribe", "🔔", herdrGet("claude", "idle"), 0, screenOldPromptThenDraft, true, "draft in the input box"},
 		{"missing agent", "workshop/scribe", "🔔", herdrNotFound, 1, screenEmpty, false, "agent_not_found"},
 		{"no answer", "workshop/scribe", "🔔", "", 1, screenEmpty, false, "cannot ask herdr"},
 		{"bad address", "scribe", "🔔", herdrGet("claude", "idle"), 0, screenEmpty, false, "bad herdr address"},

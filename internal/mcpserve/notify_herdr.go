@@ -100,6 +100,10 @@ func (n *herdrNotifier) Ring(endpoint, address, bell, _ string) error {
 		return busyRefusal{n.refuse(endpoint, "agent working")}
 	case "blocked":
 		return busyRefusal{n.refuse(endpoint, "agent at a dialog")}
+	case "unknown":
+		// herdr reports unknown while it has not yet placed the agent, at
+		// startup and between detections; it ends on its own, so ask again.
+		return busyRefusal{n.refuse(endpoint, "agent state 'unknown'")}
 	case "idle", "done":
 	default:
 		return n.refuse(endpoint, fmt.Sprintf("agent state '%s'", status))
