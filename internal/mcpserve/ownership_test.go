@@ -107,17 +107,17 @@ func TestDepart_WithNoRowRemovesNothing(t *testing.T) {
 }
 
 // A SERVER THAT NEVER CONFIRMED ITS ROW FREES NOTHING. The subscribe reported
-// success but no row reads back as this server's, so nothing on the way out can
-// tell its seat from a stranger's.
+// success but handed back no row, so nothing on the way out can tell this
+// server's seat from a stranger's.
 func TestDepart_WithoutAConfirmedRegistrationRemovesNothing(t *testing.T) {
 	dir := home(t, "provider = none\n")
 	f := &fake{}
 	d := f.deps()
-	d.Subscribe = func(args []string) error {
+	d.Subscribe = func(args []string) (*model.Registration, error) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		f.subscribed = append(f.subscribed, args)
-		return nil
+		return nil, nil
 	}
 	sess, done := serve(t, d)
 	f.ready(t)
@@ -217,5 +217,39 @@ func TestRegister_ReTakesFromAnEarlierServerOfTheSameRuntimeAndKeepsTheQueue(t *
 	defer f.mu.Unlock()
 	if len(f.unsubscribed) != 1 || !strings.Contains(strings.Join(f.unsubscribed[0], " "), "--reason clean") {
 		t.Errorf("the server did not free its own seat: %v", f.unsubscribed)
+	}
+}
+
+// A LATER SERVER RE-TAKES THE SEAT THE MOMENT THIS ONE HAS WRITTEN ITS ROW.
+// Both name the same runtime pid, so a server that learned which row is its
+// own by reading the ledger back would read the later server's row, take it
+// for its own, and destroy it on the way out. The row this server owns is the
+// one its subscribe wrote, and nothing read afterwards can change that.
+func TestDepart_LeavesASeatReTakenBetweenItsSubscribeAndItsReadBack(t *testing.T) {
+	dir := home(t, "provider = none\n")
+	f := &fake{}
+	d := f.deps()
+	ppid := os.Getppid()
+	d.Subscribe = func(args []string) (*model.Registration, error) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.subscribed = append(f.subscribed, args)
+		f.calls = append(f.calls, "subscribe")
+		reg, err := register(args)
+		// The later server's re-take, landing straight after this write.
+		holdAt(t, ppid, model.StartedAt(ppid), later)
+		return reg, err
+	}
+	sess, done := serve(t, d)
+	f.ready(t)
+	stop(t, sess, done)
+
+	leavesTheSeat(t, f)
+	if r := heldNow(t); r == nil || r.Registered != later {
+		t.Errorf("the later server's row did not survive: %+v", r)
+	}
+	want := fmt.Sprintf("left %s: seat now held by pid %d (registered %s); registration and queue untouched", seat, ppid, later)
+	if !strings.Contains(delivery(t, dir), want) {
+		t.Errorf("want %q in:\n%s", want, delivery(t, dir))
 	}
 }

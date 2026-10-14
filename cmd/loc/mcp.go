@@ -315,7 +315,7 @@ func mcpDeps() (mcpserve.Deps, func(), error) {
 	return mcpserve.Deps{
 		Endpoint:    me,
 		Version:     v,
-		Subscribe:   subscribeVerb,
+		Subscribe:   subscribe,
 		Unsubscribe: unsubscribeVerb,
 		Send: func(w io.Writer, to, body string) error {
 			return withProvider(func(pp provider.Provider) error { return send(pp, w, to, body) })

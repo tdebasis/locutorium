@@ -57,7 +57,9 @@ type Deps struct {
 	// Version is the loc this is, for the initialize handshake.
 	Version string
 
-	Subscribe   func(args []string) error
+	// Subscribe is the subscribe verb, handing back the row it wrote: the
+	// one way this server can know which registration is its own (register).
+	Subscribe   func(args []string) (*model.Registration, error)
 	Unsubscribe func(args []string) error
 	Send        func(w io.Writer, to, body string) error
 	Read        func(w io.Writer, peek bool) error
@@ -241,9 +243,9 @@ type server struct {
 	// address is where this seat is reached, the deployment's own
 	// LOC_LISTENER_ADDRESS. The notifier is handed it on every ring.
 	address string
-	// own is the registration this server wrote, as it read it back. Nil
-	// until register succeeds, and nil after it when the row could not be
-	// read back; depart treats both the same way (see depart).
+	// own is the registration this server wrote, as the subscribe verb handed
+	// it back. Nil until register succeeds, and nil after it when the verb
+	// handed back no row; depart treats both the same way (see depart).
 	own *tenure
 }
 
@@ -339,7 +341,7 @@ func (s *server) register(clientVersion string) error {
 	if err != nil {
 		return err
 	}
-	if err := s.d.Subscribe([]string{
+	reg, err := s.d.Subscribe([]string{
 		s.d.Endpoint,
 		"--pid", strconv.Itoa(s.d.Ppid()),
 		"--type", os.Getenv("LOC_LISTENER_TYPE"),
@@ -347,17 +349,21 @@ func (s *server) register(clientVersion string) error {
 		"--version", clientVersion,
 		"--display", agentToken(s.d.Endpoint),
 		"--cwd", cwd,
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
 
 	// THE SERVER REMEMBERS WHICH REGISTRATION IS ITS OWN. Leaving is undoing
 	// this row and no other, and by the time this server leaves the seat may
 	// have been taken by somebody else: a later server of the same runtime,
-	// or a new runtime after this one's died. A row that does not read back
-	// as the one just written — absent, unreadable, or naming another pid —
-	// is not claimed, and the server will leave the seat alone on the way out.
-	if reg, err := model.Load(s.d.Endpoint); err == nil && reg != nil && reg.Process.PID == s.d.Ppid() {
+	// or a new runtime after this one's died. The row is the one the verb
+	// says it WROTE, never one read back from the ledger: a later server of
+	// the same runtime names the same pid and can replace the row between the
+	// write and any read, and a read-back would then claim the successor's
+	// row and destroy it on the way out. A verb that hands back no row leaves
+	// nothing claimed, and the server leaves the seat alone (depart).
+	if reg != nil {
 		t := tenureOf(reg)
 		s.own = &t
 	}

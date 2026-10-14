@@ -147,7 +147,10 @@ func TestMCP_ASecondSignalDoesNotCutTheGoodbyeShort(t *testing.T) {
 	// missing, and what is asserted here, is the line AFTER it.
 	log := deliveryLog(t, p.home, e1)
 	goodbye := strings.Index(log, "goodbye "+e1+": signal interrupt")
-	left := strings.Index(log, "left "+e1)
+	// THE PLAIN LINE AND NO OTHER. A server that found the seat no longer its
+	// own writes "left <ep>: ..." and frees nothing (#216); a bare substring
+	// would accept that as the departure this case is about.
+	left := strings.Index(log, " left "+e1+"\n")
 	if goodbye < 0 {
 		t.Fatalf("the delivery log does not say the seat was signalled; it said:\n%s", log)
 	}

@@ -139,45 +139,57 @@ func incumbent(reg *model.Registration) string {
 // subscribing. What must not persist is two instances draining one queue, each
 // receiving part of the mail.
 func subscribeVerb(args []string) error {
+	_, err := subscribe(args)
+	return err
+}
+
+// subscribe is the verb, handing back the row it wrote.
+//
+// THE ROW IS HANDED BACK, NOT LEFT TO BE READ. A seat's own MCP server needs to
+// know which registration is its own, so that leaving undoes that one and no
+// other (internal/mcpserve, #216). Reading the ledger back after the write
+// cannot tell it: a later server of the same runtime names the same pid, and
+// may have replaced the row in between. Only the writer knows what it wrote.
+func subscribe(args []string) (*model.Registration, error) {
 	if len(args) == 0 {
-		return errUsage
+		return nil, errUsage
 	}
 	endpoint := args[0]
 	if err := model.ValidEndpoint(endpoint); err != nil {
-		return err
+		return nil, err
 	}
 	var pidArg, agentType, version, display, role, cwd, address string
 	if err := parseFlags(args[1:], map[string]*string{
 		"--pid": &pidArg, "--type": &agentType, "--version": &version,
 		"--display": &display, "--role": &role, "--cwd": &cwd, "--address": &address,
 	}, nil); err != nil {
-		return err
+		return nil, err
 	}
 	if pidArg == "" || agentType == "" || version == "" {
-		return errUsage
+		return nil, errUsage
 	}
 	// THE TYPE IS A CLOSED SET, because it chooses the notifier that rings
 	// this seat (internal/mcpserve/notify.go, R28). A type with no notifier
 	// behind it would register a seat that reads as reachable and rings
 	// nothing, and the deployment would find that out by being told nothing.
 	if err := mcpserve.ValidListenerType(agentType); err != nil {
-		return err
+		return nil, err
 	}
 	// The address is checked for the same reason, where its type has a rule.
 	if err := mcpserve.ValidListenerAddress(agentType, address); err != nil {
-		return err
+		return nil, err
 	}
 	pid, err := strconv.Atoi(pidArg)
 	if err != nil || pid <= 0 {
-		return fmt.Errorf("invalid --pid '%s': a process id is a positive number", pidArg)
+		return nil, fmt.Errorf("invalid --pid '%s': a process id is a positive number", pidArg)
 	}
 
 	held, err := model.Load(endpoint)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if held != nil {
-		return fmt.Errorf("endpoint '%s' is held by %s; free it with 'loc unsubscribe %s'",
+		return nil, fmt.Errorf("endpoint '%s' is held by %s; free it with 'loc unsubscribe %s'",
 			endpoint, incumbent(held), endpoint)
 	}
 
@@ -208,7 +220,7 @@ func subscribeVerb(args []string) error {
 	// nothing. The rule is general: order the two writes so the gap falls
 	// where the reconciler's action matches the caller's intent. Here the
 	// row's presence is what "arrived" means.
-	return withPresence(func(pr provider.Presence) error {
+	err = withPresence(func(pr provider.Presence) error {
 		if err := model.Save(reg); err != nil {
 			return err
 		}
@@ -218,6 +230,10 @@ func subscribeVerb(args []string) error {
 		}
 		return emitJoin(pr, reg)
 	})
+	if err != nil {
+		return nil, err
+	}
+	return reg, nil
 }
 
 // emitJoin publishes the one heavy event. Everything a consumer knows about an

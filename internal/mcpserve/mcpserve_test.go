@@ -77,7 +77,7 @@ func (f *fake) deps() Deps {
 		// server reads that row back to know which registration is its own and
 		// reads it again before it leaves. The queue is not modelled: what a
 		// case asserts about the queue is whether an unsubscribe ran.
-		Subscribe: func(args []string) error {
+		Subscribe: func(args []string) (*model.Registration, error) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
 			f.subscribed = append(f.subscribed, args)
@@ -232,20 +232,25 @@ func home(t *testing.T, config string) string {
 }
 
 // register is the fake subscribe's ledger write: the row the real verb
-// saves, with the pid it was handed and that pid's start time.
-func register(args []string) error {
+// saves, with the pid it was handed and that pid's start time, handed back as
+// the real verb hands it back.
+func register(args []string) (*model.Registration, error) {
 	pid := 0
 	for i := 1; i+1 < len(args); i++ {
 		if args[i] == "--pid" {
 			pid, _ = strconv.Atoi(args[i+1])
 		}
 	}
-	return model.Save(&model.Registration{
+	reg := &model.Registration{
 		Endpoint: args[0], Instance: model.Instance(args[0]),
 		Agent:      model.Agent{Type: "tmux", Version: clientVer},
 		Process:    model.Process{PID: pid, Started: model.StartedAt(pid)},
 		Registered: model.Now(),
-	})
+	}
+	if err := model.Save(reg); err != nil {
+		return nil, err
+	}
+	return reg, nil
 }
 
 // hold writes a registration for the seat, as a predecessor would have left.
@@ -360,7 +365,7 @@ func TestServe_RegistersTheRuntimesPidAndTheRuntimesName(t *testing.T) {
 	}
 	// An ordinary session should log goodbye and left lines, with no other entries.
 	log := delivery(t, dir)
-	if !strings.Contains(log, "goodbye "+seat+": eof") || !strings.Contains(log, "left "+seat) {
+	if !strings.Contains(log, "goodbye "+seat+": eof") || !strings.Contains(log, " left "+seat+"\n") {
 		t.Errorf("an ordinary session should log goodbye and left; got: %q", log)
 	}
 }

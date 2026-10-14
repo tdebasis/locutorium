@@ -22,13 +22,13 @@ func TestDepartLog_GoodbyeAndLeftOnEOF(t *testing.T) {
 	}
 
 	// Check for left line (successful departure)
-	if !strings.Contains(log, "left workshop.scribe") {
+	if !strings.Contains(log, " left workshop.scribe\n") {
 		t.Errorf("delivery log missing 'left workshop.scribe' line; got:\n%s", log)
 	}
 
 	// Verify the order: goodbye should come before left
 	goodbyeIdx := strings.Index(log, "goodbye workshop.scribe: eof")
-	leftIdx := strings.Index(log, "left workshop.scribe")
+	leftIdx := strings.Index(log, " left workshop.scribe\n")
 	if goodbyeIdx < 0 || leftIdx < 0 {
 		t.Fatalf("required lines not found; log:\n%s", log)
 	}
@@ -62,7 +62,7 @@ func TestDepartLog_GoodbyeAndLeftWhenTheSeatWasFullyUp(t *testing.T) {
 	if !strings.Contains(log, "goodbye workshop.scribe: eof") {
 		t.Errorf("delivery log missing 'goodbye workshop.scribe: eof' line; got:\n%s", log)
 	}
-	if !strings.Contains(log, "left workshop.scribe") {
+	if !strings.Contains(log, " left workshop.scribe\n") {
 		t.Errorf("delivery log missing 'left workshop.scribe' line; got:\n%s", log)
 	}
 }
