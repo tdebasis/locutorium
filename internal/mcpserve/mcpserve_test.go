@@ -370,24 +370,40 @@ func TestServe_RegistersTheRuntimesPidAndTheRuntimesName(t *testing.T) {
 	}
 }
 
-// A DEAD PREDECESSOR IS DISPLACED, AND SAID SO. A registration whose process
-// has no start time was already gone when it was recorded, which is exactly
-// what a crashed runtime leaves behind.
-func TestServe_DisplacesADeadIncumbentAndNamesItsPid(t *testing.T) {
+// A DEAD PREDECESSOR IS DISPLACED, AND SAID SO, AND ITS MAIL STAYS. A
+// registration whose process has no start time was already gone when it was
+// recorded, which is exactly what a crashed runtime leaves behind. A crash is
+// not the agent deciding to leave, so only the row goes: no unsubscribe runs
+// before the subscribe, because an unsubscribe destroys the queue (#234).
+func TestServe_DisplacesADeadIncumbentAndKeepsTheQueue(t *testing.T) {
 	dir := home(t, "provider = none\n")
-	hold(t, 999999, "")
+	const crashed = "2026-01-01T00:00:00.000Z"
+	holdAt(t, 999999, "", crashed)
 	f := &fake{}
 	sess, done := serve(t, f.deps())
-	stop(t, sess, done)
+	f.ready(t)
 
-	if len(f.subscribed) != 1 {
-		t.Fatalf("a dead incumbent was not displaced: subscribed %d times", len(f.subscribed))
+	f.mu.Lock()
+	calls := append([]string(nil), f.calls...)
+	f.mu.Unlock()
+	if len(calls) != 1 || calls[0] != "subscribe" {
+		t.Errorf("the displacement ran %v; want a subscribe and nothing before it, because an unsubscribe destroys the queue", calls)
 	}
-	if len(f.unsubscribed) < 2 || !strings.Contains(strings.Join(f.unsubscribed[0], " "), "--force") {
-		t.Errorf("the displacement was not forced: %v", f.unsubscribed)
+	if r := heldNow(t); r == nil || r.Registered == crashed || r.Process.PID != os.Getppid() {
+		t.Errorf("the dead predecessor's row was not replaced: %+v", r)
 	}
-	if !strings.Contains(delivery(t, dir), "displaced "+seat+": pid 999999 is gone") {
-		t.Errorf("the displacement left no trace; the log said %q", delivery(t, dir))
+	want := "displaced " + seat + ": pid 999999 is gone; queue kept"
+	if !strings.Contains(delivery(t, dir), want) {
+		t.Errorf("want %q in:\n%s", want, delivery(t, dir))
+	}
+
+	// The seat this server took is its own, so it frees it on the way out:
+	// one unsubscribe, the clean one, and only that.
+	stop(t, sess, done)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.unsubscribed) != 1 || !strings.Contains(strings.Join(f.unsubscribed[0], " "), "--reason clean") {
+		t.Errorf("want exactly the clean leave; the server unsubscribed %v", f.unsubscribed)
 	}
 }
 
