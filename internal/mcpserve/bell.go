@@ -87,7 +87,9 @@ var errSuppressed = errors.New("suppressed by the breaker")
 // defaultCourierName is what the courier is called when the bell cannot say
 // who sent the mail. The startup backlog path asks the broker HOW MUCH mail is
 // waiting and never who sent it, so it names no seat; a name invented there
-// would be a guess standing in the one field a reader trusts.
+// would be a guess standing in the one field a reader trusts. A later try of a
+// streak asks the same question, and it names a seat only under the rule in
+// laterNames.
 const defaultCourierName = "loc-bell"
 
 // bell coalesces arrivals and rings the seat's notifier.
@@ -136,6 +138,17 @@ type bell struct {
 	// once. They name the courier and nothing else: they never reach the bell
 	// line, which stays a count with no body.
 	senders []string
+
+	// blind says the window's count holds mail with no known sender: an
+	// arrival whose sender did not parse, or a backlog that found more mail
+	// than the watch saw. It is cleared when the window rings.
+	blind bool
+
+	// The streak's senders and the count its first ring announced. A later try
+	// reads them to name the courier (laterNames). They are nil and 0 when the
+	// first ring could not name every message, and clearStreak forgets them.
+	streakSenders []string
+	streakN       int
 
 	// The breaker's counters, bucketed by calendar minute and hour exactly as
 	// the shell listener's are: a bucket that has rolled over starts empty,
@@ -201,6 +214,9 @@ func (b *bell) arrived(sender string) {
 		return
 	}
 	b.pending++
+	if sender == "" {
+		b.blind = true
+	}
 	b.note(sender)
 	if b.timer == nil {
 		b.timer = time.AfterFunc(b.window, b.fire)
@@ -251,7 +267,10 @@ func (b *bell) backlog() {
 		return
 	}
 	if n > b.pending {
+		// The watch saw fewer messages than the broker holds, so some of this
+		// mail has no known sender.
 		b.pending = n
+		b.blind = true
 	}
 	if b.timer != nil {
 		b.timer.Stop()
@@ -272,9 +291,16 @@ func (b *bell) fire() {
 	b.pending = 0
 	senders := b.senders
 	b.senders = nil
+	blind := b.blind
+	b.blind = false
 	b.timer = nil
 	stopped := b.stopped
 	b.clearStreak()
+	// THE STREAK KEEPS ITS FIRST RING'S SENDERS only when they account for
+	// every message that ring announced. A blind window keeps none.
+	if !stopped && n > 0 && !blind && len(senders) > 0 {
+		b.streakSenders, b.streakN = senders, n
+	}
 	b.mu.Unlock()
 	if stopped || n <= 0 {
 		return
@@ -493,9 +519,53 @@ func (b *bell) again() {
 		return
 	}
 
-	// A later try asks the broker how much mail is waiting and never who sent
-	// it, so it names no seat, exactly as the backlog path does.
-	b.try(n, defaultCourierName, "")
+	b.mu.Lock()
+	names := b.laterNames(n)
+	b.mu.Unlock()
+	b.try(n, courierName(names), bellFrom(names))
+}
+
+// laterNames is who a later try may name, or nil when it may name no one.
+// Called under the lock.
+//
+// A LATER TRY NAMES A SEAT ONLY WHEN THE COUNT ENTAILS IT. The try asks the
+// broker how much mail waits and never who sent it. The streak remembers the
+// senders its first ring named and how many messages that ring announced, and
+// the open window holds any mail that arrived since. Those senders are named
+// when every one of these is true:
+//
+//   - the first ring named every message it announced, and so did the window;
+//   - the queue holds no more than the two counts together, so no mail from
+//     an unseen sender can be waiting;
+//   - with several senders, the queue holds exactly that many. A smaller count
+//     means some mail was read, and the count cannot say whose.
+//
+// Anything else names no seat, exactly as the backlog path does.
+func (b *bell) laterNames(n int) []string {
+	if len(b.streakSenders) == 0 || b.blind {
+		return nil
+	}
+	names := append([]string(nil), b.streakSenders...)
+	for _, s := range b.senders {
+		seen := false
+		for _, have := range names {
+			if have == s {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			names = append(names, s)
+		}
+	}
+	known := b.streakN + b.pending
+	if n > known {
+		return nil
+	}
+	if len(names) > 1 && n != known {
+		return nil
+	}
+	return names
 }
 
 // endStreak closes a streak that ended without a give-up.
@@ -505,8 +575,8 @@ func (b *bell) endStreak() {
 	b.mu.Unlock()
 }
 
-// clearStreak cancels a waiting try and forgets the count. Called under the
-// lock.
+// clearStreak cancels a waiting try and forgets the count and the senders.
+// Called under the lock.
 func (b *bell) clearStreak() {
 	if b.tryTimer != nil {
 		b.tryTimer.Stop()
@@ -514,6 +584,8 @@ func (b *bell) clearStreak() {
 	}
 	b.tries = 0
 	b.rangs = 0
+	b.streakSenders = nil
+	b.streakN = 0
 }
 
 // giveBack returns the minute and hour charges for a ring that TYPED NOTHING.
