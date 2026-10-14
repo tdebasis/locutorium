@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -45,9 +46,11 @@ type fake struct {
 
 	subscribed   [][]string
 	unsubscribed [][]string
-	emitted      []string
-	nudged       []string
-	couriers     []string
+	// calls is both verbs in the order they ran.
+	calls    []string
+	emitted  []string
+	nudged   []string
+	couriers []string
 
 	// The callbacks Watch was handed, so a case can make an arrival happen.
 	arrived      func(sender string)
@@ -70,18 +73,24 @@ func (f *fake) deps() Deps {
 	return Deps{
 		Endpoint: seat,
 		Version:  "1.4.2",
-		Subscribe: func(args []string) error {
+		// The two verbs keep the ledger row as the real ones do, because the
+		// server reads that row back to know which registration is its own and
+		// reads it again before it leaves. The queue is not modelled: what a
+		// case asserts about the queue is whether an unsubscribe ran.
+		Subscribe: func(args []string) (*model.Registration, error) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
 			f.subscribed = append(f.subscribed, args)
-			return nil
+			f.calls = append(f.calls, "subscribe")
+			return register(args)
 		},
 		Unsubscribe: func(args []string) error {
 			time.Sleep(f.slowLeave)
 			f.mu.Lock()
 			defer f.mu.Unlock()
 			f.unsubscribed = append(f.unsubscribed, args)
-			return nil
+			f.calls = append(f.calls, "unsubscribe "+strings.Join(args[1:], " "))
+			return model.Remove(args[0])
 		},
 		Send: func(w io.Writer, to, body string) error {
 			if f.sendErr != nil {
@@ -222,8 +231,37 @@ func home(t *testing.T, config string) string {
 	return dir
 }
 
+// register is the fake subscribe's ledger write: the row the real verb
+// saves, with the pid it was handed and that pid's start time, handed back as
+// the real verb hands it back.
+func register(args []string) (*model.Registration, error) {
+	pid := 0
+	for i := 1; i+1 < len(args); i++ {
+		if args[i] == "--pid" {
+			pid, _ = strconv.Atoi(args[i+1])
+		}
+	}
+	reg := &model.Registration{
+		Endpoint: args[0], Instance: model.Instance(args[0]),
+		Agent:      model.Agent{Type: "tmux", Version: clientVer},
+		Process:    model.Process{PID: pid, Started: model.StartedAt(pid)},
+		Registered: model.Now(),
+	}
+	if err := model.Save(reg); err != nil {
+		return nil, err
+	}
+	return reg, nil
+}
+
 // hold writes a registration for the seat, as a predecessor would have left.
 func hold(t *testing.T, pid int, started string) {
+	t.Helper()
+	holdAt(t, pid, started, model.Now())
+}
+
+// holdAt is hold with the registration time chosen, so a case can tell two
+// rows naming the same process apart.
+func holdAt(t *testing.T, pid int, started, registered string) {
 	t.Helper()
 	if err := os.MkdirAll(model.Dir(), 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -232,7 +270,7 @@ func hold(t *testing.T, pid int, started string) {
 		Endpoint: seat, Instance: "workshop",
 		Agent:      model.Agent{Type: "acme-cli", Version: "1.0.0"},
 		Process:    model.Process{PID: pid, Started: started},
-		Registered: model.Now(),
+		Registered: registered,
 	})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -327,7 +365,7 @@ func TestServe_RegistersTheRuntimesPidAndTheRuntimesName(t *testing.T) {
 	}
 	// An ordinary session should log goodbye and left lines, with no other entries.
 	log := delivery(t, dir)
-	if !strings.Contains(log, "goodbye "+seat+": eof") || !strings.Contains(log, "left "+seat) {
+	if !strings.Contains(log, "goodbye "+seat+": eof") || !strings.Contains(log, " left "+seat+"\n") {
 		t.Errorf("an ordinary session should log goodbye and left; got: %q", log)
 	}
 }

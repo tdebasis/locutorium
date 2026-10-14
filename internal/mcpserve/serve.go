@@ -57,7 +57,9 @@ type Deps struct {
 	// Version is the loc this is, for the initialize handshake.
 	Version string
 
-	Subscribe   func(args []string) error
+	// Subscribe is the subscribe verb, handing back the row it wrote: the
+	// one way this server can know which registration is its own (register).
+	Subscribe   func(args []string) (*model.Registration, error)
 	Unsubscribe func(args []string) error
 	Send        func(w io.Writer, to, body string) error
 	Read        func(w io.Writer, peek bool) error
@@ -241,6 +243,27 @@ type server struct {
 	// address is where this seat is reached, the deployment's own
 	// LOC_LISTENER_ADDRESS. The notifier is handed it on every ring.
 	address string
+	// own is the registration this server wrote, as the subscribe verb handed
+	// it back. Nil until register succeeds, and nil after it when the verb
+	// handed back no row; depart treats both the same way (see depart).
+	own *tenure
+}
+
+// tenure is what tells one registration of a seat from another: the runtime's
+// pid and start time, and when the row was written.
+//
+// THE PID IS NOT ENOUGH, AND NEITHER IS THE PAIR. A runtime that reconnects
+// its MCP server launches a second one with the SAME parent while the first
+// may still be running, so two servers can hold rows naming one runtime
+// process. Only the registration time tells the earlier row from the later.
+type tenure struct {
+	pid        int
+	started    string
+	registered string
+}
+
+func tenureOf(r *model.Registration) tenure {
+	return tenure{pid: r.Process.PID, started: r.Process.Started, registered: r.Registered}
 }
 
 // departReason describes why the server is departing.
@@ -318,7 +341,7 @@ func (s *server) register(clientVersion string) error {
 	if err != nil {
 		return err
 	}
-	return s.d.Subscribe([]string{
+	reg, err := s.d.Subscribe([]string{
 		s.d.Endpoint,
 		"--pid", strconv.Itoa(s.d.Ppid()),
 		"--type", os.Getenv("LOC_LISTENER_TYPE"),
@@ -327,6 +350,24 @@ func (s *server) register(clientVersion string) error {
 		"--display", agentToken(s.d.Endpoint),
 		"--cwd", cwd,
 	})
+	if err != nil {
+		return err
+	}
+
+	// THE SERVER REMEMBERS WHICH REGISTRATION IS ITS OWN. Leaving is undoing
+	// this row and no other, and by the time this server leaves the seat may
+	// have been taken by somebody else: a later server of the same runtime,
+	// or a new runtime after this one's died. The row is the one the verb
+	// says it WROTE, never one read back from the ledger: a later server of
+	// the same runtime names the same pid and can replace the row between the
+	// write and any read, and a read-back would then claim the successor's
+	// row and destroy it on the way out. A verb that hands back no row leaves
+	// nothing claimed, and the server leaves the seat alone (depart).
+	if reg != nil {
+		t := tenureOf(reg)
+		s.own = &t
+	}
+	return nil
 }
 
 // requireListenerEnv refuses to serve without the deployment's two listener
@@ -366,6 +407,28 @@ func (s *server) displaceOrRefuse() error {
 	if held.Alive() && held.Process.PID != s.d.Ppid() {
 		return heldElsewhere(s.d.Endpoint, held)
 	}
+
+	// THE SAME RUNTIME, AN EARLIER SERVER: THE ROW GOES AND THE MAIL STAYS.
+	// A runtime that reconnects its MCP server launches this one while the
+	// last may still be running, and the seat is the runtime's in both cases.
+	// What waits in the queue was sent to that runtime, so forcing an
+	// unsubscribe here, which destroys the queue, threw away mail its own
+	// addressee was about to read. Only the ledger row is removed — with the
+	// ledger's own function, because the unsubscribe verb has no way to keep
+	// a queue — and subscribe then adopts the queue, which CreateQueue allows
+	// because it is idempotent for a queue of the same shape. A sweep that
+	// lands between the two finds a queue with no row, and that it reports
+	// and leaves alone (#141). The earlier server, when it goes, finds a row
+	// that is not its own and leaves this one standing (depart).
+	if held.Alive() {
+		if err := model.Remove(s.d.Endpoint); err != nil {
+			return err
+		}
+		s.log(fmt.Sprintf("re-took %s from an earlier server of the same runtime, pid %d (registered %s); queue kept",
+			s.d.Endpoint, held.Process.PID, held.Registered))
+		return nil
+	}
+
 	dead := !held.Alive()
 	if err := s.d.Unsubscribe([]string{s.d.Endpoint, "--force"}); err != nil {
 		return err
@@ -407,7 +470,41 @@ func (s *server) logGoodbye(reason departReason) {
 }
 
 // depart frees the seat on the way out, bounded.
+//
+// IT FREES ONLY ITS OWN SEAT. The unsubscribe it runs removes the row AND
+// destroys the queue with whatever mail is in it, so running it over a seat
+// somebody else now holds took that seat from under them and threw away their
+// mail (#216). The row is read first and compared with the one this server
+// wrote; anything else — no row, or a row of another tenure — is left exactly
+// as it is, and the log says who holds it.
+//
+// A SERVER THAT NEVER CONFIRMED ITS ROW FREES NOTHING. It cannot tell its own
+// registration from a stranger's, and of the two mistakes leaving a row
+// behind is the one that is repaired: a row naming a dead runtime is reaped by
+// the sweep, and one naming a live runtime is re-taken by its next server with
+// the queue kept. Destroying a stranger's queue is repaired by nothing.
 func (s *server) depart(reason departReason) {
+	defer s.releasePIDFile()
+
+	if s.own == nil {
+		s.log(fmt.Sprintf("left %s: this server never confirmed its registration; registration and queue untouched",
+			s.d.Endpoint))
+		return
+	}
+	held, err := model.Load(s.d.Endpoint)
+	switch {
+	case err != nil:
+		s.log(fmt.Sprintf("leave failed %s: %v", s.d.Endpoint, err))
+		return
+	case held == nil:
+		s.log(fmt.Sprintf("left %s: no registration to remove", s.d.Endpoint))
+		return
+	case tenureOf(held) != *s.own:
+		s.log(fmt.Sprintf("left %s: seat now held by pid %d (registered %s); registration and queue untouched",
+			s.d.Endpoint, held.Process.PID, held.Registered))
+		return
+	}
+
 	done := make(chan error, 1)
 	go func() {
 		// --force because our own pid is alive: it is this very process doing
@@ -426,8 +523,6 @@ func (s *server) depart(reason departReason) {
 	case <-time.After(departureWait):
 		s.log(fmt.Sprintf("leave timed out %s", s.d.Endpoint))
 	}
-
-	s.releasePIDFile()
 }
 
 // THE SERVING PROCESS NAMES ITSELF, because nothing else in the deployment
@@ -461,8 +556,17 @@ func (s *server) claimPIDFile() {
 		[]byte(strconv.Itoa(pid)+"\n"+model.StartedAt(pid)+"\n"), 0o600)
 }
 
-// releasePIDFile removes it on the way out.
-func (s *server) releasePIDFile() { _ = model.ReleaseServerPID(s.d.Endpoint) }
+// releasePIDFile removes it on the way out, IF IT STILL NAMES THIS PROCESS.
+// A later server of the same seat writes its own over this one's, and removing
+// that would leave a served seat naming no server — the stale-file mistake
+// claimPIDFile exists to avoid, made the other way round. The comparison is
+// the pair claimPIDFile wrote, computed by the same function.
+func (s *server) releasePIDFile() {
+	pid := os.Getpid()
+	if other, err := model.ReleaseServerPIDIfOwn(s.d.Endpoint, pid, model.StartedAt(pid)); err == nil && other != 0 {
+		s.log(fmt.Sprintf("left %s: server pid file names pid %d; left in place", s.d.Endpoint, other))
+	}
+}
 
 // warn is a line that must not be lost: it goes to the delivery log, where a
 // deployment already looks for what was delivered and what was not, AND to the
