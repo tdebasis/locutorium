@@ -337,8 +337,12 @@ func (n *courierNotifier) Ring(endpoint, address, bell, courier string) error {
 		}
 		return n.fail(endpoint, fmt.Sprintf("courier: %v", err))
 	}
-	if reason := courierOutcome(stdout.Bytes(), address); reason != "" {
+	reason, strays := courierOutcome(stdout.Bytes(), address)
+	if reason != "" {
 		return n.fail(endpoint, reason)
+	}
+	for _, s := range strays {
+		n.log(fmt.Sprintf("nudge %s courier also sent to %s, %s", endpoint, s, notAt(address)))
 	}
 	n.log(fmt.Sprintf("nudge %s rang '%s'", endpoint, bell))
 	return nil

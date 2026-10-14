@@ -26,11 +26,26 @@ import (
 // is_error flag, so a result counts as a send only when it is not an error
 // AND its text says "success":true.
 //
-// THE ADDRESSEE IS CHECKED WHEN THE PANE CAN BE FOUND MECHANICALLY. A pane id
-// such as %2 appears in ListAgents' own listing ("tmux conclave:@1.%2"), so
-// the send must name a session on a line that carries that id. Any other
-// address form (a pane target such as conclave:4.1) does not appear in the
-// listing, and there the send's own success is the whole of the evidence.
+// THE ADDRESSEE IS CHECKED WHEREVER IT CAN BE CHECKED MECHANICALLY. Three
+// address forms reach this:
+//
+//   - A pane id such as %2. ListAgents prints it on the session's own line
+//     ("tmux house:@1.%2"), so the send must name a session on a line that
+//     carries that id.
+//   - A session name such as scribe. The send must name exactly that session:
+//     "scribe", or "scribe [id]" as ListAgents writes it.
+//   - A pane target such as house:3.1 (it holds ':' or '.'). ListAgents does
+//     not print targets, so nothing in the stream ties a session to one, and
+//     the runtime's confirmation of the send is the whole of the evidence.
+//     THIS IS A KNOWN GAP: a courier that confirms a send to the wrong session
+//     at a pane target is recorded as rang.
+//
+// A CHANGE IN THE RUNTIME'S OUTPUT FAILS EVERY BELL; IT NEVER RINGS ONE. Each
+// fact here has to be found before it counts — a SendMessage call, its
+// result, the "success":true in it, the addressee — so a stream whose shape
+// this no longer reads finds none of them, and the bell is written down as
+// failed, mostly with reasonNoResult. A run of those across every claude seat
+// is the sign to look at the format, not at the seats.
 
 // courierEvent is the part of one stream-json line this reads.
 type courierEvent struct {
@@ -55,13 +70,19 @@ type courierBlock struct {
 // paneID is the address form ListAgents prints: tmux's own %N pane id.
 var paneID = regexp.MustCompile(`^%[0-9]+$`)
 
+// reasonNoResult is the failure for a stream that proves nothing either way.
+// It names the format, because a changed format is how every bell would read.
+const reasonNoResult = "courier gave no result (output unreadable, or the runtime's format changed)"
+
 // courierReasonMax caps the runtime's text where it reaches a reason. The
 // reason lands in the day's record and in `loc status`, one line each.
 const courierReasonMax = 100
 
-// courierOutcome reads the courier's stdout and returns "" when it proves a
-// bell was sent to the session on address, or the reason the bell failed.
-func courierOutcome(out []byte, address string) string {
+// courierOutcome reads the courier's stdout. It returns reason "" when the
+// stream proves a bell was sent to the session at address, or the reason the
+// bell failed. strays names the other sends the courier made, each with
+// whether it was delivered, so a ring that also woke someone else says so.
+func courierOutcome(out []byte, address string) (reason string, strays []string) {
 	var (
 		events   int
 		finished bool                  // a result event that is not an error
@@ -104,40 +125,85 @@ func courierOutcome(out []byte, address string) string {
 		}
 	}
 	if events == 0 {
-		return "courier gave no result"
+		return reasonNoResult, nil
 	}
 	if len(order) == 0 {
 		if !finished {
-			return "courier gave no result"
+			return reasonNoResult, nil
 		}
-		return "courier found no matching session"
+		return "courier found no matching session", nil
 	}
 
 	var wrong, failed string
+	rang := false
 	for _, id := range order {
 		r, ok := results[id]
 		if !ok {
 			continue
 		}
-		if why, sent := sendResult(r); !sent {
+		to := uses[id]
+		why, sent := sendResult(r)
+		if !isAddressee(listings, address, to) {
+			// A send to another session is a stray whether or not it was
+			// delivered. A delivered one woke the wrong seat and says so; an
+			// undelivered one is a send that failed, and says why.
+			if sent {
+				wrong = fmt.Sprintf("courier sent to '%s', %s", short(to), notAt(address))
+				strays = append(strays, fmt.Sprintf("'%s' (delivered)", short(to)))
+			} else {
+				failed = why
+				strays = append(strays, fmt.Sprintf("'%s' (not delivered: %s)", short(to), why))
+			}
+			continue
+		}
+		if !sent {
 			failed = why
 			continue
 		}
-		to := uses[id]
-		if paneID.MatchString(address) && !onPane(listings, address, to) {
-			wrong = fmt.Sprintf("courier sent to '%s', not the session on pane %s", short(to), address)
-			continue
-		}
-		return ""
+		rang = true
 	}
 	switch {
+	case rang:
+		return "", strays
 	case wrong != "":
-		return wrong
+		return wrong, nil
 	case failed != "":
-		return "courier send failed: " + failed
+		return "courier send failed: " + failed, nil
 	default:
-		return "courier gave no result"
+		return reasonNoResult, nil
 	}
+}
+
+// paneTarget reports whether an address is a tmux pane target such as
+// house:3.1, the form ListAgents does not print.
+func paneTarget(address string) bool { return strings.ContainsAny(address, ":.") }
+
+// namedID is a session as ListAgents names it: "name [id]".
+var namedID = regexp.MustCompile(`^(.*) \[[^\]]+\]$`)
+
+// isAddressee reports whether a send to `to` is a send to the session at
+// address, under the three rules in the comment at the top of this file.
+func isAddressee(listings []string, address, to string) bool {
+	switch {
+	case paneID.MatchString(address):
+		return onPane(listings, address, to)
+	case paneTarget(address):
+		return true // the known gap: nothing in the stream can say
+	default:
+		if to == address {
+			return true
+		}
+		m := namedID.FindStringSubmatch(to)
+		return m != nil && m[1] == address
+	}
+}
+
+// notAt is the rest of a wrong-addressee reason.
+func notAt(address string) string {
+	if paneID.MatchString(address) {
+		return "not the session on pane " + address
+	}
+	return "not the session named " + address
 }
 
 // addressee is the session a SendMessage call names.
