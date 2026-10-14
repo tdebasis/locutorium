@@ -422,7 +422,13 @@ func TestNotify_ClaudeMatchesTheAddresseeByAddressForm(t *testing.T) {
 			"courier sent to 'clerk', not the session named scribe"},
 		{"a name, sent to a longer name", "scribe", sentTo("house.scribe [5b2d3e]"),
 			"courier sent to 'house.scribe [5b2d3e]', not the session named scribe"},
+		{"a name, sent to a numbered twin", "scribe", sentTo("scribe (2) [abc123]"),
+			"courier sent to 'scribe (2) [abc123]', not the session named scribe"},
+		{"a dotted name, sent to that name [id]", "house.scribe", sentTo("house.scribe [5b2d3e]"), ""},
+		{"a dotted name, sent to another session", "house.scribe", sentTo("clerk"),
+			"courier sent to 'clerk', not the session named house.scribe"},
 		{"a pane target, any confirmed send", "workshop:2.1", sentTo("clerk"), ""},
+		{"a pane target with a window id and pane id", "workshop:@2.%4", sentTo("clerk"), ""},
 		{"a pane target, no send", "workshop:2.1", courierStream(courierNoMatch),
 			"courier found no matching session"},
 	} {

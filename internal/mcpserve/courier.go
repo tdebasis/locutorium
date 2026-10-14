@@ -176,7 +176,13 @@ func courierOutcome(out []byte, address string) (reason string, strays []string)
 
 // paneTarget reports whether an address is a tmux pane target such as
 // house:3.1, the form ListAgents does not print.
-func paneTarget(address string) bool { return strings.ContainsAny(address, ":.") }
+//
+// THE TARGET'S OWN SHAPE IS MATCHED, not any colon or dot: a session, a
+// colon, a window, and optionally a dot and a pane. A dotted session name
+// such as house.scribe is a name, and the exact-name rule applies to it.
+func paneTarget(address string) bool { return paneTargetForm.MatchString(address) }
+
+var paneTargetForm = regexp.MustCompile(`^[^:\s]+:@?\d+(\.%?\d+)?$`)
 
 // namedID is a session as ListAgents names it: "name [id]".
 var namedID = regexp.MustCompile(`^(.*) \[[^\]]+\]$`)
