@@ -185,3 +185,32 @@ func TestBell_AHeldTryIsNotCountedInTheGiveUpsRang(t *testing.T) {
 		t.Errorf("the record holds %v\nwant              %v", got, want)
 	}
 }
+
+// A HELD ANSWER ON THE LAST TRY ENDS NOTHING. A held try stands in for the try
+// it was asked as, so after two of three tries it stands in for the third. It
+// must still leave the streak open and arm the recheck, or the receiver that
+// holds the bell would read as a seat that was never told.
+//
+// PLANT: in counted, drop `!held &&` from `final`, and the give-up line follows
+// the held try.
+func TestBell_AHeldAnswerOnTheLastTryDoesNotEndTheStreak(t *testing.T) {
+	dir := home(t, "provider = none\n")
+	f := &fake{unread: 2, nudgeErrs: []error{busy("pane_in_mode"), busy("pane_in_mode"), held()}}
+	b, sch, _ := retryBell(t, f, func() time.Time { return bellRecordClock })
+
+	b.arrived("")
+	b.fire()      // 1/3 refused
+	sch.run(t, 0) // 2/3 refused
+	sch.run(t, 1) // 3/3 held
+
+	want := []string{"1/3 refused", "2/3 refused", "3/3 held"}
+	if got := results(t, dir); !sameStrings(got, want) {
+		t.Errorf("the record holds %v\nwant              %v", got, want)
+	}
+	if got := sch.delays(); len(got) != 3 || got[2] != testHeldGap {
+		t.Errorf("the tries were scheduled %v; want the recheck after the held answer", got)
+	}
+	if !tryArmed(b) {
+		t.Error("no recheck is waiting after a held answer on the last try")
+	}
+}

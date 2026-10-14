@@ -700,6 +700,10 @@ busy refusal gets.
 - **The recheck keeps a dead receiver from leaving mail silent.** A receiver that still holds the
   bell answers `held` again. A receiver that has died gives no answer, that try is recorded
   `failed`, and the streak counts on as entry 17 describes, to its give-up.
+- **The bus puts no bound on a hold; the receiver does.** While a receiver keeps answering `held`,
+  the bell keeps asking at the recheck gap and the mail waits. A receiver that holds bells must end
+  its own holds: after a set time it says so where the person can see it and answers `busy` instead,
+  so the bell's ordinary tries and give-up take over.
 - **The streak still ends silently when the seat reads its mail.** The recheck asks the queue first,
   as every later try does.
 - **A held try's line carries the number of the try it stands in for.** `2/3 held` followed by
