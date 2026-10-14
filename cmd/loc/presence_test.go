@@ -543,11 +543,14 @@ func TestPresence_Unsubscribe_DestroysQueueAndEmitsClean(t *testing.T) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 4. sweep reaps dead pids and PUBLISHES NOTHING, and is idempotent
+// 4. sweep reaps dead pids, KEEPS THEIR QUEUES, PUBLISHES NOTHING, and is
+//    idempotent
 //    PRESENCE.md §How an agent leaves; §CLI → sweep. #27 removed the event:
 //    a departure event says an agent left, a reap says a record was wrong, and
-//    a reap may be tidying a record that went stale hours earlier. Same-machine
-//    is a precondition the harness cannot violate on one host; see the notes.
+//    a reap may be tidying a record that went stale hours earlier. #234 kept
+//    the queue: a dead process is not an agent deciding its mail is unwanted.
+//    Same-machine is a precondition the harness cannot violate on one host;
+//    see the notes.
 // ════════════════════════════════════════════════════════════════════════════
 
 func TestPresence_Sweep_ReapsADeadPidWithoutAnnouncingIt(t *testing.T) {
@@ -561,29 +564,38 @@ func TestPresence_Sweep_ReapsADeadPidWithoutAnnouncingIt(t *testing.T) {
 	if code != 0 {
 		t.Errorf("sweep exited %d (stderr %q), want 0", code, errOut)
 	}
-	if !strings.Contains(out, e2+": reaped") {
-		t.Errorf("sweep printed %q, want a line naming the reap of %s", out, e2)
+	if !strings.Contains(out, e2+": reaped, the process is gone; queue kept\n") {
+		t.Errorf("sweep printed %q, want a line naming the reap of %s and its kept queue", out, e2)
 	}
 	if _, err := os.Stat(filepath.Join(p.home, "run", "presence", e2+".json")); !os.IsNotExist(err) {
 		t.Error("the dead registration survived the sweep")
+	}
+	if !p.qexists(q2) {
+		t.Error("the sweep deleted the dead seat's queue; a reap keeps it (#234)")
 	}
 	if m, ok := findEvent(t, collect(sub, 1*time.Second), "agent.unsubscribe"); ok {
 		t.Errorf("the sweep published an agent.unsubscribe (%v); a reap announces nothing", m["endpoint"])
 	}
 }
 
-// Idempotent: a second sweep with nothing left to reap prints nothing, exits 0
-// and publishes nothing. Silence is what makes it safe to run on a timer.
-func TestPresence_Sweep_SecondSweepIsSilent(t *testing.T) {
+// Idempotent: a second sweep has nothing left to reap. It changes nothing,
+// exits 0 and publishes nothing. What it prints is the report of the queue the
+// first sweep kept, a queue with no row now, in the words used for any other,
+// and nothing else (#234).
+func TestPresence_Sweep_SecondSweepOnlyReportsTheKeptQueue(t *testing.T) {
 	p := newPresence(t)
 	p.as(t, "host")
 	exec("subscribe", e2, "--pid", pidStr(deadPid(t)), "--type", "tmux", "--version", "3.2.0")
 	exec("sweep") // first sweep reaps the dead pid
 
 	sub := p.witness(t, "presence.workshop")
-	code, out, errOut := exec("sweep") // second sweep: nothing left to do
-	if code != 0 || out != "" {
-		t.Errorf("second sweep exit=%d stdout=%q (stderr %q), want a silent 0", code, out, errOut)
+	code, out, errOut := exec("sweep") // second sweep: nothing left to change
+	if code != 0 || out != queueNoRowLine(e2) {
+		t.Errorf("second sweep exit=%d stdout=%q (stderr %q), want 0 and only %q",
+			code, out, errOut, queueNoRowLine(e2))
+	}
+	if !p.qexists(q2) {
+		t.Error("the second sweep deleted the kept queue")
 	}
 	if m, ok := findEvent(t, collect(sub, 1*time.Second), "agent.unsubscribe"); ok {
 		t.Errorf("a second sweep emitted an agent.unsubscribe (%v); it must be a silent no-op", m["endpoint"])
