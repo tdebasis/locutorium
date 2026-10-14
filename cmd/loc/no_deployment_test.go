@@ -293,7 +293,7 @@ func TestTheDaemonSweepsItsOwnBrokerAfterTheConfigIsRewritten(t *testing.T) {
 		t.Errorf("%s is not on this daemon's own broker: %v; the sweep did not run there",
 			model.StreamName(live), err)
 	}
-	// And the dead row's own queue was reaped there rather than anywhere else.
+	// And the dead row was reaped there rather than anywhere else.
 	if _, err := os.Stat(filepath.Join(home, "run", "presence", gone+".json")); !os.IsNotExist(err) {
 		t.Errorf("the dead row survived every beat: %v", err)
 	}

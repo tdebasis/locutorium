@@ -227,9 +227,11 @@ notifier's own per-attempt lines are in `run/<endpoint>.delivery.log`.
 reads one, and `loc status` ignores it.
 
 `queue-deleted` says a queue is gone, so mail stops reaching that seat. The reason is one of `left`
-(the agent unsubscribed), `displaced` (another agent took the seat with `--force`) or `expired` (the
-sweep found the registered process gone). Older logs also hold `orphan`, from the sweep that used to
-delete a queue no row claimed; no version writes that reason now.
+(the agent unsubscribed), `displaced` (another agent took the seat with `--force`) or `expired`
+(`loc unsubscribe --reason expiry`). Older logs also hold `expired` from the sweep, which used to
+delete the queue of a seat whose process was gone, and `orphan`, from the sweep that used to delete
+a queue no row claimed. The sweep writes neither now: it deletes no queue, and a reap is a line in
+the daemon's log, `<endpoint>: reaped, the process is gone; queue kept`.
 
 The file holds message bodies in plain text. The writer creates the directory `0700` and the file
 `0600`, and it sets those modes only when it creates them.

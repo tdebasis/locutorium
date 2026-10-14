@@ -66,6 +66,11 @@ type Deps struct {
 	Status      func(w io.Writer, endpoint string) error
 	Topics      func(w io.Writer) error
 	Emit        func(kind, endpoint, tool string)
+	// Depart publishes the seat's departure event with the reason given, and
+	// does nothing else: it is the announcement the unsubscribe verb makes,
+	// without the queue deletion that verb also makes. A dead predecessor is
+	// displaced with it (displaceOrRefuse).
+	Depart func(reason string) error
 
 	// The medium's listener seam. Watch rings arrived once per message
 	// published to the seat's queue subject, reconnected once per
@@ -399,43 +404,65 @@ func (s *server) requireListenerEnv() error {
 // sweep runs, and refusing to start over it would make a crash cost a seat.
 // The displacement is written to the delivery log with the dead pid, because
 // it is the only trace that the previous occupant did not leave cleanly.
+//
+// WHOEVER HELD THE SEAT, THE ROW GOES AND THE MAIL STAYS. Nothing this server
+// does to a predecessor destroys the queue. Only a deliberate `loc
+// unsubscribe` does that, because only an agent or an operator can decide a
+// seat is finished.
 func (s *server) displaceOrRefuse() error {
 	held, err := model.Load(s.d.Endpoint)
 	if err != nil || held == nil {
 		return err
 	}
-	if held.Alive() && held.Process.PID != s.d.Ppid() {
+	// Asked once. A process can die between two questions, and the branch
+	// taken must be the one the log line below describes.
+	alive := held.Alive()
+	if alive && held.Process.PID != s.d.Ppid() {
 		return heldElsewhere(s.d.Endpoint, held)
 	}
 
-	// THE SAME RUNTIME, AN EARLIER SERVER: THE ROW GOES AND THE MAIL STAYS.
-	// A runtime that reconnects its MCP server launches this one while the
-	// last may still be running, and the seat is the runtime's in both cases.
-	// What waits in the queue was sent to that runtime, so forcing an
-	// unsubscribe here, which destroys the queue, threw away mail its own
-	// addressee was about to read. Only the ledger row is removed — with the
-	// ledger's own function, because the unsubscribe verb has no way to keep
-	// a queue — and subscribe then adopts the queue, which CreateQueue allows
-	// because it is idempotent for a queue of the same shape. A sweep that
-	// lands between the two finds a queue with no row, and that it reports
-	// and leaves alone (#141). The earlier server, when it goes, finds a row
-	// that is not its own and leaves this one standing (depart).
-	if held.Alive() {
-		if err := model.Remove(s.d.Endpoint); err != nil {
-			return err
-		}
+	// Only the ledger row is removed — with the ledger's own function, because
+	// the unsubscribe verb has no way to keep a queue — and subscribe then
+	// adopts the queue, which CreateQueue allows because it is idempotent for
+	// a queue of the same shape. A sweep that lands between the two finds a
+	// queue with no row, and that it reports and leaves alone (#141).
+	if err := model.Remove(s.d.Endpoint); err != nil {
+		return err
+	}
+
+	// THE SAME RUNTIME, AN EARLIER SERVER. A runtime that reconnects its MCP
+	// server launches this one while the last may still be running, and the
+	// seat is the runtime's in both cases. What waits in the queue was sent to
+	// that runtime, so forcing an unsubscribe here, which destroys the queue,
+	// threw away mail its own addressee was about to read (#232). The earlier
+	// server, when it goes, finds a row that is not its own and leaves this
+	// one standing (depart).
+	if alive {
 		s.log(fmt.Sprintf("re-took %s from an earlier server of the same runtime, pid %d (registered %s); queue kept",
 			s.d.Endpoint, held.Process.PID, held.Registered))
 		return nil
 	}
 
-	dead := !held.Alive()
-	if err := s.d.Unsubscribe([]string{s.d.Endpoint, "--force"}); err != nil {
-		return err
+	// A DEAD PREDECESSOR'S MAIL IS KEPT FOR WHOEVER TAKES THE SEAT. A crash is
+	// not the agent deciding to leave: the mail was sent to the seat, and the
+	// seat is usually back, restarted by a person or a supervisor, which is
+	// what this server is. The forced unsubscribe this used to run deleted the
+	// queue, so a sender was told a message was accepted that its reader never
+	// saw (#234). The line keeps its old start, so a grep for a displacement
+	// still finds it.
+	//
+	// THE DEPARTURE IS STILL ANNOUNCED, as `expiry`. The forced unsubscribe
+	// published it, and a watcher that saw the dead agent join must see it
+	// leave before it sees this server join. The reason is `expiry` because
+	// that is the reason that means the process is gone (PRESENCE.md §How an
+	// agent leaves); the verb used to say `clean` only because nobody passed
+	// it one. A same-runtime re-take, above, announces nothing: that agent
+	// did not leave. An announcement that cannot be published is logged and
+	// does not cost the seat, as with every other event this server emits.
+	if err := s.d.Depart("expiry"); err != nil {
+		s.log(fmt.Sprintf("departure of %s not announced: %v", s.d.Endpoint, err))
 	}
-	if dead {
-		s.log(fmt.Sprintf("displaced %s: pid %d is gone", s.d.Endpoint, held.Process.PID))
-	}
+	s.log(fmt.Sprintf("displaced %s: pid %d is gone; queue kept", s.d.Endpoint, held.Process.PID))
 	return nil
 }
 

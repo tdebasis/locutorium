@@ -6,9 +6,10 @@ import (
 	"time"
 )
 
-// Attendance is the answer to one question: does this endpoint hold a queue?
-// It is the question the send path asks, and a seat whose queue is gone is a
-// seat that cannot receive mail.
+// Attendance is the medium's answer to one question: does this endpoint hold
+// a queue? The send path asks it, and asks the ledger for a row as well,
+// because a queue no row claims is kept mail for a seat nobody is attending
+// (#234). Derive reads it beside the row for the same reason.
 //
 // IT HAS THREE STATES AND NOT TWO. "The broker says there is no queue" and
 // "the broker could not be asked" are different facts, and a bool reports the
@@ -47,13 +48,19 @@ func Derive(endpoint string, reg *Registration, att Attendance, act *Activity, n
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n", endpoint)
 	fmt.Fprintf(&b, "  registered: %s\n", registeredLine(reg))
-	fmt.Fprintf(&b, "  attending:  %s\n", attendingLine(att))
+	fmt.Fprintf(&b, "  attending:  %s\n", attendingLine(reg, att))
 	fmt.Fprintf(&b, "  process:    %s\n", processLine(reg))
 	fmt.Fprintf(&b, "  activity:   %s\n", activityLine(reg, act, now, window))
 	return b.String()
 }
 
-// attendingLine derives the reachable fact from the medium's answer.
+// attendingLine derives the reachable fact from the medium's answer and the
+// row, the two things the send path asks.
+//
+// A QUEUE WITH NO ROW IS NOT ATTENDED. The queue of a seat whose process died
+// is kept for its next subscribe (#234), and a send to it is refused, so the
+// line says `no` and says the mail is kept. Without the row this line would
+// say `yes` for a seat the send path refuses.
 //
 // THE FIRST WORD OF THE VALUE CARRIES THE ANSWER, AND NOTHING ELSE IN THE LINE
 // DOES. It is exactly one of `yes`, `no` and `unknown`. What follows it in
@@ -68,7 +75,7 @@ func Derive(endpoint string, reg *Registration, att Attendance, act *Activity, n
 //
 // activityLine below keeps a different rule, and keeps it because every word
 // in every one of its lines is written here.
-func attendingLine(att Attendance) string {
+func attendingLine(reg *Registration, att Attendance) string {
 	switch {
 	case !att.asked:
 		reason := att.reason
@@ -76,6 +83,9 @@ func attendingLine(att Attendance) string {
 			reason = "the question was never put"
 		}
 		return fmt.Sprintf("unknown (could not ask: %s)", reason)
+	case att.exists && reg == nil:
+		return "no (queue kept with no registration: a send to this endpoint is refused; " +
+			"the next subscribe adopts the mail in it)"
 	case att.exists:
 		return "yes (queue exists)"
 	default:

@@ -48,22 +48,29 @@ func liveRow(t *testing.T, d *presenceDeployment, endpoint string) {
 
 // ------------------------------------------------------------- sweep failures
 
-// A queue the medium refuses to destroy stops the reap where it stands. The
-// row is NOT removed, because a row removed beside a queue that survived
-// leaves a queue with no row, which NOTHING now cleans up (#141) — and the
-// operator has not been told the medium is refusing.
-func TestSweepStopsWhenTheQueueCannotBeDestroyed(t *testing.T) {
+// THE REAP NEVER ASKS THE MEDIUM TO DESTROY A QUEUE (#234). A dead process
+// is evidence that the agent stopped, not that its mail is unwanted, so the
+// row and its pidfile go and the queue stays. The medium here would refuse a
+// deletion; the sweep never asks, so it reaps the row and exits clean.
+//
+// THE PLANT THAT TURNS THIS RED: put `pr.DeleteQueue(f.Endpoint)` back in the
+// DeadPID case of sweep.
+func TestSweepReapsTheRowAndNeverDeletesTheQueue(t *testing.T) {
 	d := newPresenceDeployment(t)
 	deadRow(t, d, "workshop.scribe")
 	d.spy.exists["workshop.scribe"] = true
 	d.spy.deleteErr = fmt.Errorf("cannot reach the medium")
 
 	code, out, errOut := exec("sweep")
-	if code != 1 || out != "" || !strings.Contains(errOut, "cannot reach the medium") {
-		t.Errorf("exit=%d stdout=%q stderr=%q; want a refusal naming the medium", code, out, errOut)
+	assertResult(t, code, out, errOut, 0, "workshop.scribe: reaped, the process is gone; queue kept\n", "")
+	if len(d.spy.deleted) != 0 {
+		t.Errorf("the sweep asked the medium to delete %v; a reap deletes no queue", d.spy.deleted)
 	}
-	if _, err := os.Stat(d.ledger("workshop.scribe.json")); err != nil {
-		t.Error("the row was removed although its queue survived")
+	if !d.spy.exists["workshop.scribe"] {
+		t.Error("the dead seat's queue is gone")
+	}
+	if _, err := os.Stat(d.ledger("workshop.scribe.json")); !os.IsNotExist(err) {
+		t.Error("the dead row survived the reap")
 	}
 }
 
@@ -119,6 +126,8 @@ func TestSweepReportsAReaderThatGoesAway(t *testing.T) {
 // Each pass reports its own line, and the change count is what the daemon
 // logs. A QUEUE WITH NO ROW IS REPORTED AND NOT COUNTED: nothing was changed
 // about it, in either instance, so the count stays at the reap and the repair.
+// The reap is one change, the row and its pidfile, and the dead seat's queue
+// is not deleted (#234).
 func TestSweepCountsAndNamesEveryChange(t *testing.T) {
 	d := newPresenceDeployment(t)
 	deadRow(t, d, "workshop.scribe")
@@ -135,17 +144,31 @@ func TestSweepCountsAndNamesEveryChange(t *testing.T) {
 	if changes != 2 {
 		t.Errorf("changes = %d, want 2 (one reap, one repair; a report is not a change)", changes)
 	}
-	want := "workshop.scribe: reaped, the process is gone\n" +
+	want := "workshop.scribe: reaped, the process is gone; queue kept\n" +
 		"atelier.stray: queue with no row; nothing removes it; remove it with loc unsubscribe atelier.stray\n" +
 		"workshop.stray: queue with no row; nothing removes it; remove it with loc unsubscribe workshop.stray\n" +
 		"workshop.clerk: queue recreated\n"
 	if out.String() != want {
 		t.Errorf("got:\n%q\nwant:\n%q", out.String(), want)
 	}
-	// THE ONE DELETION IS THE DEAD SEAT'S OWN QUEUE. Neither queue with no
-	// row was touched, whatever instance it sat in.
-	if len(d.spy.deleted) != 1 || d.spy.deleted[0] != "workshop.scribe" {
-		t.Errorf("the sweep deleted %v, want only the dead row's own queue", d.spy.deleted)
+	// NOTHING IS DELETED. Not the dead seat's queue, and neither queue with
+	// no row, whatever instance it sat in.
+	if len(d.spy.deleted) != 0 {
+		t.Errorf("the sweep deleted %v, want nothing", d.spy.deleted)
+	}
+
+	// THE NEXT BEAT SEES THE KEPT QUEUE AS A QUEUE WITH NO ROW, reports it in
+	// the words it uses for any other, and changes nothing.
+	out.Reset()
+	changes, err = sweepVerb(&out, nil)
+	if err != nil {
+		t.Fatalf("second sweepVerb: %v", err)
+	}
+	if changes != 0 {
+		t.Errorf("second beat changes = %d, want 0", changes)
+	}
+	if want := "workshop.scribe: queue with no row; nothing removes it; remove it with loc unsubscribe workshop.scribe\n"; !strings.Contains(out.String(), want) {
+		t.Errorf("the second beat omits %q; it printed:\n%s", want, out.String())
 	}
 }
 
@@ -219,7 +242,7 @@ func TestStatusNamesEveryKindOfDisagreement(t *testing.T) {
 		t.Fatalf("seatLines: %v", err)
 	}
 	for _, want := range []string{
-		"atelier.scribe: pid dead, next beat reaps it\n",
+		"atelier.scribe: pid dead, next beat reaps the row; queue kept\n",
 		"workshop.clerk: row ok, queue ok\n",
 		"workshop.legacy: row unreadable: ",
 		"workshop.scribe: queue missing, next beat repairs it\n",
