@@ -3,6 +3,8 @@ package presence
 import (
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"github.com/tdebasis/locutorium/internal/config"
 )
@@ -32,6 +34,43 @@ func ReleaseServerPID(endpoint string) error {
 		return err
 	}
 	return nil
+}
+
+// ReleaseServerPIDIfOwn removes the file only when it names the process given
+// by pid and started, the pair the server wrote when it claimed the seat. It
+// returns 0 when the file was removed or was already gone, and otherwise the
+// pid the file names, which is left in place.
+//
+// A SERVER RELEASES ONLY ITS OWN CLAIM. A later server of the same seat writes
+// its own pid over the earlier one's, and the earlier one, leaving, would
+// otherwise remove the file that names its successor: a served seat would then
+// name no server. The pair is compared rather than the pid, because a pid
+// alone names a stranger once the kernel reuses it. A file that cannot be
+// parsed names nobody this process can prove is itself, so it is left too, and
+// reported as pid -1.
+//
+// The read and the remove are two steps. A server that claims the seat
+// between them loses its file; the gap is one read of a two-line file.
+func ReleaseServerPIDIfOwn(endpoint string, pid int, started string) (other int, err error) {
+	b, err := os.ReadFile(ServerPIDFile(endpoint))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+	if len(lines) != 2 {
+		return -1, nil
+	}
+	named, err := strconv.Atoi(strings.TrimSpace(lines[0]))
+	if err != nil || named <= 0 {
+		return -1, nil
+	}
+	if named != pid || strings.TrimSpace(lines[1]) != started {
+		return named, nil
+	}
+	return 0, ReleaseServerPID(endpoint)
 }
 
 // DaemonPIDFile is where the Locutorium's own daemon writes its pid.
