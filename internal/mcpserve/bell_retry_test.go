@@ -952,3 +952,45 @@ func TestBell_ANewStreakDoesNotCarryTheOldSenders(t *testing.T) {
 		}
 	})
 }
+
+// AN ARRIVAL WITH NO KNOWN SENDER DURING THE STREAK NAMES NOBODY. Its sender
+// did not parse, so the window that holds it is blind. A later try that falls
+// inside that window cannot say the mail that waits is the first ring's
+// sender's mail, even when the count fits: one message in it has a sender
+// nobody knows.
+//
+// PLANT: in laterNames, delete the `b.blind` check, and both arms name
+// workshop.binder.
+// PLANT: in arrived, delete the `if sender == "" { b.blind = true }` arm, and
+// both arms name workshop.binder.
+func TestBell_AnUnknownSenderDuringTheStreakNamesNobody(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		unread int
+	}{
+		{"the queue holds both messages", 2},
+		{"one of the two was read", 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			home(t, "provider = none\n")
+			f := &fake{unread: 1, nudgeErr: busy("pane_in_mode")}
+			b, sch, _ := retryBell(t, f, nil)
+
+			b.arrived("workshop.binder")
+			b.fire()
+			// Mail whose sender did not parse lands while the streak is open,
+			// and its window has not rung yet.
+			b.arrived("")
+			f.unread = c.unread
+			sch.run(t, 0)
+
+			if got := f.couriersRung(); len(got) != 2 || got[1] != defaultCourierName {
+				t.Errorf("the couriers were %v; want the second to be %q", got, defaultCourierName)
+			}
+			want := fmt.Sprintf("🔔 %d new → read", c.unread)
+			if got := f.bells(); len(got) != 2 || got[1] != want {
+				t.Errorf("the bells were %q; want the second to be %q", got, want)
+			}
+		})
+	}
+}
