@@ -50,8 +50,9 @@ type fake struct {
 	couriers     []string
 
 	// The callbacks Watch was handed, so a case can make an arrival happen.
-	arrived     func(sender string)
-	reconnected func()
+	arrived      func(sender string)
+	reconnected  func()
+	disconnected func()
 
 	unread    int
 	unreadErr error
@@ -118,9 +119,9 @@ func (f *fake) deps() Deps {
 			defer f.mu.Unlock()
 			f.emitted = append(f.emitted, kind+" "+endpoint+" "+tool)
 		},
-		Watch: func(_ string, arrived func(string), reconnected func()) (func(), error) {
+		Watch: func(_ string, arrived func(string), reconnected, disconnected func()) (func(), error) {
 			f.mu.Lock()
-			f.arrived, f.reconnected = arrived, reconnected
+			f.arrived, f.reconnected, f.disconnected = arrived, reconnected, disconnected
 			f.mu.Unlock()
 			return func() {}, nil
 		},
@@ -189,6 +190,14 @@ func (f *fake) reconnect() {
 	r := f.reconnected
 	f.mu.Unlock()
 	r()
+}
+
+// disconnect is the connection being lost.
+func (f *fake) disconnect() {
+	f.mu.Lock()
+	d := f.disconnected
+	f.mu.Unlock()
+	d()
 }
 
 func (f *fake) events() []string {
@@ -794,9 +803,9 @@ func TestBell_ABacklogNamesNoSender(t *testing.T) {
 // arrivalsDuringWatch wraps the fake's Watch so that n arrivals land in the one
 // stretch a case cannot otherwise reach: after the watcher is live and before
 // startBell takes its backlog sample.
-func arrivalsDuringWatch(watch func(string, func(string), func()) (func(), error), n int) func(string, func(string), func()) (func(), error) {
-	return func(endpoint string, arrived func(string), reconnected func()) (func(), error) {
-		stop, err := watch(endpoint, arrived, reconnected)
+func arrivalsDuringWatch(watch func(string, func(string), func(), func()) (func(), error), n int) func(string, func(string), func(), func()) (func(), error) {
+	return func(endpoint string, arrived func(string), reconnected, disconnected func()) (func(), error) {
+		stop, err := watch(endpoint, arrived, reconnected, disconnected)
 		if err != nil {
 			return stop, err
 		}
@@ -854,7 +863,9 @@ func TestBell_AnUnwatchableMediumStillServesTheSeat(t *testing.T) {
 	home(t, "provider = none\n")
 	f := &fake{}
 	d := f.deps()
-	d.Watch = func(string, func(string), func()) (func(), error) { return nil, fmt.Errorf("cannot reach the medium") }
+	d.Watch = func(string, func(string), func(), func()) (func(), error) {
+		return nil, fmt.Errorf("cannot reach the medium")
+	}
 	sess, done := serve(t, d)
 	defer stop(t, sess, done)
 
