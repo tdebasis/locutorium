@@ -131,7 +131,7 @@ unknown name is refused before anything is sent.
   and no body. See `OPERATORS.md`.
 - **`loc send` puts the message in the queue and rings nothing.** The seat's own server is the one
   thing that notifies, through the notifier its registered type names: `tmux` types the bell into the
-  seat's pane, `claude` sends it through a one-shot courier, `webhook` sends it as one HTTP request
+  seat's pane, `herdr` types it into an agent that herdr runs, `claude` sends it through a one-shot courier, `webhook` sends it as one HTTP request
   to a URL on the same machine, and `none` rings nothing at all — a seat
   registered as `none` finds its mail on its next `read`. A sender that rang as well would be a
   second bell for one message, and it is the one that knows least: it cannot coalesce, it is not
@@ -735,11 +735,12 @@ Context Protocol. It does not return: it holds the seat for the life of the runt
 reached — and `LOC_LISTENER_ADDRESS` — where to reach it. `loc mcp` never guesses at either.
 
 The type is a closed set of four, because it chooses the notifier that rings the seat. `subscribe`
-refuses any other value and names these four.
+refuses any other value and names these five.
 
 | type | what it does | what the address is |
 |---|---|---|
 | `tmux` | types the bell into the seat's pane and submits it | a tmux pane target, such as `%42` |
+| `herdr` | types the bell into an agent that herdr runs and submits it | `<herdr session>/<agent name>`, such as `conclave/scribe` |
 | `claude` | runs a one-shot `claude -p` courier that delivers the bell with `SendMessage` | a tmux pane id the courier matches a session by |
 | `webhook` | sends the bell as one HTTP `POST` | a loopback `http` URL, such as `http://127.0.0.1:8644/hooks/bell` |
 | `none` | rings nothing; the seat finds its mail on the next `read` | unused, and still required |
@@ -796,6 +797,12 @@ position still means the same pane; the id does not.
 The `tmux` notifier refuses to type when the pane is in copy mode, and refuses when the pane is not
 an agent's input box: typing into a pane that has dropped to a shell executes the text. A refusal is
 written to the delivery log and the message waits in the queue.
+
+The `herdr` notifier asks herdr for the agent's state first. It refuses, and asks again later, while
+the agent is working or at a permission or question dialog, and while the input box holds text the
+person typed. It reads the input box only for agent kinds it has a reader for (Claude Code today);
+any other kind is refused rather than typed into blind. `subscribe` refuses an address that is not
+`<session>/<agent name>`.
 
 The `claude` notifier spawns at most one courier per seat per 30 seconds. A ring inside that window
 is dropped and logged `rate-limited`. Nothing is lost, because the queue holds the message.

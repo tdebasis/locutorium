@@ -529,6 +529,32 @@ func TestServe_RefusesAWebhookAddressOffThisMachine(t *testing.T) {
 	}
 }
 
+// A herdr seat whose address is not <session>/<agent name> is refused the
+// same way: it would register, read as attended, and fail at every ring.
+func TestServe_RefusesABadHerdrAddress(t *testing.T) {
+	dir := home(t, "provider = none\n")
+	t.Setenv("LOC_LISTENER_TYPE", "herdr")
+	t.Setenv("LOC_LISTENER_ADDRESS", "scribe")
+	f := &fake{}
+	serverT, _ := mcp.NewInMemoryTransports()
+	done := make(chan error, 1)
+	go func() { done <- Serve(context.Background(), f.deps(), serverT) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("the server started with a herdr address that has no session")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Serve did not return within 3s: it is serving instead of refusing")
+	}
+	if len(f.subscribed) != 0 {
+		t.Errorf("a refused server registered anyway: %v", f.subscribed)
+	}
+	if !strings.Contains(delivery(t, dir), "invalid herdr address") {
+		t.Errorf("the refusal was not written to the delivery log: %q", delivery(t, dir))
+	}
+}
+
 // The seat is freed even when the medium has gone with the runtime. Bounded,
 // because nothing is waiting for us by then and a hang would be the worst of
 // the endings available.
