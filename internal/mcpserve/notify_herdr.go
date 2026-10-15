@@ -95,7 +95,8 @@ func (n *herdrNotifier) Ring(endpoint, address, bell, _ string) error {
 		return n.refuse(endpoint, fmt.Sprintf("cannot ask herdr about %s: %v", address, err))
 	}
 
-	switch status := a.Result.Agent.Status; status {
+	status := a.Result.Agent.Status
+	switch status {
 	case "working":
 		return busyRefusal{n.refuse(endpoint, "agent working")}
 	case "blocked":
@@ -129,7 +130,9 @@ func (n *herdrNotifier) Ring(endpoint, address, bell, _ string) error {
 	if err := exec.Command("herdr", "--session", session, "agent", "prompt", name, bell).Run(); err != nil {
 		return n.fail(endpoint, fmt.Sprintf("herdr agent prompt: %v", err))
 	}
-	n.log(fmt.Sprintf("nudge %s rang '%s'", endpoint, bell))
+	// The line names the state herdr reported, so a ring at the edge of a
+	// turn can be read afterwards as herdr's answer and not a guess.
+	n.log(fmt.Sprintf("nudge %s rang '%s' (herdr state: %s)", endpoint, bell, status))
 	return nil
 }
 

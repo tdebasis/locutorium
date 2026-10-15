@@ -802,7 +802,8 @@ The `herdr` notifier asks herdr for the agent's state first. It refuses, and ask
 the agent is working or at a permission or question dialog, and while the input box holds text the
 person typed. It reads the input box only for agent kinds it has a reader for (Claude Code today);
 any other kind is refused rather than typed into blind. `subscribe` refuses an address that is not
-`<session>/<agent name>`.
+`<session>/<agent name>`. When it rings, its delivery log line names the state herdr reported, for
+example `nudge house.bob rang '…' (herdr state: idle)`.
 
 The `claude` notifier spawns at most one courier per seat per 30 seconds. A ring inside that window
 is dropped and logged `rate-limited`. Nothing is lost, because the queue holds the message.
