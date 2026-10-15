@@ -558,7 +558,7 @@ func TestNotify_AnUnknownListenerTypeIsRefusedByName(t *testing.T) {
 	if err == nil {
 		t.Fatal("the retired name claude-courier was accepted")
 	}
-	for _, want := range []string{"claude-courier", "tmux", "claude", "webhook", "none"} {
+	for _, want := range []string{"claude-courier", "tmux", "herdr", "claude", "webhook", "none"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the refusal does not name %q: %s", want, err)
 		}

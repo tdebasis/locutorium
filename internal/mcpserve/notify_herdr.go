@@ -33,7 +33,7 @@ var herdrAddress = regexp.MustCompile(`^([^/\s]+)/([^/\s]+)$`)
 // as reachable.
 func validHerdrAddress(address string) error {
 	if !herdrAddress.MatchString(address) {
-		return fmt.Errorf("a herdr address is '<session>/<agent name>', such as 'conclave/scribe'; got '%s'", address)
+		return fmt.Errorf("invalid herdr address '%s': it must be <session>/<agent name>, such as 'conclave/scribe'", address)
 	}
 	return nil
 }

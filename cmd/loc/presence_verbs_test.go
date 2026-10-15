@@ -239,6 +239,17 @@ func TestPresenceVerbsRefusals(t *testing.T) {
 			wantErr: "loc: invalid webhook address: it is empty\n",
 		},
 		{
+			name: "subscribe a herdr seat with no session in its address",
+			args: []string{"subscribe", "workshop.scribe", "--pid", "1", "--type", "herdr", "--version", "3.2.0",
+				"--address", "scribe"},
+			wantErr: "loc: invalid herdr address 'scribe': it must be <session>/<agent name>, such as 'conclave/scribe'\n",
+		},
+		{
+			name:    "subscribe a herdr seat with no address",
+			args:    []string{"subscribe", "workshop.scribe", "--pid", "1", "--type", "herdr", "--version", "3.2.0"},
+			wantErr: "loc: invalid herdr address '': it must be <session>/<agent name>, such as 'conclave/scribe'\n",
+		},
+		{
 			name:    "unsubscribe with a reason outside the two",
 			args:    []string{"unsubscribe", "workshop.scribe", "--reason", "bored"},
 			wantErr: "loc: invalid --reason 'bored': a departure is 'clean' or 'expiry'\n",
