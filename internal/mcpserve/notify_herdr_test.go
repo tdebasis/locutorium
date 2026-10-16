@@ -84,7 +84,7 @@ func TestNotify_HerdrTypesTheBellIntoAnIdleEmptyBox(t *testing.T) {
 		if got := prompted(t, file); got != want {
 			t.Errorf("%s: herdr was asked %q; want %q", status, got, want)
 		}
-		if want := "nudge workshop.scribe rang '🔔 1 new → read'"; r.joined() != want {
+		if want := "nudge workshop.scribe rang '🔔 1 new → read' (herdr state: " + status + ")"; r.joined() != want {
 			t.Errorf("%s: delivery log said %q; want %q", status, r.joined(), want)
 		}
 	}
