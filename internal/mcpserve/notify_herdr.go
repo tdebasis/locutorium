@@ -20,7 +20,7 @@ import (
 // pane to tell a prompt from a shell; this one asks herdr.
 //
 // THE ADDRESS IS "<herdr session>/<agent name>", for example
-// "conclave/scribe". herdr's own pane ids name a pane inside one session, and
+// "work/scribe". herdr's own pane ids name a pane inside one session, and
 // the bell runs outside any session, so the session is part of the address.
 type herdrNotifier struct{ log func(string) }
 
@@ -33,7 +33,7 @@ var herdrAddress = regexp.MustCompile(`^([^/\s]+)/([^/\s]+)$`)
 // as reachable.
 func validHerdrAddress(address string) error {
 	if !herdrAddress.MatchString(address) {
-		return fmt.Errorf("invalid herdr address '%s': it must be <session>/<agent name>, such as 'conclave/scribe'", address)
+		return fmt.Errorf("invalid herdr address '%s': it must be <session>/<agent name>, such as 'work/scribe'", address)
 	}
 	return nil
 }

@@ -740,7 +740,7 @@ refuses any other value and names these five.
 | type | what it does | what the address is |
 |---|---|---|
 | `tmux` | types the bell into the seat's pane and submits it | a tmux pane target, such as `%42` |
-| `herdr` | types the bell into an agent that herdr runs and submits it | `<herdr session>/<agent name>`, such as `conclave/scribe` |
+| `herdr` | types the bell into an agent that herdr runs and submits it | `<herdr session>/<agent name>`, such as `work/scribe` |
 | `claude` | runs a one-shot `claude -p` courier that delivers the bell with `SendMessage` | a tmux pane id the courier matches a session by |
 | `webhook` | sends the bell as one HTTP `POST` | a loopback `http` URL, such as `http://127.0.0.1:8644/hooks/bell` |
 | `none` | rings nothing; the seat finds its mail on the next `read` | unused, and still required |
