@@ -160,10 +160,10 @@ func TestNotify_HerdrRefuses(t *testing.T) {
 }
 
 func TestNotify_HerdrAddressIsCheckedAtSubscribe(t *testing.T) {
-	if err := ValidListenerAddress(ListenerHerdr, "conclave/scribe"); err != nil {
+	if err := ValidListenerAddress(ListenerHerdr, "work/scribe"); err != nil {
 		t.Errorf("a good herdr address was refused: %v", err)
 	}
-	for _, bad := range []string{"", "scribe", "conclave/", "/scribe", "a/b/c", "con clave/scribe"} {
+	for _, bad := range []string{"", "scribe", "work/", "/scribe", "a/b/c", "my work/scribe"} {
 		if err := ValidListenerAddress(ListenerHerdr, bad); err == nil {
 			t.Errorf("the herdr address %q was accepted", bad)
 		}

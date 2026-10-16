@@ -242,12 +242,12 @@ func TestPresenceVerbsRefusals(t *testing.T) {
 			name: "subscribe a herdr seat with no session in its address",
 			args: []string{"subscribe", "workshop.scribe", "--pid", "1", "--type", "herdr", "--version", "3.2.0",
 				"--address", "scribe"},
-			wantErr: "loc: invalid herdr address 'scribe': it must be <session>/<agent name>, such as 'conclave/scribe'\n",
+			wantErr: "loc: invalid herdr address 'scribe': it must be <session>/<agent name>, such as 'work/scribe'\n",
 		},
 		{
 			name:    "subscribe a herdr seat with no address",
 			args:    []string{"subscribe", "workshop.scribe", "--pid", "1", "--type", "herdr", "--version", "3.2.0"},
-			wantErr: "loc: invalid herdr address '': it must be <session>/<agent name>, such as 'conclave/scribe'\n",
+			wantErr: "loc: invalid herdr address '': it must be <session>/<agent name>, such as 'work/scribe'\n",
 		},
 		{
 			name:    "unsubscribe with a reason outside the two",
