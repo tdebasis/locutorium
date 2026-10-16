@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.18](https://github.com/tdebasis/locutorium/compare/v0.0.17...v0.0.18) (2026-10-16)
+
+
+### Bug Fixes
+
+* neutral example for the herdr address ([#244](https://github.com/tdebasis/locutorium/issues/244)) ([8f60243](https://github.com/tdebasis/locutorium/commit/8f60243543c188ee5d6640cd0f2071396d29dfec))
+
 ## [0.0.17](https://github.com/tdebasis/locutorium/compare/v0.0.16...v0.0.17) (2026-10-16)
 
 
