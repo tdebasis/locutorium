@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.17](https://github.com/tdebasis/locutorium/compare/v0.0.16...v0.0.17) (2026-10-16)
+
+
+### Features
+
+* **mcpserve:** a herdr listener that types the bell into a herdr agent ([#239](https://github.com/tdebasis/locutorium/issues/239)) ([68108bf](https://github.com/tdebasis/locutorium/commit/68108bf25fb5be884b2e3e9ff54cd8f0ae1a158e))
+* **mcpserve:** the herdr bell's rang line names the state herdr reported ([#242](https://github.com/tdebasis/locutorium/issues/242)) ([4b4b3ab](https://github.com/tdebasis/locutorium/commit/4b4b3aba768ba1260145938412c90ace58bb562f))
+
 ## [0.0.16](https://github.com/tdebasis/locutorium/compare/v0.0.15...v0.0.16) (2026-10-14)
 
 
