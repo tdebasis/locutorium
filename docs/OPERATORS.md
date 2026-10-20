@@ -109,7 +109,7 @@ it:
 | type | what it does |
 |---|---|
 | `tmux` | types one bell line into the seat's pane, then submits it. It first checks that the pane accepts input. |
-| `herdr` | types one bell line into an agent that herdr runs, then submits it. It asks herdr for the agent's state first and waits while the agent is working, at a dialog, or holds a draft. Agent kinds without an input-box reader are refused. |
+| `herdr` | types one bell line into an agent that herdr runs, then submits it. It asks herdr for the agent's state first and waits while the agent is working or at a dialog. It reads no screen, for any agent kind: a draft in the box is not seen, so the bell is added to it and submitted with it, and an open menu that herdr reports as idle can take the bell. |
 | `claude` | starts one Claude session to carry the bell to the seat. At most one session per seat per 30 seconds. |
 | `webhook` | sends the bell as one HTTP `POST` to a URL on the same machine. The request is not signed. `429` and `503` mean that the receiver is busy. `202` with the reply header `Loc-Bell: held` means that the receiver has the bell and will deliver it later. |
 | `none` | rings nothing. The seat finds its mail on its next `loc read`. |
