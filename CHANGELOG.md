@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.18](https://github.com/tdebasis/locutorium/compare/v0.0.17...v0.0.18) (2026-10-20)
+
+
+### Bug Fixes
+
+* **mcpserve:** the herdr bell rings any agent kind on herdr's state alone ([#247](https://github.com/tdebasis/locutorium/issues/247)) ([9c6f22f](https://github.com/tdebasis/locutorium/commit/9c6f22fa2ec4a19ef65ba18870c67efb8d2b6d61))
+* neutral example for the herdr address ([#244](https://github.com/tdebasis/locutorium/issues/244)) ([8f60243](https://github.com/tdebasis/locutorium/commit/8f60243543c188ee5d6640cd0f2071396d29dfec))
+
 ## [0.0.17](https://github.com/tdebasis/locutorium/compare/v0.0.16...v0.0.17) (2026-10-16)
 
 
