@@ -32,9 +32,14 @@ process set it.
 
 A local process on the same machine can set `LOC_IDENTITY` to any name it
 chooses, then send or publish under that name. The same process can also read
-under that name. A read consumes: it takes the messages out of that
-identity's queue, exactly once (`docs/CLI.md` §read), so they never reach the
-seat they were addressed to. Authentication is what would constrain both
+under that name. A read consumes: it takes the messages out of that identity's
+queue, exactly once (`docs/CLI.md` §read), so they never reach the seat they
+were addressed to. The day's record does not show who did it: each message
+taken from a queue writes a line with the message's `uid` and the endpoint
+name (`docs/CLI.md` §read), so a read under a borrowed name is recorded under
+that name, exactly as a read by the seat itself would be. The record shows
+that a read happened and under which name; with no authentication, a name is
+not evidence of who acted. Authentication is what would constrain both
 directions, and v0 has none. This is a stated design position for v0. It is
 not a vulnerability to report.
 

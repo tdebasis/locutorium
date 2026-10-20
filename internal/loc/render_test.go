@@ -101,6 +101,36 @@ func TestRenderMatchesREADME(t *testing.T) {
 	}
 }
 
+// TestRenderMatchesTheDocsSamples keeps the sample reads in docs/CLI.md and
+// docs/WALKTHROUGH.md in step with the renderer, as TestRenderMatchesREADME
+// does for the README: each envelope, rendered, must appear in its file byte
+// for byte. They share the README's sample time.
+func TestRenderMatchesTheDocsSamples(t *testing.T) {
+	const ts = "2026-08-26T03:54:39Z"
+	cases := []struct {
+		file string
+		env  Envelope
+	}{
+		{"../../docs/CLI.md", Envelope{ID: "x", TS: ts, From: "workshop.clerk", To: "workshop.scribe", Kind: "msg", Body: "a question about the ledger", Refs: []string{}}},
+		{"../../docs/WALKTHROUGH.md", Envelope{ID: "x", TS: ts, From: "house.ada", To: "house.bob", Kind: "msg", Body: "the build is green; the tag is yours", Refs: []string{}}},
+	}
+	for _, c := range cases {
+		t.Run(c.file, func(t *testing.T) {
+			b, err := os.ReadFile(c.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got bytes.Buffer
+			if err := RenderOne(&got, c.env); err != nil {
+				t.Fatalf("RenderOne: %v", err)
+			}
+			if !strings.Contains(string(b), got.String()) {
+				t.Errorf("%s has no sample read matching the renderer:\n%s", c.file, got.String())
+			}
+		})
+	}
+}
+
 func TestRenderHeaderUsesASCIIArrow(t *testing.T) {
 	var got bytes.Buffer
 	if err := RenderOne(&got, Envelope{From: "ada", To: "bob", TS: "T", Body: "x"}); err != nil {
