@@ -12,8 +12,8 @@ import (
 // ---------------------------------------------------------------- herdr
 
 // fakeHerdr puts a `herdr` first on PATH. `agent get` prints the JSON given,
-// `agent read` prints the screen given, and `agent prompt` appends its argv to
-// a file and prints nothing. It returns that file. THE REAL HERDR IS NEVER
+// `agent read` writes --READ-- into the prompts file (the bell must never read
+// a screen), and `agent prompt` appends its argv to the same file. It returns that file. THE REAL HERDR IS NEVER
 // INVOKED BY A TEST, so no live session is read or typed into.
 func fakeHerdr(t *testing.T, get string, getExit int, screen string) string {
 	t.Helper()
@@ -27,7 +27,7 @@ func fakeHerdr(t *testing.T, get string, getExit int, screen string) string {
 	script := "#!/bin/sh\n" +
 		"for a in \"$@\"; do case \"$a\" in\n" +
 		"  get) cat " + filepath.Join(dir, "get") + "; exit " + strconv.Itoa(getExit) + " ;;\n" +
-		"  read) cat " + filepath.Join(dir, "screen") + "; exit 0 ;;\n" +
+		"  read) printf -- '--READ--\\n' >> " + prompts + "; cat " + filepath.Join(dir, "screen") + "; exit 0 ;;\n" +
 		"  prompt) for b in \"$@\"; do printf '%s\\n' \"$b\"; done >> " + prompts + "; printf -- '--END--\\n' >> " + prompts + "; exit 0 ;;\n" +
 		"esac; done\nexit 9\n"
 	if err := os.WriteFile(filepath.Join(dir, "herdr"), []byte(script), 0o700); err != nil {
@@ -46,18 +46,10 @@ func herdrGet(kind, status string) string {
 
 const herdrNotFound = `{"error":{"code":"agent_not_found","message":"agent target scribe not found"},"id":"cli:agent:get"}`
 
-// Claude Code's input box, as `herdr agent read --format ansi` shows it.
-const (
-	boxRule       = "\x1b[2m────────────────────────────────────────\x1b[0m"
-	screenEmpty   = "output above\n" + boxRule + "\n❯ \n" + boxRule + "\n  ⏵⏵ accept edits on\n"
-	screenSuggest = "output above\n" + boxRule + "\n❯ \x1b[2mTry \"fix the tests\"\x1b[0m\n" + boxRule + "\n"
-	screenDraft   = "output above\n" + boxRule + "\n❯ half a thought\n" + boxRule + "\n"
-	screenDraft2  = "output above\n" + boxRule + "\n❯ \n  and a second line\n" + boxRule + "\n"
-	screenNoBox   = "a shell prompt $ \n"
-	// An earlier prompt in the history above the box: the box is the LAST ❯.
-	screenOldPromptThenDraft = "❯ an old prompt\n⏺ its answer\n" + boxRule + "\n❯\u00a0half a thought\n" + boxRule + "\n"
-	screenOldDraftThenEmpty  = "❯ an old prompt with words\n⏺ its answer\n" + boxRule + "\n❯\u00a0\n" + boxRule + "\n"
-)
+// A screen with a draft in Claude Code's box: the bell rings over it, since it
+// reads no screen.
+const screenDraft = "output above\n\x1b[2m────\x1b[0m\n❯ half a thought\n\x1b[2m────\x1b[0m\n"
+const screenEmpty = ""
 
 // prompted returns the argv of every `agent prompt` the fake saw.
 func prompted(t *testing.T, file string) string {
@@ -72,43 +64,23 @@ func prompted(t *testing.T, file string) string {
 	return string(b)
 }
 
-func TestNotify_HerdrTypesTheBellIntoAnIdleEmptyBox(t *testing.T) {
-	for _, status := range []string{"idle", "done"} {
-		file := fakeHerdr(t, herdrGet("claude", status), 0, screenEmpty)
-		r := &recorder{}
-		n := &herdrNotifier{log: r.log}
-		if err := n.Ring("workshop.scribe", "workshop/scribe", "🔔 1 new → read", ""); err != nil {
-			t.Fatalf("%s: an empty box refused the bell: %v", status, err)
+func TestNotify_HerdrTypesTheBellIntoAnIdleAgentOfAnyKind(t *testing.T) {
+	for _, kind := range []string{"claude", "codex", "aider"} {
+		for _, status := range []string{"idle", "done"} {
+			file := fakeHerdr(t, herdrGet(kind, status), 0, screenDraft)
+			r := &recorder{}
+			n := &herdrNotifier{log: r.log}
+			if err := n.Ring("workshop.scribe", "workshop/scribe", "🔔 1 new → read", ""); err != nil {
+				t.Fatalf("%s %s: refused: %v", kind, status, err)
+			}
+			want := "--session\nworkshop\nagent\nprompt\nscribe\n🔔 1 new → read\n--END--\n"
+			if got := prompted(t, file); got != want {
+				t.Errorf("%s %s: herdr was asked %q; want %q (no screen read)", kind, status, got, want)
+			}
+			if want := "nudge workshop.scribe rang '🔔 1 new → read' (herdr state: " + status + ")"; r.joined() != want {
+				t.Errorf("%s %s: delivery log said %q; want %q", kind, status, r.joined(), want)
+			}
 		}
-		want := "--session\nworkshop\nagent\nprompt\nscribe\n🔔 1 new → read\n--END--\n"
-		if got := prompted(t, file); got != want {
-			t.Errorf("%s: herdr was asked %q; want %q", status, got, want)
-		}
-		if want := "nudge workshop.scribe rang '🔔 1 new → read' (herdr state: " + status + ")"; r.joined() != want {
-			t.Errorf("%s: delivery log said %q; want %q", status, r.joined(), want)
-		}
-	}
-}
-
-func TestNotify_HerdrReadsTheLastPromptNotAnOldOne(t *testing.T) {
-	file := fakeHerdr(t, herdrGet("claude", "idle"), 0, screenOldDraftThenEmpty)
-	n := &herdrNotifier{log: (&recorder{}).log}
-	if err := n.Ring("workshop.scribe", "workshop/scribe", "🔔", ""); err != nil {
-		t.Fatalf("an old prompt in the history was read as the box: %v", err)
-	}
-	if prompted(t, file) == "" {
-		t.Error("the bell was not typed into the empty box under an old prompt")
-	}
-}
-
-func TestNotify_HerdrTypesOverClaudesOwnSuggestion(t *testing.T) {
-	file := fakeHerdr(t, herdrGet("claude", "idle"), 0, screenSuggest)
-	n := &herdrNotifier{log: (&recorder{}).log}
-	if err := n.Ring("workshop.scribe", "workshop/scribe", "🔔", ""); err != nil {
-		t.Fatalf("Claude's faint suggestion was read as a draft: %v", err)
-	}
-	if prompted(t, file) == "" {
-		t.Error("the bell was not typed over Claude's own suggestion")
 	}
 }
 
@@ -124,13 +96,11 @@ func TestNotify_HerdrRefuses(t *testing.T) {
 	}{
 		{"working", "workshop/scribe", "🔔", herdrGet("claude", "working"), 0, screenEmpty, true, "agent working"},
 		{"dialog", "workshop/scribe", "🔔", herdrGet("claude", "blocked"), 0, screenEmpty, true, "agent at a dialog"},
-		{"draft", "workshop/scribe", "🔔", herdrGet("claude", "idle"), 0, screenDraft, true, "draft in the input box"},
-		{"draft on line 2", "workshop/scribe", "🔔", herdrGet("claude", "idle"), 0, screenDraft2, true, "draft in the input box"},
-		{"no box", "workshop/scribe", "🔔", herdrGet("claude", "idle"), 0, screenNoBox, true, "input box not found"},
-		{"other kind", "workshop/scribe", "🔔", herdrGet("codex", "idle"), 0, screenEmpty, false, "no draft check for agent kind 'codex'"},
+		{"codex working", "workshop/scribe", "🔔", herdrGet("codex", "working"), 0, screenEmpty, true, "agent working"},
+		{"codex at a dialog", "workshop/scribe", "🔔", herdrGet("codex", "blocked"), 0, screenEmpty, true, "agent at a dialog"},
+		{"codex unknown state", "workshop/scribe", "🔔", herdrGet("codex", "unknown"), 0, screenEmpty, true, "agent state 'unknown'"},
 		{"unknown state", "workshop/scribe", "🔔", herdrGet("claude", "unknown"), 0, screenEmpty, true, "agent state 'unknown'"},
 		{"strange state", "workshop/scribe", "🔔", herdrGet("claude", "sleeping"), 0, screenEmpty, false, "agent state 'sleeping'"},
-		{"draft under an old prompt", "workshop/scribe", "🔔", herdrGet("claude", "idle"), 0, screenOldPromptThenDraft, true, "draft in the input box"},
 		{"missing agent", "workshop/scribe", "🔔", herdrNotFound, 1, screenEmpty, false, "agent_not_found"},
 		{"no answer", "workshop/scribe", "🔔", "", 1, screenEmpty, false, "cannot ask herdr"},
 		{"bad address", "scribe", "🔔", herdrGet("claude", "idle"), 0, screenEmpty, false, "bad herdr address"},

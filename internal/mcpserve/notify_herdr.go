@@ -57,17 +57,18 @@ type herdrAgent struct {
 // THE ORDER OF THE QUESTIONS IS THE GUARD. The state comes first: a dialog
 // (blocked) is never typed into, because a keystroke there can answer it, and
 // a working agent is never interrupted. Both end on their own, so both are
-// marked ErrBusy and the bell asks again. Only an idle or done agent has its
-// input box read, and only an empty box is typed into.
+// marked ErrBusy and the bell asks again. An idle or done agent is typed into.
 //
-// THE BOX CHECK IS PER AGENT KIND, AND A KIND WITHOUT ONE IS REFUSED. herdr
-// does not protect a half-typed draft: `herdr agent prompt` appends to it and
-// submits both (measured 2026-10-13 in the deployment). How an empty box looks
-// differs by agent, so a kind this file has no reader for is refused rather
-// than typed into blind.
+// IT READS NO SCREEN, FOR ANY AGENT KIND. herdr reports the state for every
+// kind it runs, so the bell asks that and nothing else. Reading an agent's
+// screen to guess whether its box holds a draft was dropped as brittle: it
+// would come back only if herdr itself could report the box's contents.
 //
-// WHAT THE GUARD DOES NOT ESTABLISH. A draft typed in the instant between the
-// box read and the prompt is not seen.
+// WHAT THE GUARD DOES NOT ESTABLISH. herdr does not protect a half-typed
+// draft: `herdr agent prompt` appends to it and submits both (measured
+// 2026-10-13 in the deployment), so a bell can be sent with a draft. herdr can
+// also report an agent idle while it shows a menu (measured on Codex,
+// 2026-10-19), so a bell can land in the menu.
 func (n *herdrNotifier) Ring(endpoint, address, bell, _ string) error {
 	m := herdrAddress.FindStringSubmatch(address)
 	if m == nil {
@@ -110,23 +111,6 @@ func (n *herdrNotifier) Ring(endpoint, address, bell, _ string) error {
 		return n.refuse(endpoint, fmt.Sprintf("agent state '%s'", status))
 	}
 
-	read, ok := herdrBoxReaders[a.Result.Agent.Kind]
-	if !ok {
-		return n.refuse(endpoint, fmt.Sprintf("no draft check for agent kind '%s'", a.Result.Agent.Kind))
-	}
-	screen, err := output("herdr", "--session", session, "agent", "read", name, "--source", "visible", "--format", "ansi")
-	if err != nil {
-		return n.refuse(endpoint, fmt.Sprintf("cannot read %s's screen: %v", address, err))
-	}
-	switch read(screen) {
-	case boxEmpty:
-	case boxDraft:
-		return busyRefusal{n.refuse(endpoint, "draft in the input box")}
-	default:
-		// FAILS CLOSED: a box that cannot be found is treated as holding text.
-		return busyRefusal{n.refuse(endpoint, "input box not found")}
-	}
-
 	if err := exec.Command("herdr", "--session", session, "agent", "prompt", name, bell).Run(); err != nil {
 		return n.fail(endpoint, fmt.Sprintf("herdr agent prompt: %v", err))
 	}
@@ -144,67 +128,4 @@ func (n *herdrNotifier) refuse(endpoint, reason string) error {
 func (n *herdrNotifier) fail(endpoint, reason string) error {
 	n.log(fmt.Sprintf("nudge %s BELL FAILED: %s", endpoint, reason))
 	return errors.New(reason)
-}
-
-// boxReading is what a box reader makes of an agent's visible screen.
-type boxReading int
-
-const (
-	boxNotFound boxReading = iota
-	boxEmpty
-	boxDraft
-)
-
-// herdrBoxReaders holds one reader per agent kind, keyed by the kind herdr
-// reports. A kind is added here only after it has been tested on the real
-// agent.
-var herdrBoxReaders = map[string]func(screen string) boxReading{
-	"claude": claudeBox,
-}
-
-// sgr matches one colour or style sequence.
-var sgr = regexp.MustCompile(`\x1b\[[0-9;]*m`)
-
-// leadBlank matches the blanks and style sequences after the prompt mark.
-var leadBlank = regexp.MustCompile(`^(?:\s|\x1b\[[0-9;]*m)*`)
-
-// claudeBox reads Claude Code's input box from a visible screen with its
-// styles kept. It is the deployment's `bin/seat` herdr_box_clear, ported.
-//
-// The box is the last line that starts with the prompt mark ❯. It is empty
-// when nothing follows the mark, or when what follows is drawn faint (SGR 2),
-// which is Claude's own suggestion and not the person's typing. Any text on
-// the lines between the prompt line and the rule under it is a draft that
-// wrapped, or started on its second line.
-func claudeBox(screen string) boxReading {
-	lines := strings.Split(screen, "\n")
-	plain := func(s string) string { return sgr.ReplaceAllString(s, "") }
-	at := -1
-	for i, l := range lines {
-		if strings.HasPrefix(strings.TrimLeft(plain(l), " \t"), "❯") {
-			at = i
-		}
-	}
-	if at < 0 {
-		return boxNotFound
-	}
-	for _, l := range lines[at+1:] {
-		p := strings.TrimLeft(plain(l), " \t")
-		if strings.HasPrefix(p, "─") {
-			break
-		}
-		if strings.TrimSpace(strings.ReplaceAll(p, " ", " ")) != "" {
-			return boxDraft
-		}
-	}
-	line := lines[at]
-	rest := strings.ReplaceAll(line[strings.Index(line, "❯")+len("❯"):], " ", " ")
-	lead := leadBlank.FindString(rest)
-	if strings.TrimSpace(plain(rest[len(lead):])) == "" {
-		return boxEmpty
-	}
-	if strings.Contains(lead, "\x1b[2m") {
-		return boxEmpty
-	}
-	return boxDraft
 }
