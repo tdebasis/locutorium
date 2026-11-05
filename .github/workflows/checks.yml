@@ -142,7 +142,7 @@ jobs:
         with:
           name: ${{ steps.stamped.outputs.name }}
           path: build/bin/loc
-          retention-days: 14
+          retention-days: 7
       - name: vet
         if: steps.probe.outputs.present == 'true'
         run: go vet ./...
@@ -244,7 +244,7 @@ jobs:
           path: |
             coverage.html
             coverage.out
-          retention-days: 14
+          retention-days: 7
 
       - name: coverage total
         id: total
