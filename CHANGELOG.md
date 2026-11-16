@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.19](https://github.com/tdebasis/locutorium/compare/v0.0.18...v0.0.19) (2026-11-16)
+
+
+### Bug Fixes
+
+* **mcpserve:** name the courier's model on every call ([#252](https://github.com/tdebasis/locutorium/issues/252)) ([34a71ef](https://github.com/tdebasis/locutorium/commit/34a71efdff4d0b43f56dfee461fdd86e423a1c36))
+
 ## [0.0.18](https://github.com/tdebasis/locutorium/compare/v0.0.17...v0.0.18) (2026-10-20)
 
 
