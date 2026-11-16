@@ -327,8 +327,104 @@ func TestNotify_ClaudeNamesTheCourierAfterTheSender(t *testing.T) {
 	}
 }
 
+// THE COURIER'S MODEL IS NAMED ON EVERY CALL (docs/DECISIONS.md entry 8).
+// The courier shipped without --model and ran on the account's default; when
+// that default became unavailable to the account, no bell rang for hours. Each
+// case asserts the exact pair "--model <value>" in the recorded argv, so a call
+// that drops the flag, or takes the model from anywhere but the courier_model
+// key, fails here. ANTHROPIC_MODEL is set in every case to a value no case
+// expects: the environment is exactly what the decision says not to inherit.
+func TestNotify_ClaudeNamesTheCouriersModelOnEveryCall(t *testing.T) {
+	cases := []struct {
+		name string
+		file string // the deployment's config file; "" means none
+		want string
+	}{
+		{"no config file: the table's default", "", "haiku"},
+		{"the key unset: the table's default", "topic_window = 7d\n", "haiku"},
+		{"the key set: that model", "courier_model = sonnet\n", "sonnet"},
+		{"the key empty: the table's default", "courier_model =\n", "haiku"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("LOC_HOME", home)
+			t.Setenv("ANTHROPIC_MODEL", "an-inherited-model")
+			if c.file != "" {
+				if err := os.WriteFile(filepath.Join(home, "config"), []byte(c.file), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			rec := fakeClaude(t, 0)
+			r := &recorder{}
+			n, err := newNotifier(ListenerClaude, r.log, time.Now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := n.Ring("workshop.scribe", "%42", "🔔 1 new → read", ""); err != nil {
+				t.Fatalf("the courier failed: %v", err)
+			}
+			b, err := os.ReadFile(rec)
+			if err != nil {
+				t.Fatalf("the courier was never spawned: %v", err)
+			}
+			got := string(b)
+			if want := "--model\n" + c.want + "\n"; !strings.Contains(got, want) {
+				t.Errorf("the courier's call is missing %q; it was:\n%s", want, got)
+			}
+			if strings.Count(got, "--model\n") != 1 {
+				t.Errorf("the courier's call names --model %d times; want once:\n%s", strings.Count(got, "--model\n"), got)
+			}
+		})
+	}
+}
+
+// A FAILED COURIER'S OWN WORDS GO IN THE RECORD. "courier exit 1" alone hid
+// the reason for hours while the courier printed it on every call.
+func TestNotify_ClaudeFailureKeepsWhatTheCourierSaid(t *testing.T) {
+	limit := `{"type":"result","subtype":"success","is_error":true,"result":"You've hit your usage limit for this model."}`
+	for _, c := range []struct {
+		name   string
+		stream string
+		want   string
+	}{
+		{"the stream's result text", courierStream([]string{courierInit, limit}),
+			"nudge workshop.scribe BELL FAILED: courier exit 1: You've hit your usage limit for this model."},
+		{"nothing printed: the exit code alone", "",
+			"nudge workshop.scribe BELL FAILED: courier exit 1"},
+		{"a line that is not the stream's JSON", "Error: not signed in\n",
+			"nudge workshop.scribe BELL FAILED: courier exit 1: Error: not signed in"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			fakeClaudeSays(t, 1, c.stream)
+			r := &recorder{}
+			n, err := newNotifier(ListenerClaude, r.log, time.Now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := n.Ring("workshop.scribe", "%42", "🔔 1 new → read", ""); err == nil {
+				t.Fatal("a courier that exited 1 was recorded as a ring")
+			}
+			if r.joined() != c.want {
+				t.Errorf("delivery log said %q; want %q", r.joined(), c.want)
+			}
+		})
+	}
+}
+
+// courierSaid prefers stderr, and bounds what it keeps to one short line.
+func TestCourierSaid_PrefersStderrAndClips(t *testing.T) {
+	if got := courierSaid([]byte(courierStream(courierSent)), []byte("warning\nError: the real reason\n")); got != "Error: the real reason" {
+		t.Errorf("courierSaid = %q; want the last stderr line", got)
+	}
+	long := strings.Repeat("x", 500)
+	if got := courierSaid(nil, []byte(long)); len([]rune(got)) != saidMax+1 || !strings.HasSuffix(got, "…") {
+		t.Errorf("courierSaid kept %d runes; want %d and an ellipsis", len([]rune(got)), saidMax+1)
+	}
+}
+
 func TestNotify_ClaudeReportsTheCouriersExitCode(t *testing.T) {
-	fakeClaude(t, 3)
+	fakeClaudeSays(t, 3, "")
 	r := &recorder{}
 	n, err := newNotifier(ListenerClaude, r.log, time.Now)
 	if err != nil {

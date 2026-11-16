@@ -16,6 +16,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/tdebasis/locutorium/internal/config"
 )
 
 // THE BELL RINGS FROM INSIDE THE BINARY.
@@ -329,18 +331,26 @@ func (n *courierNotifier) Ring(endpoint, address, bell, courier string) error {
 	// whether the bell rang. stream-json prints every tool call and its result
 	// as one JSON line each, and courierOutcome reads those, never the
 	// model's closing prose.
+	//
+	// THE COURIER'S MODEL IS NAMED ON EVERY CALL (docs/DECISIONS.md entry 8).
+	// Without --model the courier runs on whatever the signed-in account
+	// defaults to, so a change to the account changes what every bell costs,
+	// and an account whose default model is unavailable rings no bell at all.
+	// The model is the courier_model key, never the environment.
 	args = append(args, "-p", fmt.Sprintf(courierPrompt, address, bell),
+		"--model", courierModel(),
 		"--allowedTools", "ListAgents,SendMessage",
 		"--output-format", "stream-json", "--verbose")
-	var stdout bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	cmd := exec.Command("claude", args...)
 	cmd.Stdin = devnull
 	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 	cmd.Env = append(os.Environ(), "LOC_COURIER=1", "LOC_IDENTITY=")
 	if err := cmd.Run(); err != nil {
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
-			return n.fail(endpoint, fmt.Sprintf("courier exit %d", ee.ExitCode()))
+			return n.fail(endpoint, withSaid(fmt.Sprintf("courier exit %d", ee.ExitCode()), courierSaid(stdout.Bytes(), stderr.Bytes())))
 		}
 		return n.fail(endpoint, fmt.Sprintf("courier: %v", err))
 	}
@@ -353,6 +363,60 @@ func (n *courierNotifier) Ring(endpoint, address, bell, courier string) error {
 	}
 	n.log(fmt.Sprintf("nudge %s rang '%s'", endpoint, bell))
 	return nil
+}
+
+// courierModel is the model every courier call names: the courier_model key,
+// or the table's default when the file does not say.
+func courierModel() string {
+	if m := strings.TrimSpace(config.Value(config.CourierModel)); m != "" {
+		return m
+	}
+	return config.Default(config.CourierModel)
+}
+
+// saidMax bounds the courier's own words in a failure record: one line, enough
+// to name the reason, never a transcript.
+const saidMax = 200
+
+// courierSaid is the courier's last words when it failed: the last line it
+// wrote on stderr, else the result text of its stream, else its last line of
+// output. An exit code alone says that the courier failed and never why; on
+// 2026-11-15 a whole account's bells failed for six hours as "courier exit 1"
+// while the courier was printing the reason each time.
+func courierSaid(stdout, stderr []byte) string {
+	if l := lastLine(stderr); l != "" {
+		return clip(l)
+	}
+	l := lastLine(stdout)
+	var r struct {
+		Result string `json:"result"`
+	}
+	if json.Unmarshal([]byte(l), &r) == nil && strings.TrimSpace(r.Result) != "" {
+		return clip(lastLine([]byte(r.Result)))
+	}
+	return clip(l)
+}
+
+// withSaid adds what the courier said to a failure reason, when it said
+// anything.
+func withSaid(reason, said string) string {
+	if said == "" {
+		return reason
+	}
+	return reason + ": " + said
+}
+
+func lastLine(b []byte) string {
+	lines := strings.Split(strings.TrimRight(string(b), "\n\r\t "), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
+}
+
+func clip(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > saidMax {
+		return string(r[:saidMax]) + "…"
+	}
+	return s
 }
 
 // take reports whether this seat may spawn now, and records the spawn when it

@@ -82,6 +82,7 @@ durable; listeners reconnect.
 | `wake_retry_seconds` | `60` | the fixed gap between one try of a seat's bell and the next |
 | `wake_tries` | `3` | how many times a bell tries while mail is unread, before it gives up |
 | `wake_held_recheck_seconds` | `300` | the gap before a bell asks again after the seat's receiver answered that it holds the bell |
+| `courier_model` | `haiku` | the model the `claude` listener's courier runs on, passed as `--model` on every call; chosen on cost, never inherited from the account |
 
 Change a key by editing the line; revert it by deleting the line.
 
