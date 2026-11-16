@@ -34,7 +34,10 @@ jobs:
         # is the only expensive thing here. It exists to test the PRODUCT, so a
         # change that touches no product file does not need it. Doc-only and
         # CI-only pull requests were each paying four minutes of macOS to prove
-        # something they could not have broken.
+        # something they could not have broken. The exception is this file: a
+        # change to it can break conformance itself (a retired runner image
+        # cancelled every run before a step, and only the next product change
+        # would have shown it), so a change here runs the job it changes.
         run: |
           base="${{ github.event.pull_request.base.sha }}"
           head="${{ github.event.pull_request.head.sha }}"
@@ -44,7 +47,7 @@ jobs:
           fi
           changed="$(git diff --name-only "$base" "$head")"
           echo "changed files:"; echo "$changed" | sed 's/^/  /'
-          if echo "$changed" | grep -qE '^(bin/|lib/|cmd/|internal/|go\.(mod|sum)$|Makefile$|conformance/|providers/|install\.sh$|README\.md$)'; then
+          if echo "$changed" | grep -qE '^(bin/|lib/|cmd/|internal/|go\.(mod|sum)$|Makefile$|conformance/|providers/|install\.sh$|README\.md$|\.github/workflows/checks\.yml$)'; then
             echo "product=true" >> "$GITHUB_OUTPUT"
           else
             echo "product=false" >> "$GITHUB_OUTPUT"
@@ -322,13 +325,17 @@ jobs:
     # and the pidfile's second line is that exact BSD string by contract. A
     # Linux runner would not be testing the thing this house actually ships.
     #
-    # This job runs on a hosted macos-14 image. Hosted runners are free for
+    # This job runs on a hosted macos-26 image, named by version so the OS
+    # changes only when this line does (macos-latest moves on its own). It ran
+    # on macos-14 until GitHub stopped serving that image: from then every run
+    # was cancelled before a step with "The configuration
+    # 'macos-14-arm64-us-default' is not supported". Hosted runners are free for
     # public repositories, and a public repository must never run
     # pull-request code on a person's machine. The refusal step below stays
     # as a fail-closed guard: if `runs-on` is ever changed back to name a
     # self-hosted runner while the repository is public, it stops the job
     # before checkout.
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 25
     steps:
       - name: refuse a self-hosted run of a public repository
@@ -339,7 +346,7 @@ jobs:
         # longer belongs here: a fork can edit this file.
         if: runner.environment != 'github-hosted' && github.event.repository.private != true
         run: |
-          echo "::error::this repository is not private and this job is on a self-hosted runner; set runs-on back to macos-14 and remove the runner"
+          echo "::error::this repository is not private and this job is on a self-hosted runner; set runs-on back to macos-26 and remove the runner"
           exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: environment carries no operator secrets
@@ -421,7 +428,7 @@ jobs:
       - name: the Go toolchain (hosted image only)
         # Same rule as the medium two steps up: a hosted image starts empty and
         # installs its own tooling, a self-hosted machine is somebody's computer
-        # and this job installs nothing there. macos-14 ships no Go, which is
+        # and this job installs nothing there. macos-14 shipped no Go, which was
         # what made the first hosted run red. The version matches the `go` job:
         # one version for one thing.
         if: runner.environment == 'github-hosted'
