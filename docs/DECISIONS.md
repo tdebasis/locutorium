@@ -198,6 +198,12 @@ every call (`--model`). Do not let it inherit whatever the account or environmen
 **Consequences:** An inherited default means a later change to the account changes what every courier
 call costs, and nothing here would notice. An explicit setting cannot drift that way.
 
+**Enforced since #251.** The courier shipped in #73 without `--model`, and nothing failed: the decision
+was not cited in that change, and the tests recorded the courier's arguments without checking for it.
+When the account's default model became unavailable, no bell rang for hours. The model is now the
+`courier_model` key (default `haiku`), and `TestNotify_ClaudeNamesTheCouriersModelOnEveryCall` fails
+when a call lacks it or takes it from the environment.
+
 ---
 
 ## 9. How a courier's context is bounded without limiting how it signs in

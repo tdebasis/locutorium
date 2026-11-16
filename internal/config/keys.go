@@ -38,6 +38,7 @@ const (
 	WakeRetrySeconds          = "wake_retry_seconds"
 	WakeTries                 = "wake_tries"
 	WakeHeldRecheckSeconds    = "wake_held_recheck_seconds"
+	CourierModel              = "courier_model"
 )
 
 // Keys is the deployment's whole configuration, in the order the file writes
@@ -53,6 +54,7 @@ var Keys = []Key{
 	{WakeRetrySeconds, "60", "the fixed gap between one try of a seat's bell and the next"},
 	{WakeTries, "3", "how many times a bell tries while mail is unread, before it gives up"},
 	{WakeHeldRecheckSeconds, "300", "the gap before a bell asks again after the seat's receiver answered that it holds the bell"},
+	{CourierModel, "haiku", "the model the claude listener's courier runs on, passed as --model on every call; chosen on cost (docs/DECISIONS.md entry 8)"},
 }
 
 // Default returns the table's value for name, or "" when the table has no such

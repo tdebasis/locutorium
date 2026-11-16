@@ -1033,6 +1033,7 @@ the bell; something else must then run `subscribe` and `unsubscribe` around the 
 | `wake_retry_seconds` | `60` | the fixed gap between one try of a seat's bell and the next (`loc mcp`) |
 | `wake_tries` | `3` | how many times a bell tries while mail is unread, before it gives up (`loc mcp`) |
 | `wake_held_recheck_seconds` | `300` | the gap before a bell asks again after the seat's receiver answered that it holds the bell (`loc mcp`) |
+| `courier_model` | `haiku` | the model the `claude` listener's courier runs on, passed as `--model` on every call; chosen on cost, never inherited from the account (`loc mcp`) |
 
 **`idle_window` is the old name of `idle_timeout`.** `loc` never rewrites a config file that exists,
 so a deployment that set the old key keeps a line that does nothing. The new key takes its own value,
@@ -1041,7 +1042,7 @@ the value in force.
 
 **The defaults live in one table**, `internal/config/keys.go`. `loc start` writes the file from it on
 first run, with each key's comment above it, so the file and the code cannot drift apart.
-`wake_retry_seconds`, `wake_tries` and `wake_held_recheck_seconds` are in that table. `wake_window_seconds`,
+`wake_retry_seconds`, `wake_tries`, `wake_held_recheck_seconds` and `courier_model` are in that table. `wake_window_seconds`,
 `wake_breaker_per_minute` and `wake_breaker_per_hour` are the deployment's and are not.
 
 **A default is not a deployment.** Every key above has one, so a home with no `config` file reads a
