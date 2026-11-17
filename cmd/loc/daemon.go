@@ -94,13 +94,38 @@ func listenAddr() (host string, port int, err error) {
 // would then boot with no floor under it.
 var refuseListen = func(host string, port int) error { return nil }
 
+// lookupHost is a seam for loopback: the resolver it asks what localhost names.
+// A test sets it to a fake, since the defect it guards against is in name
+// resolution, which a case on this machine cannot change (#188).
+var lookupHost = net.LookupHost
+
 // loopback reports whether a host name reaches this machine and no other.
+//
+// A LITERAL ADDRESS IS CHECKED AS IT IS. 127.0.0.0/8 and ::1 pass; 0.0.0.0
+// does not, since unspecified is not loopback.
+//
+// THE NAME localhost IS RESOLVED, NOT TRUSTED. A hosts file can point it at an
+// address the network reaches, and the broker authenticates nobody, so the
+// name passes only when it resolves and every address it gives is loopback.
+// Any other name is refused.
 func loopback(host string) bool {
-	if host == "localhost" {
-		return true
+	if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
+		return ip.IsLoopback()
 	}
-	ip := net.ParseIP(strings.Trim(host, "[]"))
-	return ip != nil && ip.IsLoopback()
+	if host != "localhost" {
+		return false
+	}
+	addrs, err := lookupHost(host)
+	if err != nil || len(addrs) == 0 {
+		return false
+	}
+	for _, a := range addrs {
+		ip := net.ParseIP(a)
+		if ip == nil || !ip.IsLoopback() {
+			return false
+		}
+	}
+	return true
 }
 
 // dialAddr is the address `loc start` and `loc stop` probe.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -902,5 +903,41 @@ func TestTheFloorRefusesTheDefaultPort(t *testing.T) {
 	}
 	if ready {
 		t.Error("the daemon became ready, so it bound a port before the floor refused")
+	}
+}
+
+// THE NAME localhost PASSES ONLY WHEN IT RESOLVES TO LOOPBACK (#188). The
+// resolver is faked, since the case is a hosts file that points localhost
+// elsewhere, which a test on this machine cannot make.
+//
+// PLANT: in loopback, return true for the name localhost before resolving it,
+// and the hosts-file arm passes.
+func TestLoopbackResolvesTheNameLocalhost(t *testing.T) {
+	restore := lookupHost
+	t.Cleanup(func() { lookupHost = restore })
+	for _, c := range []struct {
+		name  string
+		host  string
+		addrs []string
+		err   error
+		want  bool
+	}{
+		{"localhost to 127.0.0.1 and ::1", "localhost", []string{"127.0.0.1", "::1"}, nil, true},
+		{"localhost to 127.0.0.2", "localhost", []string{"127.0.0.2"}, nil, true},
+		{"a hosts file points localhost at the network", "localhost", []string{"10.0.0.5"}, nil, false},
+		{"one loopback and one routable address", "localhost", []string{"127.0.0.1", "192.168.1.9"}, nil, false},
+		{"localhost does not resolve", "localhost", nil, errors.New("no such host"), false},
+		{"localhost resolves to nothing", "localhost", []string{}, nil, false},
+		{"a literal loopback address", "127.0.0.1", nil, errors.New("not asked"), true},
+		{"a literal ::1 in brackets", "[::1]", nil, errors.New("not asked"), true},
+		{"the unspecified address", "0.0.0.0", nil, nil, false},
+		{"another name", "example.com", []string{"127.0.0.1"}, nil, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			lookupHost = func(string) ([]string, error) { return c.addrs, c.err }
+			if got := loopback(c.host); got != c.want {
+				t.Errorf("loopback(%q) with the resolver giving %v, %v: %v, want %v", c.host, c.addrs, c.err, got, c.want)
+			}
+		})
 	}
 }
