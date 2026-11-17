@@ -61,10 +61,13 @@ type fake struct {
 
 	unread    int
 	unreadErr error
-	departErr error
-	nudgeErr  error
-	sendErr   error
-	slowLeave time.Duration
+	// duringUnread, when set, runs once inside the next Unread call, before it
+	// answers: a case uses it to make something happen while the count is read.
+	duringUnread func()
+	departErr    error
+	nudgeErr     error
+	sendErr      error
+	slowLeave    time.Duration
 
 	// nudgeErrs is what the notifier returns, one entry per ring, in order.
 	// Once it is spent the notifier falls back to nudgeErr, so a case that
@@ -144,7 +147,13 @@ func (f *fake) deps() Deps {
 			f.mu.Unlock()
 			return func() {}, nil
 		},
-		Unread: func(string) (int, error) { return f.unread, f.unreadErr },
+		Unread: func(string) (int, error) {
+			if h := f.duringUnread; h != nil {
+				f.duringUnread = nil
+				h()
+			}
+			return f.unread, f.unreadErr
+		},
 		Notify: notifierFunc(func(_, _, bell, courier string) error {
 			f.mu.Lock()
 			defer f.mu.Unlock()

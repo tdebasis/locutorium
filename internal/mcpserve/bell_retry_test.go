@@ -1047,6 +1047,51 @@ func TestBell_ALaterTryWhileTheWatchIsDownNamesNobody(t *testing.T) {
 	}
 }
 
+// A SECOND LOSS DURING THE RECONNECT'S COUNT KEEPS THE WATCH DOWN (#233). The
+// reconnect's backlog reads the count outside the lock. If the connection drops
+// again while that read is in flight, the count that comes back is from before
+// the second loss, so it must not end the cut. Otherwise a later try names a
+// sender for mail the watch did not see.
+//
+// PLANT: in backlog, clear b.cut whatever the loss count, and the later try
+// after the second loss names workshop.mason.
+func TestBell_ASecondLossDuringTheCountKeepsTheWatchDown(t *testing.T) {
+	home(t, "provider = none\n")
+	f := &fake{unread: 1, nudgeErr: busy("pane_in_mode")}
+	b, sch, _ := retryBell(t, f, nil)
+
+	b.disconnected()                // the first loss
+	f.duringUnread = b.disconnected // the second loss, while the count is read
+	b.backlog()                     // the reconnect's backlog
+
+	b.mu.Lock()
+	cut := b.cut
+	b.mu.Unlock()
+	if !cut {
+		t.Fatalf("after a loss during the count, the bell says the watch is back")
+	}
+
+	// A new sender's streak while the watch is down again: its later try names
+	// nobody, since mail from others can land unseen.
+	b.arrived("workshop.mason")
+	f.unread = 2
+	b.fire()
+	sch.run(t, len(sch.fn)-1)
+	got := f.couriersRung()
+	if last := got[len(got)-1]; last != defaultCourierName {
+		t.Errorf("the couriers were %v; a later try after the second loss must name %q", got, defaultCourierName)
+	}
+
+	// The next reconnect, with no loss during its count, ends the cut.
+	b.backlog()
+	b.mu.Lock()
+	cut = b.cut
+	b.mu.Unlock()
+	if cut {
+		t.Errorf("a reconnect whose count is read with no loss during it must end the cut")
+	}
+}
+
 // A WINDOW OPEN ACROSS THE LOSS GIVES ITS STREAK NO NAMES. The window saw one
 // sender before the watch went down. In the gap, another sender's mail can
 // land and a read can take the first. The backlog's count then fits the

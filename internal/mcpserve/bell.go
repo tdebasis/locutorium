@@ -164,6 +164,12 @@ type bell struct {
 	// count is read.
 	back bool
 
+	// losses counts every loss the watch reported (disconnected). The
+	// reconnect's backlog notes it before it reads the count, which it does
+	// outside the lock, and ends the cut only if no loss came during the read:
+	// a count from before a second loss says nothing about mail since (#233).
+	losses int
+
 	// The breaker's counters, bucketed by calendar minute and hour exactly as
 	// the shell listener's are: a bucket that has rolled over starts empty,
 	// and the hour rolling over is what un-trips the breaker.
@@ -250,6 +256,7 @@ func (b *bell) disconnected() {
 	b.mu.Lock()
 	b.cut = true
 	b.back = false
+	b.losses++
 	b.mu.Unlock()
 }
 
@@ -293,6 +300,7 @@ func (b *bell) backlog() {
 	if b.cut {
 		b.back = true
 	}
+	seen := b.losses
 	b.mu.Unlock()
 	n, err := b.s.d.Unread(b.s.d.Endpoint)
 	if err != nil {
@@ -308,9 +316,11 @@ func (b *bell) backlog() {
 	// THE COUNT ENDS A CUT. A count read after the reconnect covers every
 	// message the watch missed. The window rings for it below, blind and with
 	// no names, so no name from before the cut reaches this ring or a later
-	// try.
+	// try. A loss during the read keeps the cut: the count is from before it.
 	wasCut := b.cut
-	b.cut = false
+	if b.losses == seen {
+		b.cut = false
+	}
 	if wasCut {
 		b.senders = nil
 	}
