@@ -10,6 +10,8 @@ on:
 
 # The action acts with RELEASE_PLEASE_TOKEN below, never with the built-in
 # GITHUB_TOKEN. So the built-in token needs only to read the repository.
+# The token is a secret of the environment "release", which only main may use
+# (locutorium-o39.1). A branch that changes this file cannot read it.
 permissions:
   contents: read
 
@@ -17,6 +19,7 @@ jobs:
   release-please:
     name: release-please
     runs-on: ubuntu-latest
+    environment: release
     steps:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
