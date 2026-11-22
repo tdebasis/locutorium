@@ -68,8 +68,9 @@ tag, and `refs/tags/<tag>` for a lightweight one. An annotated tag's own object 
 
 ## The token
 
-The workflow reads the repository secret `RELEASE_PLEASE_TOKEN`. It is a fine-grained personal access
-token. It is scoped to this repository, with write access to contents, pull requests and issues. It
+The workflow reads the secret `RELEASE_PLEASE_TOKEN` of the environment `release`. Only `main` may use
+that environment, so a branch that changes the workflow cannot read the secret. It is a fine-grained
+personal access token. It is scoped to this repository, with write access to contents, pull requests and issues. It
 expires on 2027-09-15.
 
 The default `GITHUB_TOKEN` is not used. A pull request that it opens starts no workflow, so the
