@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.20](https://github.com/tdebasis/locutorium/compare/v0.0.19...v0.0.20) (2026-11-22)
+
+
+### Bug Fixes
+
+* the bell keeps a loss during its count, and loc start resolves localhost ([#233](https://github.com/tdebasis/locutorium/issues/233), [#188](https://github.com/tdebasis/locutorium/issues/188)) ([#255](https://github.com/tdebasis/locutorium/issues/255)) ([b451c87](https://github.com/tdebasis/locutorium/commit/b451c8728d8b77dd4c1fe467064729e4988e1e15))
+
 ## [0.0.19](https://github.com/tdebasis/locutorium/compare/v0.0.18...v0.0.19) (2026-11-16)
 
 
